@@ -9,8 +9,7 @@
 #![warn(clippy::pedantic)]
 #![warn(rust_2018_idioms)]
 
-
 //! gotstate-rs: A hierarchical finite state machine library
-//! 
+//!
 //! This crate provides a type-safe, production-ready implementation
 //! of hierarchical finite state machines.

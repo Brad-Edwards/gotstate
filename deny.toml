@@ -1,13 +1,11 @@
 [licenses]
-unlicensed = "deny"
 allow = [
     "MIT",
     "Apache-2.0",
-    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Unlicense",
+    "BSD-2-Clause"
 ]
-copyleft = "warn"
-allow-osi-fsf-free = "either"
-default = "deny"
 
 [bans]
 multiple-versions = "warn"
@@ -18,9 +16,3 @@ highlight = "all"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-git = []
-
-[advisories]
-vulnerability = "deny"
-unmaintained = "warn"
-yanked = "warn"
-notice = "warn"
