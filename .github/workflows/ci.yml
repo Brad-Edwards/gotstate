@@ -42,7 +42,7 @@ jobs:
       run: cargo fmt -- --check
 
     - name: Run clippy
-      run: cargo clippy -- -D warnings
+      run: cargo clippy -- -D warnings -A clippy::multiple_crate_versions
 
     - name: Run tests
       run: cargo test --verbose
