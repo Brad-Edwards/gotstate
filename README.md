@@ -1,5 +1,7 @@
 # gotstate-rs
 
+[![Build](https://github.com/KeplerOps/gotstate-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/KeplerOps/gotstate-rs/actions/workflows/ci.yml)
+
 A production-ready hierarchical finite state machine (HFSM) library for Rust, focusing on reliability, safety, and ease of use.
 
 ## Features
@@ -53,8 +55,8 @@ Full documentation will be available on [docs.rs](https://docs.rs/gotstate-rs) o
 
 Licensed under either of:
 
- * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
- * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or [MIT](http://opensource.org/licenses/MIT))
 
 at your option.
 
@@ -67,6 +69,3 @@ dual licensed as above, without any additional terms or conditions.
 ## Safety
 
 This crate uses `#![forbid(unsafe_code)]` to ensure memory safety.
-```
-
-Note: This README is intentionally concise and focused on what we can definitively say about the library at this stage. As implementation progresses, we can expand sections like Examples, Usage, and API documentation.

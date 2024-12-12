@@ -10,7 +10,7 @@ repos:
 
       - id: cargo-clippy
         name: Rust linting
-        entry: bash -c 'cargo clippy -- -D warnings'
+        entry: bash -c 'cargo clippy -- -D warnings -A clippy::multiple_crate_versions'
         language: system
         types: [rust]
         pass_filenames: false
@@ -31,7 +31,7 @@ repos:
 
       - id: cargo-deny
         name: Rust dependency check
-        entry: bash -c 'cargo deny check --config cargo-deny.toml'
+        entry: bash -c 'cargo deny check'
         language: system
         types: [rust]
         pass_filenames: false

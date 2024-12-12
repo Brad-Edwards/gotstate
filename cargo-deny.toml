@@ -2,15 +2,17 @@
 allow = [
     "MIT",
     "Apache-2.0",
+    "BSD-2-Clause",
     "Unicode-3.0",
-    "Unlicense",
-    "BSD-2-Clause"
 ]
 
 [bans]
 multiple-versions = "warn"
 wildcards = "allow"
 highlight = "all"
+skip = [
+    { name = "windows-sys" }
+]
 
 [sources]
 unknown-registry = "deny"

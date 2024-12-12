@@ -51,7 +51,7 @@ jobs:
       run: cargo audit
 
     - name: Check dependencies
-      run: cargo deny check
+      run: cargo deny check -c cargo-deny.toml
 
     - name: Build documentation
       run: cargo doc --no-deps
