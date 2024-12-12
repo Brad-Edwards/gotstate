@@ -3,35 +3,59 @@ repos:
     hooks:
       - id: cargo-fmt
         name: Rust formatting
-        entry: bash -c 'cd capture-engine && cargo fmt --all -- --check'
+        entry: bash -c 'cargo fmt --all -- --check'
         language: system
         types: [rust]
         pass_filenames: false
 
       - id: cargo-clippy
         name: Rust linting
-        entry: bash -c 'cd capture-engine && cargo clippy -- -D warnings'
+        entry: bash -c 'cargo clippy -- -D warnings -A clippy::multiple_crate_versions'
         language: system
         types: [rust]
         pass_filenames: false
 
       - id: cargo-audit
         name: Rust security audit
-        entry: bash -c 'cd capture-engine && cargo audit'
+        entry: bash -c 'cargo audit'
         language: system
         types: [rust]
         pass_filenames: false
 
       - id: cargo-test
         name: Rust tests
-        entry: bash -c 'cd capture-engine && cargo test'
+        entry: bash -c 'cargo test'
         language: system
         types: [rust]
         pass_filenames: false
 
       - id: cargo-deny
         name: Rust dependency check
-        entry: bash -c 'cd capture-engine && cargo deny check --config cargo-deny.toml'
+        entry: bash -c 'cargo deny check'
         language: system
         types: [rust]
         pass_filenames: false
+
+      - id: cargo-doc
+        name: Rust documentation
+        entry: bash -c 'cargo doc --no-deps --all-features'
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: check-added-large-files
+
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.16.23
+    hooks:
+      - id: typos
