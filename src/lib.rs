@@ -1,3 +1,7 @@
+#![allow(dead_code)]
+#![allow(clippy::cognitive_complexity)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
 pub mod api;
 pub mod behavior;
 pub mod builder;
