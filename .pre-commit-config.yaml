@@ -31,7 +31,7 @@ repos:
 
       - id: cargo-deny
         name: Rust dependency check
-        entry: bash -c 'cargo deny check'
+        entry: bash -c 'cargo deny check -c cargo-deny.toml'
         language: system
         types: [rust]
         pass_filenames: false
