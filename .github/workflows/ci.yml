@@ -6,72 +6,82 @@ on:
   pull_request:
     branches: [ main ]
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Check formatting (black)
+        run: black --check .
+      - name: Check imports (isort)
+        run: isort --check-only .
+      - name: Lint code (flake8)
+        run: flake8 .
+      - name: Type check (mypy)
+        run: mypy .
 
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-        override: true
-        components: rustfmt, clippy
-
-    - name: Install cargo-audit
-      run: cargo install cargo-audit@0.21.0
-
-    - name: Install cargo-deny
-      run: cargo install cargo-deny
-
-    - name: Cache dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Check formatting
-      run: cargo fmt -- --check
-
-    - name: Run clippy
-      run: cargo clippy -- -D warnings -A clippy::multiple_crate_versions
-
-    - name: Run tests
-      run: cargo test --verbose
-
-    - name: Security audit
-      run: cargo audit
-
-    - name: Check dependencies
-      run: cargo deny check -c cargo-deny.toml
-
-    - name: Build documentation
-      run: cargo doc --no-deps
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run tests
+        run: pytest
 
   coverage:
     runs-on: ubuntu-latest
+    needs: test
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt codecov
+      - name: Run coverage
+        run: pytest --cov=hsm --cov-report=xml
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5.1.1
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          fail_ci_if_error: true
 
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
-
-    - name: Install cargo-tarpaulin
-      run: cargo install cargo-tarpaulin@0.31.3
-
-    - name: Generate coverage report
-      run: cargo tarpaulin --out Xml
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v5.1.1
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install bandit
+        run: pip install bandit
+      - name: Run bandit
+        run: bandit -r .

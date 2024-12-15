@@ -1,0 +1,16 @@
+# bandit.yaml
+exclude_dirs: [".git", ".venv", "tests", "scratch"]
+skips: []
+
+aggregate_by_severity_and_confidence: true
+
+severity_level: MEDIUM
+confidence_level: MEDIUM
+
+profiles:
+  custom:
+    include:
+      - B201 # flask_debug_true
+      - B301 # pickle
+      - B506 # yaml_load
+      - B602 # subprocess_popen_with_shell_equals_true
