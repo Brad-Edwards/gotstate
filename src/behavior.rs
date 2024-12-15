@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Behavior interfaces for state machine implementations.
+use crate::core::Event;
 use crate::diagnostics::Diagnostics;
 use crate::model::{StateDefinition, TransitionDefinition};
+use crate::resource::ResourceManager;
 
 /// `BehaviorContext` provides runtime information to behavior implementations.
 ///
@@ -24,15 +26,27 @@ pub trait BehaviorContext: Send + Sync {
 /// (`GuardEvaluator`, `ActionExecutor`, `StateLifecycleHandler`). Implementations can mix and match
 /// these patterns based on complexity and reusability needs.
 pub trait Behavior: Send + Sync {
-    type Error;
+    type Error: std::fmt::Debug;
     type TransitionDef: TransitionDefinition;
     type Context: BehaviorContext;
 
     fn evaluate_guard(
         &self,
         transition: &Self::TransitionDef,
-        ctx: &Self::Context,
+        context: &Self::Context,
     ) -> Result<bool, Self::Error>;
+
+    fn execute_actions<E, H, T, C>(
+        &self,
+        transition: &Self::TransitionDef,
+        event: &Event,
+        resources: &dyn ResourceManager<
+            Error = E,
+            ResourceHandle = H,
+            ResourceType = T,
+            ResourceConfig = C,
+        >,
+    ) -> Result<(), Self::Error>;
     fn execute_action(
         &self,
         transition: &Self::TransitionDef,

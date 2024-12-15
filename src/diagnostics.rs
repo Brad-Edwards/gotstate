@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Diagnostics module.
+use std::collections::HashMap;
 
+/// Statistics for state transitions
+#[derive(Debug, Default)]
+pub struct TransitionStats {
+    pub attempts: u64,
+    pub successes: u64,
+}
 /// `Diagnostics` provides logging, error reporting, and metric collection.
 ///
 /// **Key Considerations:**
@@ -15,6 +22,8 @@ pub trait Diagnostics: Send + Sync {
     fn log(&self, message: &str, level: &Self::LogLevel);
     fn report_error(&self, error: &Self::ErrorInfo);
     fn get_diagnostic_data(&self) -> Self::DiagnosticData;
+    fn log_transition_attempt(&self, from: &str, to: &str, success: bool);
+    fn get_transition_statistics(&self) -> HashMap<String, TransitionStats>;
 }
 
 /// `Logger` provides a simplified logging interface.

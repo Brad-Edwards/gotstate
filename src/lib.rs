@@ -12,4 +12,5 @@ pub mod diagnostics;
 pub mod fsm_api;
 pub mod model;
 pub mod resource;
+pub mod types;
 pub mod validator;
