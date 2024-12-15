@@ -1,5 +1,5 @@
 # bandit.yaml
-exclude_dirs: [".git", ".venv", "tests*", "scratch"]
+exclude_dirs: [".git", ".venv", "hsm/tests", "scratch"]
 skips: []
 
 aggregate_by_severity_and_confidence: true
