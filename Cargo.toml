@@ -12,11 +12,20 @@ keywords = ["fsm", "state-machine", "hierarchical", "async"]
 categories = ["data-structures", "rust-patterns"]
 
 [dependencies]
+matches = "0.1.1"
+mockall = "0.12"
 pretty_assertions = "1.4"
 proptest = "1.1"
-mockall = "0.12"
 test-case = "3.3"
 
 [dev-dependencies]
+mockall = "0.12"
+pretty_assertions = "1.4"
+proptest = "1.1"
+test-case = "3.3"
 
 [features]
+
+[lib]
+name = "gotstate"
+path = "src/lib.rs"
