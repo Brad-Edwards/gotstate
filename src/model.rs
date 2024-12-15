@@ -39,6 +39,7 @@ pub trait StateDefinition: Send + Sync + Sized {
     fn name(&self) -> &str;
     fn children(&self) -> &[Self];
     fn is_composite(&self) -> bool;
+    fn id(&self) -> String;
 }
 
 /// `EventDefinition` describes an event type that triggers transitions.
@@ -66,6 +67,14 @@ pub trait TransitionDefinition: Clone + Send + Sync {
     fn has_guard(&self) -> bool;
     fn validate_transition(&self, from: &str, to: &str) -> bool;
     fn get_priority(&self) -> u32;
+
+    fn id(&self) -> String;
+
+    fn event_id(&self) -> String;
+
+    fn source_state_id(&self) -> String;
+
+    fn target_state_id(&self) -> String;
 }
 
 // Add support for transition hooks
