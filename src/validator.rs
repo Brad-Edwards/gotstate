@@ -10,7 +10,6 @@ use crate::model::{ModelDefinition, StateDefinition, TransitionDefinition};
 /// - `RuleEngine`: Applies additional domain-specific validation rules.
 ///
 /// This layering allows flexibility, but implementers should document which validators are used.
-
 pub trait Validator: Send + Sync {
     type Model: ModelDefinition;
     type ValidationResult;

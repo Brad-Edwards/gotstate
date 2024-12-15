@@ -23,7 +23,6 @@ pub trait BehaviorContext: Send + Sync {
 /// and handling state entry/exit. This trait can stand alone or be composed from separate traits
 /// (`GuardEvaluator`, `ActionExecutor`, `StateLifecycleHandler`). Implementations can mix and match
 /// these patterns based on complexity and reusability needs.
-
 pub trait Behavior: Send + Sync {
     type Error;
     type TransitionDef: TransitionDefinition;
