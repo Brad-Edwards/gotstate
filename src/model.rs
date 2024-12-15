@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Model interfaces for state machine implementations.
-
+use crate::core::{Event, StateHandle};
+use std::error::Error;
 /// A `ModelDefinition` describes states, events, and transitions in the FSM.
 ///
 /// **Key Considerations:**
@@ -16,10 +17,17 @@ pub trait ModelDefinition: Send + Sync {
         EventDef = Self::EventDefinition,
     >;
 
+    fn transitions(&self) -> &[Self::TransitionDefinition];
+    fn available_transitions(
+        &self,
+        state_id: &str,
+        event: &Event,
+    ) -> Vec<Self::TransitionDefinition>;
+    fn resolve_target_state(&self, transition: &Self::TransitionDefinition) -> Option<String>;
+
     fn root_state(&self) -> &Self::StateDefinition;
     fn states(&self) -> &[Self::StateDefinition];
     fn events(&self) -> &[Self::EventDefinition];
-    fn transitions(&self) -> &[Self::TransitionDefinition];
 }
 
 /// `StateDefinition` represents a single state within the FSM, potentially hierarchical.
@@ -48,7 +56,7 @@ pub trait EventDefinition: Send + Sync {
 /// **Key Considerations:**
 /// - Must ensure `source_state` and `target_state` are valid states from the model.
 /// - `has_guard` indicates whether guard evaluation is required.
-pub trait TransitionDefinition: Send + Sync {
+pub trait TransitionDefinition: Clone + Send + Sync {
     type StateDef: StateDefinition;
     type EventDef: EventDefinition;
 
@@ -56,6 +64,20 @@ pub trait TransitionDefinition: Send + Sync {
     fn target_state(&self) -> &Self::StateDef;
     fn event(&self) -> &Self::EventDef;
     fn has_guard(&self) -> bool;
+    fn validate_transition(&self, from: &str, to: &str) -> bool;
+    fn get_priority(&self) -> u32;
+}
+
+// Add support for transition hooks
+pub trait TransitionHooks {
+    fn before_transition(&self, from: &str, to: &str) -> Result<(), Box<dyn Error>>;
+    fn after_transition(&self, from: &str, to: &str) -> Result<(), Box<dyn Error>>;
+}
+
+// Add support for state history
+pub trait StateHistory {
+    fn get_previous_state(&self) -> Option<StateHandle>;
+    fn get_state_history(&self) -> Vec<StateHandle>;
 }
 
 /// `ModelBuilderInternal` allows incremental construction of the model.
