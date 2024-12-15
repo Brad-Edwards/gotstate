@@ -35,7 +35,7 @@ python_functions = ["test_*"]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 0
+fail_under = 80
 
 [tool.coverage.run]
 source = ["hsm"]
