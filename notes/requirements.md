@@ -2,7 +2,7 @@
 
 ## **1. Introduction**
 
-This document outlines the requirements for a hierarchical finite state machine (FSM) library intended for production use. The library **MUST** be language-agnostic and suitable for implementation in multiple programming languages. It is designed to provide a solid foundation for state machine behaviors, focusing on the most common and essential functionalities necessary for a principal software engineer to commence implementation design.
+This document outlines the requirements for a hierarchical finite state machine (FSM) library intended for production use. The library **MUST** be implemented in Python. It is designed to provide a solid foundation for state machine behaviors, focusing on the most common and essential functionalities necessary for a principal software engineer to commence implementation design.
 
 ## **2. Terms and Definitions**
 

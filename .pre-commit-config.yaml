@@ -1,61 +1,42 @@
 repos:
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        language_version: python3.10
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        language_version: python3.10
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
+        language_version: python3.10
+        additional_dependencies: [flake8-bugbear]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        additional_dependencies: []
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        language_version: python3.10
+        args: ["-c", "bandit.yaml", "-r", "."]
+
   - repo: local
     hooks:
-      - id: cargo-fmt
-        name: Rust formatting
-        entry: bash -c 'cargo fmt --all -- --check'
+      - id: pytest-coverage
+        name: Run tests with coverage
+        entry: pytest
         language: system
-        types: [rust]
+        types: [python]
         pass_filenames: false
-
-      - id: cargo-clippy
-        name: Rust linting
-        entry: bash -c 'cargo clippy -- -D warnings -A clippy::multiple_crate_versions'
-        language: system
-        types: [rust]
-        pass_filenames: false
-
-      - id: cargo-audit
-        name: Rust security audit
-        entry: bash -c 'cargo audit'
-        language: system
-        types: [rust]
-        pass_filenames: false
-
-      - id: cargo-test
-        name: Rust tests
-        entry: bash -c 'cargo test'
-        language: system
-        types: [rust]
-        pass_filenames: false
-
-      - id: cargo-deny
-        name: Rust dependency check
-        entry: bash -c 'cargo deny check -c cargo-deny.toml'
-        language: system
-        types: [rust]
-        pass_filenames: false
-
-      - id: cargo-doc
-        name: Rust documentation
-        entry: bash -c 'cargo doc --no-deps --all-features'
-        language: system
-        types: [rust]
-        pass_filenames: false
-
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
-    hooks:
-      - id: check-yaml
-      - id: check-toml
-      - id: end-of-file-fixer
-      - id: trailing-whitespace
-      - id: check-merge-conflict
-      - id: mixed-line-ending
-        args: ["--fix=lf"]
-      - id: check-added-large-files
-
-  - repo: https://github.com/crate-ci/typos
-    rev: v1.16.23
-    hooks:
-      - id: typos
+        always_run: true

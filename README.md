@@ -1,6 +1,9 @@
 # gotstate-rs
 
-[![CI](https://github.com/KeplerOps/gotstate-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/KeplerOps/gotstate-rs/actions/workflows/ci.yml)
+[![Security](https://github.com/KeplerOps/gotstate/actions/workflows/security.yml/badge.svg)](https://github.com/KeplerOps/gotstate/actions/workflows/security.yml)
+[![Quality](https://github.com/KeplerOps/gotstate/actions/workflows/sonar.yml/badge.svg)](https://github.com/KeplerOps/gotstate/actions/workflows/sonar.yml)
+[![Tests](https://github.com/KeplerOps/gotstate/actions/workflows/test.yml/badge.svg)](https://github.com/KeplerOps/gotstate/actions/workflows/test.yml)
+[![Lint](https://github.com/KeplerOps/gotstate/actions/workflows/lint.yml/badge.svg)](https://github.com/KeplerOps/gotstate/actions/workflows/lint.yml)
 
 A production-ready hierarchical finite state machine (HFSM) library for Rust, focusing on reliability, safety, and ease of use.
 
