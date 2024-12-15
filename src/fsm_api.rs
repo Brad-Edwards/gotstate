@@ -1,11 +1,19 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! # FSM API
 use crate::behavior::Behavior;
 use crate::concurrency::Concurrency;
 use crate::core::CoreEngine;
 use crate::diagnostics::Diagnostics;
 use crate::model::ModelDefinition;
 use crate::resource::ResourceManager;
-use crate::validation::Validator;
+use crate::validator::*;
 
+/// `FsmApi` provides a high-level API for creating and interacting with FSM instances.
+///
+/// **Key Considerations:**
+/// - Simplifies integration into end-user applications.
+/// - Ensures that all required components (model, concurrency, behavior, diagnostics, resources, validation) are provided.
 pub trait FsmApi: Send + Sync {
     type Engine: CoreEngine;
     type Model: ModelDefinition;
@@ -16,6 +24,8 @@ pub trait FsmApi: Send + Sync {
     type Validator: Validator<Model = Self::Model>;
     type Error;
 
+    /// Creates a new FSM instance from all provided components.
+    /// This is typically where validation is applied and resources are initialized.
     fn create_fsm(
         &self,
         model: Self::Model,
@@ -26,8 +36,10 @@ pub trait FsmApi: Send + Sync {
         validator: Self::Validator,
     ) -> Result<Self::Engine, Self::Error>;
 
+    /// Retrieves information about the current state of the given engine.
     fn get_state_info(&self, engine: &Self::Engine) -> <Self::Engine as CoreEngine>::StateHandle;
 
+    /// Dispatches an event into the engine and returns the result of the transition.
     fn dispatch_event(
         &self,
         engine: &Self::Engine,
