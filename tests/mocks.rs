@@ -20,6 +20,7 @@ use gotstate::model::{
 };
 use gotstate::resource::{ResourceManager, ResourcePool, ResourceTracker};
 use gotstate::validator::Validator;
+use gotstate::ModelTypes;
 
 // A general-purpose MockError used across multiple tests
 #[derive(Debug, Clone)]
@@ -61,6 +62,10 @@ impl StateDefinition for MockState {
 
     fn is_composite(&self) -> bool {
         !self.children.is_empty()
+    }
+
+    fn id(&self) -> String {
+        self.name.clone()
     }
 }
 
@@ -139,6 +144,25 @@ impl TransitionDefinition for MockTransition {
 
     fn get_priority(&self) -> u32 {
         0 // Default priority of 0
+    }
+
+    fn id(&self) -> String {
+        format!(
+            "{}_{}_{}_{}",
+            self.from.name, self.to.name, self.event.id, self.has_guard
+        )
+    }
+
+    fn event_id(&self) -> String {
+        self.event.name.clone().unwrap_or_default()
+    }
+
+    fn source_state_id(&self) -> String {
+        self.from.name.clone()
+    }
+
+    fn target_state_id(&self) -> String {
+        self.to.name.clone()
     }
 }
 
@@ -232,6 +256,11 @@ pub struct MockModel {
     pub states: Vec<MockState>,
     pub events: Vec<MockEvent>,
     pub transitions: Vec<MockTransition>,
+}
+
+impl ModelTypes for MockModel {
+    type StateDef = MockState;
+    type TransitionDef = MockTransition;
 }
 
 impl ModelDefinition for MockModel {

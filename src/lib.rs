@@ -14,3 +14,15 @@ pub mod model;
 pub mod resource;
 pub mod types;
 pub mod validator;
+
+pub use crate::core::{
+    CoreContextProvider, CoreDispatcher, CoreEngine, CoreExecutor, EngineError, Event, ExecutorExt,
+    FsmContext, FsmDispatcher, FsmEngine, FsmExecutor, FsmLifecycleController, LifecycleController,
+    PoisonErrorConverter, StateHandle, TransitionResult,
+};
+
+pub use validator::{
+    FsmRecoveryCoordinator, FsmRuleEngine, FsmRuntimeValidator, FsmStructuralValidator,
+    FsmValidator, ModelTypes, RecoveryCoordinator, RuleEngine, RuntimeValidator,
+    StructuralValidator, ValidationError, ValidationResult, Validator,
+};
