@@ -1,7 +1,8 @@
 from typing import Any, Dict, List, Optional
 
 from hsm.interfaces.abc import AbstractStateMachine
-from hsm.interfaces.types import Event, EventID, StateID
+from hsm.interfaces.protocols import Event
+from hsm.interfaces.types import EventID, StateID
 
 
 class StateMachine(AbstractStateMachine):

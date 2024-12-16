@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 from hsm.interfaces.abc import AbstractAction, AbstractGuard, AbstractTransition
-from hsm.interfaces.types import EventID, StateID
+from hsm.interfaces.types import StateID
 
 
 class Transition(AbstractTransition):

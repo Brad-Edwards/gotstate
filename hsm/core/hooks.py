@@ -1,5 +1,5 @@
 from hsm.interfaces.abc import AbstractHook
-from hsm.interfaces.types import Transition
+from hsm.interfaces.protocols import Transition
 
 
 class DefaultHook(AbstractHook):
