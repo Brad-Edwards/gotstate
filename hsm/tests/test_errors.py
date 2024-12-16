@@ -1,5 +1,4 @@
 # hsm/tests/test_errors.py
-# nosec
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 """Test suite for HSM error handling and error classes.
