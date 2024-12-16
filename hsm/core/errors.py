@@ -2,7 +2,7 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 
 class HSMError(Exception):
@@ -137,6 +137,26 @@ class EventQueueFullError(HSMError):
         self.queue_size = queue_size
         self.max_size = max_size
         self.dropped_event = dropped_event
+
+
+class ValidationError(HSMError):
+    """Raised when validation fails.
+
+    Attributes:
+        component: Component that failed validation
+        validation_results: List of validation failures
+    """
+
+    def __init__(
+        self,
+        message: str,
+        component: Optional[str] = None,
+        validation_results: Optional[List[Any]] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(message, details)
+        self.component = component
+        self.validation_results = validation_results or []
 
 
 @dataclass(frozen=True)

@@ -25,6 +25,7 @@ from hsm.core.errors import (
     HSMError,
     InvalidStateError,
     InvalidTransitionError,
+    ValidationError,
     create_error_context,
 )
 
@@ -311,3 +312,49 @@ def test_error_details_modification():
     error.details["new"] = "value"
     assert "new" in error.details
     assert error.details["original"] == "value"
+
+
+# -----------------------------------------------------------------------------
+# VALIDATION ERROR TESTS
+# -----------------------------------------------------------------------------
+
+
+def test_validation_error_basic() -> None:
+    """Test basic ValidationError creation and attributes."""
+    error = ValidationError("Validation failed")
+    assert str(error) == "Validation failed"
+    assert error.component is None
+    assert error.validation_results == []
+    assert error.details == {}
+
+
+def test_validation_error_with_component() -> None:
+    """Test ValidationError with component information."""
+    error = ValidationError("Validation failed", component="state_machine")
+    assert error.component == "state_machine"
+    assert error.validation_results == []
+
+
+def test_validation_error_with_results() -> None:
+    """Test ValidationError with validation results."""
+    results = [
+        {"severity": "ERROR", "message": "Invalid state"},
+        {"severity": "WARNING", "message": "Missing transition"},
+    ]
+    error = ValidationError("Validation failed", component="state_machine", validation_results=results)
+    assert error.validation_results == results
+    assert len(error.validation_results) == 2
+
+
+def test_validation_error_with_details() -> None:
+    """Test ValidationError with additional details."""
+    details = {"timestamp": 123456789, "validator": "structure"}
+    error = ValidationError("Validation failed", component="state_machine", details=details)
+    assert error.details == details
+
+
+def test_validation_error_inheritance() -> None:
+    """Test that ValidationError properly inherits from HSMError."""
+    error = ValidationError("Validation failed")
+    assert isinstance(error, HSMError)
+    assert isinstance(error, Exception)
