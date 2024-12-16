@@ -1,4 +1,12 @@
-# test_errors.py
+# hsm/tests/test_errors.py
+# nosec
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+"""Test suite for HSM error handling and error classes.
+
+This module contains unit tests for various error conditions and error
+classes in the HSM implementation.
+"""
 import dataclasses
 import logging
 import time
@@ -60,7 +68,9 @@ def mock_logger():
     return logger
 
 
-# Basic Error Cases
+# -----------------------------------------------------------------------------
+# BASIC ERROR CASES TESTS
+# -----------------------------------------------------------------------------
 def test_hsm_error_base():
     """Test the base HSM error class."""
     message = "Test error message"
@@ -97,7 +107,9 @@ def test_invalid_state_error():
     assert error.operation == operation
 
 
-# Core Functionality
+# -----------------------------------------------------------------------------
+# CORE FUNCTIONALITY TESTS
+# -----------------------------------------------------------------------------
 def test_configuration_error():
     """Test ConfigurationError with validation errors."""
     component = "StateMachine"
@@ -119,7 +131,9 @@ def test_guard_evaluation_error(sample_event, sample_state_data):
     assert error.event == sample_event
 
 
-# Context Manager Tests
+# -----------------------------------------------------------------------------
+# CONTEXT MANAGER TESTS
+# -----------------------------------------------------------------------------
 @contextmanager
 def error_context() -> Generator[None, None, None]:
     """Context manager for testing error handling."""
@@ -136,7 +150,9 @@ def test_error_context_manager():
             raise InvalidStateError("Context test", "STATE_A", "test_op")
 
 
-# Edge Cases
+# -----------------------------------------------------------------------------
+# EDGE CASES TESTS
+# -----------------------------------------------------------------------------
 def test_error_with_empty_details():
     """Test error creation with empty details."""
     error = HSMError("Test message")
@@ -175,7 +191,9 @@ def test_nested_error_handling():
         assert "inner_error" in outer.details
 
 
-# Integration Tests
+# -----------------------------------------------------------------------------
+# INTEGRATION TESTS
+# -----------------------------------------------------------------------------
 def test_event_queue_full_error():
     """Test EventQueueFullError in queue context."""
     queue_size = 100
