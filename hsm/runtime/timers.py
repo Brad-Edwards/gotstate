@@ -1,5 +1,5 @@
 from hsm.interfaces.abc import AbstractTimer
-from hsm.interfaces.types import Event
+from hsm.interfaces.protocols import Event
 
 
 class Timer(AbstractTimer):

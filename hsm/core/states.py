@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from hsm.interfaces.abc import AbstractCompositeState, AbstractState
 from hsm.interfaces.types import StateID

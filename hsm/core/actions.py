@@ -1,7 +1,7 @@
 from typing import Any
 
 from hsm.interfaces.abc import AbstractAction
-from hsm.interfaces.types import Event
+from hsm.interfaces.protocols import Event
 
 
 class BasicAction(AbstractAction):
