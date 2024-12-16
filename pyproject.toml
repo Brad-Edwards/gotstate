@@ -35,7 +35,7 @@ line_length = 120
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "-v --cov=hsm --cov-report=term-missing"
-testpaths = ["hsm/tests"]  # Update this to point to the correct test directory
+testpaths = ["hsm/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

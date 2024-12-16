@@ -1,6 +1,6 @@
 [flake8]
 max-line-length = 120
-exclude = .venv,__pycache__,build,dist,.git,scratch/*
+exclude = .venv,__pycache__,build,dist,.git,scratch/*,hsm/tests/*
 extend-ignore = E203,F821,F401
 # remove F821 and F401 after implementation
 per-file-ignores =
