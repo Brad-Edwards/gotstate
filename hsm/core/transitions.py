@@ -1,3 +1,6 @@
+# hsm/core/transitions.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
 from typing import List, Optional
 
 from hsm.interfaces.abc import AbstractAction, AbstractGuard, AbstractTransition

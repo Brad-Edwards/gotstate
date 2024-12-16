@@ -1,3 +1,6 @@
+# hsm/core/hooks.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
 from hsm.interfaces.abc import AbstractHook
 from hsm.interfaces.protocols import Transition
 

@@ -1,3 +1,6 @@
+# hsm/interfaces/types.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
 from typing import Any, Callable, Dict, NamedTuple
 
 StateID = str

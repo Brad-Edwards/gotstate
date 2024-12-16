@@ -1,4 +1,6 @@
 # hsm/interfaces/protocols.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
 from typing import Any, List, Optional, Protocol, runtime_checkable
 
 from hsm.interfaces.abc import AbstractAction, AbstractGuard

@@ -1,3 +1,6 @@
+# hsm/interfaces/abc.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Dict, List, Optional, Protocol, TypeVar, runtime_checkable
