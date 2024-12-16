@@ -179,14 +179,9 @@ def test_action_with_null_event(sample_state_data: Dict[str, Any]) -> None:
     Test calling action with None event, expecting it to fail gracefully.
     """
     action = MockAction("NullEventAction")
-    # Even though this is unusual, we test how the action handles it.
-    # MockAction won't raise an exception unless event is required.
-    # Let's test by explicitly checking an attribute from event.
-    # We'll simulate raising an error if event is None.
-    if True:  # Just a code block to show logic
-        if None is None:  # This simulates a scenario that shouldn't fail normally
-            action.execute(MockEvent("null_event", None), sample_state_data)
-            assert action.executed is True
+    # Test how the action handles null event scenario
+    action.execute(MockEvent("null_event", None), sample_state_data)
+    assert action.executed is True
 
 
 def test_action_with_empty_state_data(sample_event: Event) -> None:
