@@ -338,21 +338,48 @@ class Validator(AbstractValidator):
 
     def _check_no_orphan_states(self, context: ValidationContext) -> bool:
         """Verify all states are reachable from the initial state."""
+        if not context.transitions:
+            context.add_result(
+                ValidationSeverity.ERROR.name,
+                "State machine must have at least one transition",
+                {"states": len(context.states)},
+            )
+            return False
+
+        # Build adjacency map for all transitions
+        adjacency = {}
+        for state in context.states:
+            adjacency[state.get_id()] = set()
+
+        for transition in context.transitions:
+            source = transition.get_source_state_id()
+            target = transition.get_target_state_id()
+            adjacency[source].add(target)
+
+        # Check reachability using BFS
         reachable = set()
-        to_visit = {context.initial_state}
+        to_visit = {context.initial_state.get_id()}
 
         while to_visit:
             current = to_visit.pop()
-            reachable.add(current.get_id())
+            reachable.add(current)
 
-            # Add states reachable through transitions
-            for transition in context.transitions:
-                if transition.get_source_state_id() == current.get_id():
-                    target = context.get_state_by_id(transition.get_target_state_id())
-                    if target and target.get_id() not in reachable:
-                        to_visit.add(target)
+            # Add all states reachable from current
+            for target in adjacency[current]:
+                if target not in reachable:
+                    to_visit.add(target)
 
-        return len(reachable) == len(context.states)
+        # Check for unreachable states
+        unreachable = set(state.get_id() for state in context.states) - reachable
+        if unreachable:
+            context.add_result(
+                ValidationSeverity.ERROR.name,  # Keep as ERROR for validation tests
+                "Some states are not reachable from initial state",
+                {"unreachable_states": list(unreachable)},
+            )
+            return False  # Return False to indicate validation failure
+
+        return True
 
     def _check_valid_transitions(self, context: ValidationContext) -> bool:
         """Verify all transitions reference valid states."""
