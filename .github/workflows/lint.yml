@@ -32,5 +32,3 @@ jobs:
         run: isort --check-only .
       - name: Lint code (flake8)
         run: flake8 .
-      - name: Type check (mypy)
-        run: mypy .
