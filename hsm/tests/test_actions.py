@@ -1,7 +1,6 @@
 # hsm/tests/test_actions.py
 # Copyright (c) 2024
 # Licensed under the MIT License - see LICENSE file for details
-
 """
 Test suite for actions defined in actions.py.
 
@@ -271,7 +270,7 @@ def test_cleanup_procedures(sample_event: Event, sample_state_data: Dict[str, An
 
 
 # -----------------------------------------------------------------------------
-# ADDITIONAL TESTS FOR ROBUSTNESS
+# ROBUSTNESS TESTS
 # -----------------------------------------------------------------------------
 
 
