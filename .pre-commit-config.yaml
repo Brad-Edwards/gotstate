@@ -29,7 +29,7 @@ repos:
     hooks:
       - id: pytest-coverage
         name: Run tests with coverage
-        entry: pytest
+        entry: pytest --color=yes --cov=. --cov-report term-missing --cov-report xml:coverage-reports/coverage.xml
         language: system
         types: [python]
         pass_filenames: false
