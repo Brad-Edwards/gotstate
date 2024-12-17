@@ -105,7 +105,7 @@ def test_timer_scheduling_error() -> None:
     """Test timer scheduling error attributes."""
     error = TimerSchedulingError("test message", "timer1", 1.0, "test reason")
     assert error.timer_id == "timer1"
-    assert error.duration == 1.0
+    assert abs(error.duration - 1.0) < 1e-9
     assert error.reason == "test reason"
     assert "timer1" in str(error)
 
@@ -153,10 +153,11 @@ def test_timer_schedule_timeout(timer: Timer, event: Event) -> None:
     with pytest.raises(ValueError):
         timer.schedule_timeout(-1.0, event)
 
-    timer.schedule_timeout(0.1, event)
+    duration = 0.1
+    timer.schedule_timeout(duration, event)
     info = timer.get_info()
     assert info.state == TimerState.RUNNING
-    assert info.duration == 0.1
+    assert abs(info.duration - duration) < 1e-9
     assert info.start_time is not None
 
 
@@ -203,10 +204,11 @@ async def test_async_timer_schedule_timeout(async_timer: AsyncTimer, event: Even
     with pytest.raises(ValueError):
         await async_timer.schedule_timeout(-1.0, event)
 
-    await async_timer.schedule_timeout(0.1, event)
+    duration = 0.1
+    await async_timer.schedule_timeout(duration, event)
     info = async_timer.get_info()
     assert info.state == TimerState.RUNNING
-    assert info.duration == 0.1
+    assert abs(info.duration - duration) < 1e-9
     assert info.start_time is not None
 
 
@@ -368,7 +370,7 @@ def test_timer_info_remaining_time(timer: Timer, event: Event) -> None:
 
     info = timer.get_info()
     assert info.remaining is not None
-    assert 0 <= info.remaining <= duration
+    assert 0 <= info.remaining <= duration + 1e-9
 
     timer.cancel_timeout(event.get_id())
     assert timer.get_info().remaining is None
