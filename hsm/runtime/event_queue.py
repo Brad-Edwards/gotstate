@@ -120,7 +120,7 @@ class EventQueue(AbstractEventQueue):
         event = queue.dequeue()  # Returns highest priority event
     """
 
-    def __init__(self, max_size: Optional[int] = None, timeout: Optional[float] = None):
+    def __init__(self, max_size: Optional[int] = None, timeout: Optional[float] = 1.0):
         """
         Initialize the event queue.
 
@@ -143,12 +143,6 @@ class EventQueue(AbstractEventQueue):
         self._sequence = 0
         self._stats = QueueStats()
         self._shutdown = False
-
-    @contextmanager
-    def batch_operation(self) -> Generator[None, None, None]:
-        """Context manager for batch operations with a single lock acquisition."""
-        with self._lock:
-            yield
 
     def enqueue(self, event: Event) -> None:
         """
@@ -205,20 +199,15 @@ class EventQueue(AbstractEventQueue):
 
         Raises:
             QueueEmptyError: If queue is empty
+            EventQueueError: If queue is shut down
         """
         if self._shutdown:
             raise EventQueueError("Queue is shut down")
 
         start_time = time.time()
         with self._lock:
-            while not self._queue:
-                if self._shutdown:
-                    raise EventQueueError("Queue is shut down")
-                if self._default_timeout is not None:
-                    if not self._not_empty.wait(timeout=self._default_timeout):
-                        raise QueueEmptyError("Timed out waiting for event")
-                else:
-                    self._not_empty.wait()
+            if not self._queue:
+                raise QueueEmptyError("Queue is empty")
 
             event = heapq.heappop(self._queue).event
             wait_time = time.time() - start_time
@@ -419,20 +408,15 @@ class AsyncEventQueue(AbstractEventQueue):
 
         Raises:
             QueueEmptyError: If queue is empty
+            EventQueueError: If queue is shut down
         """
         if self._shutdown:
             raise EventQueueError("Queue is shut down")
 
         start_time = time.time()
         async with self._lock:
-            while not self._queue:
-                if self._shutdown:
-                    raise EventQueueError("Queue is shut down")
-                if self._default_timeout is not None:
-                    if not await self._not_empty.wait(timeout=self._default_timeout):
-                        raise QueueEmptyError("Timed out waiting for event")
-                else:
-                    await self._not_empty.wait()
+            if not self._queue:
+                raise QueueEmptyError("Queue is empty")
 
             event = heapq.heappop(self._queue).event
             wait_time = time.time() - start_time
@@ -465,7 +449,10 @@ class AsyncEventQueue(AbstractEventQueue):
             if not self._queue:
                 if timeout is None or timeout <= 0:
                     return None
-                await self._not_empty.wait(timeout=timeout)
+                try:
+                    await asyncio.wait_for(self._not_empty.wait(), timeout)
+                except asyncio.TimeoutError:
+                    return None
                 if not self._queue:
                     return None
 
@@ -483,8 +470,8 @@ class AsyncEventQueue(AbstractEventQueue):
         """
         async with self._lock:
             self._shutdown = True
-            await self._not_empty.notify_all()
-            await self._not_full.notify_all()
+            self._not_empty.notify_all()
+            self._not_full.notify_all()
 
     async def get_stats(self) -> QueueStats:
         """Get current queue statistics."""

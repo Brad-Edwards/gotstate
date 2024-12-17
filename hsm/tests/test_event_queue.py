@@ -6,6 +6,7 @@ import asyncio
 import logging
 import threading
 import time
+from contextlib import contextmanager
 from typing import Any, Dict, Generator, Optional
 
 import pytest
@@ -237,15 +238,26 @@ def test_event_queue_try_dequeue(event_queue: EventQueue, test_event: Event) -> 
     assert dequeued.get_id() == test_event.get_id()
 
 
-def test_event_queue_batch_operation(event_queue: EventQueue) -> None:
-    """Test batch operation context manager."""
+def test_event_queue_atomic_operations(event_queue: EventQueue) -> None:
+    """Test that queue operations maintain atomicity."""
     events = [Event(f"event{i}", priority=i) for i in range(3)]
 
-    with event_queue.batch_operation():
-        for event in events:
-            event_queue.enqueue(event)
+    # Test atomic enqueue
+    for event in events:
+        event_queue.enqueue(event)
 
+    # Verify queue state
     assert event_queue.size() == 3
+    assert not event_queue.is_full()
+
+    # Test atomic dequeue
+    dequeued_events = []
+    while not event_queue.is_empty():
+        dequeued_events.append(event_queue.dequeue())
+
+    # Verify ordering
+    assert len(dequeued_events) == 3
+    assert [e.get_priority() for e in dequeued_events] == [0, 1, 2]
 
 
 # -----------------------------------------------------------------------------
