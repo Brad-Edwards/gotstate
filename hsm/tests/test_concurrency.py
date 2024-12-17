@@ -278,7 +278,7 @@ def test_lock_manager_duplicate_id(lock_manager: LockManager, lock_id: str) -> N
 
 def test_lock_manager_remove_lock(lock_manager: LockManager, lock_id: str) -> None:
     """Test lock removal."""
-    lock = lock_manager.create_lock(lock_id)
+    lock_manager.create_lock(lock_id)
     lock_manager.remove_lock(lock_id)
     assert lock_manager.get_lock(lock_id) is None
 
@@ -295,7 +295,7 @@ def test_lock_manager_remove_locked(lock_manager: LockManager, lock_id: str) -> 
 def test_lock_manager_get_all_locks(lock_manager: LockManager) -> None:
     """Test retrieving all managed locks."""
     lock1 = lock_manager.create_lock("lock1")
-    lock2 = lock_manager.create_lock("lock2")
+    lock_manager.create_lock("lock2")
 
     lock1.acquire()
     locks = lock_manager.get_all_locks()
