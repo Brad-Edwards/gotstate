@@ -96,7 +96,87 @@ class PrioritizedEvent:
         return (self.priority, self.sequence) == (other.priority, other.sequence)
 
 
-class EventQueue(AbstractEventQueue):
+class BaseEventQueue:
+    """Base class containing common event queue functionality."""
+
+    def __init__(self, max_size: Optional[int] = None, timeout: Optional[float] = None):
+        if max_size is not None and max_size <= 0:
+            raise ValueError("max_size must be positive or None")
+
+        self._max_size = max_size
+        self._default_timeout = timeout
+        self._queue: List[PrioritizedEvent] = []
+        self._sequence = 0
+        self._stats = QueueStats()
+        self._shutdown = False
+
+    def _validate_event(self, event: Event) -> None:
+        """Validate event and check shutdown state."""
+        if self._shutdown:
+            raise EventQueueError("Queue is shut down")
+
+        if not isinstance(event, Event):
+            raise TypeError("event must implement Event protocol")
+
+    def _check_full(self) -> None:
+        """Check if queue is full and raise appropriate error."""
+        if self._max_size is not None and len(self._queue) >= self._max_size:
+            raise QueueFullError(
+                "Queue is at maximum capacity",
+                max_size=self._max_size,
+                current_size=len(self._queue),
+            )
+
+    def _create_priority_event(self, event: Event) -> PrioritizedEvent:
+        """Create a PrioritizedEvent wrapper."""
+        priority_event = PrioritizedEvent(
+            priority=event.get_priority(),
+            sequence=self._sequence,
+            event=event,
+        )
+        self._sequence += 1
+        return priority_event
+
+    def _log_enqueue(self, event: Event) -> None:
+        """Log enqueue operation."""
+        logger.debug(
+            "Enqueued event %s (priority=%d, queue_size=%d)",
+            event.get_id(),
+            event.get_priority(),
+            len(self._queue),
+        )
+
+    def _log_dequeue(self, event: Event, wait_time: float) -> None:
+        """Log dequeue operation."""
+        logger.debug(
+            "Dequeued event %s (wait_time=%.3fs, queue_size=%d)",
+            event.get_id(),
+            wait_time,
+            len(self._queue),
+        )
+
+    def _check_shutdown(self) -> None:
+        """Check if queue is shut down and raise appropriate error."""
+        if self._shutdown:
+            raise EventQueueError("Queue is shut down")
+
+    def _handle_dequeue(self, start_time: float) -> AbstractEvent:
+        """Common dequeue logic."""
+        if not self._queue:
+            raise QueueEmptyError("Queue is empty")
+
+        event = heapq.heappop(self._queue).event
+        wait_time = time.time() - start_time
+        self._stats.record_dequeue(wait_time)
+        self._log_dequeue(event, wait_time)
+        return event
+
+    def _handle_shutdown(self) -> None:
+        """Common shutdown logic."""
+        self._shutdown = True
+
+
+class EventQueue(BaseEventQueue, AbstractEventQueue):
     """
     Thread-safe priority queue implementation for events.
 
@@ -131,18 +211,10 @@ class EventQueue(AbstractEventQueue):
         Raises:
             ValueError: If max_size is not None and <= 0
         """
-        if max_size is not None and max_size <= 0:
-            raise ValueError("max_size must be positive or None")
-
-        self._max_size = max_size
-        self._default_timeout = timeout
-        self._queue: List[PrioritizedEvent] = []
+        super().__init__(max_size, timeout)
         self._lock = threading.Lock()
         self._not_empty = threading.Condition(self._lock)
         self._not_full = threading.Condition(self._lock)
-        self._sequence = 0
-        self._stats = QueueStats()
-        self._shutdown = False
 
     def enqueue(self, event: Event) -> None:
         """
@@ -157,36 +229,17 @@ class EventQueue(AbstractEventQueue):
             QueueFullError: If queue is at max_size
             TypeError: If event is not a valid Event object
         """
-        if self._shutdown:
-            raise EventQueueError("Queue is shut down")
-
-        if not isinstance(event, Event):
-            raise TypeError("event must implement Event protocol")
+        self._validate_event(event)
 
         with self._lock:
-            if self._max_size is not None and len(self._queue) >= self._max_size:
-                raise QueueFullError(
-                    "Queue is at maximum capacity",
-                    max_size=self._max_size,
-                    current_size=len(self._queue),
-                )
+            self._check_full()
 
-            priority_event = PrioritizedEvent(
-                priority=event.get_priority(),
-                sequence=self._sequence,
-                event=event,
-            )
-            self._sequence += 1
+            priority_event = self._create_priority_event(event)
             heapq.heappush(self._queue, priority_event)
             self._stats.record_enqueue(len(self._queue))
             self._not_empty.notify()
 
-            logger.debug(
-                "Enqueued event %s (priority=%d, queue_size=%d)",
-                event.get_id(),
-                event.get_priority(),
-                len(self._queue),
-            )
+            self._log_enqueue(event)
 
     def dequeue(self) -> AbstractEvent:
         """
@@ -201,25 +254,12 @@ class EventQueue(AbstractEventQueue):
             QueueEmptyError: If queue is empty
             EventQueueError: If queue is shut down
         """
-        if self._shutdown:
-            raise EventQueueError("Queue is shut down")
+        self._check_shutdown()
 
         start_time = time.time()
         with self._lock:
-            if not self._queue:
-                raise QueueEmptyError("Queue is empty")
-
-            event = heapq.heappop(self._queue).event
-            wait_time = time.time() - start_time
-            self._stats.record_dequeue(wait_time)
+            event = self._handle_dequeue(start_time)
             self._not_full.notify()
-
-            logger.debug(
-                "Dequeued event %s (wait_time=%.3fs, queue_size=%d)",
-                event.get_id(),
-                wait_time,
-                len(self._queue),
-            )
             return event
 
     def try_dequeue(self, timeout: Optional[float] = None) -> Optional[AbstractEvent]:
@@ -232,8 +272,7 @@ class EventQueue(AbstractEventQueue):
         Returns:
             Event if available, None if timeout or queue is empty
         """
-        if self._shutdown:
-            raise EventQueueError("Queue is shut down")
+        self._check_shutdown()
 
         start_time = time.time()
         with self._lock:
@@ -244,9 +283,7 @@ class EventQueue(AbstractEventQueue):
                 if not self._queue:
                     return None
 
-            event = heapq.heappop(self._queue).event
-            wait_time = time.time() - start_time
-            self._stats.record_dequeue(wait_time)
+            event = self._handle_dequeue(start_time)
             self._not_full.notify()
             return event
 
@@ -257,7 +294,7 @@ class EventQueue(AbstractEventQueue):
         Any blocked operations will be woken up and raise EventQueueError.
         """
         with self._lock:
-            self._shutdown = True
+            self._handle_shutdown()
             self._not_empty.notify_all()
             self._not_full.notify_all()
 
@@ -313,7 +350,7 @@ class EventQueue(AbstractEventQueue):
             return self._queue[0].event if self._queue else None
 
 
-class AsyncEventQueue(AbstractEventQueue):
+class AsyncEventQueue(BaseEventQueue, AbstractEventQueue):
     """
     Asynchronous event queue implementation.
 
@@ -344,18 +381,10 @@ class AsyncEventQueue(AbstractEventQueue):
         Raises:
             ValueError: If max_size is not None and <= 0
         """
-        if max_size is not None and max_size <= 0:
-            raise ValueError("max_size must be positive or None")
-
-        self._max_size = max_size
-        self._default_timeout = timeout
-        self._queue: List[PrioritizedEvent] = []
+        super().__init__(max_size, timeout)
         self._lock = asyncio.Lock()
         self._not_empty = asyncio.Condition(self._lock)
         self._not_full = asyncio.Condition(self._lock)
-        self._sequence = 0
-        self._stats = QueueStats()
-        self._shutdown = False
 
     async def enqueue(self, event: Event) -> None:
         """
@@ -368,36 +397,17 @@ class AsyncEventQueue(AbstractEventQueue):
             QueueFullError: If queue is at max_size
             TypeError: If event is not a valid Event object
         """
-        if self._shutdown:
-            raise EventQueueError("Queue is shut down")
-
-        if not isinstance(event, Event):
-            raise TypeError("event must implement Event protocol")
+        self._validate_event(event)
 
         async with self._lock:
-            if self._max_size is not None and len(self._queue) >= self._max_size:
-                raise QueueFullError(
-                    "Queue is at maximum capacity",
-                    max_size=self._max_size,
-                    current_size=len(self._queue),
-                )
+            self._check_full()
 
-            priority_event = PrioritizedEvent(
-                priority=event.get_priority(),
-                sequence=self._sequence,
-                event=event,
-            )
-            self._sequence += 1
+            priority_event = self._create_priority_event(event)
             heapq.heappush(self._queue, priority_event)
             self._stats.record_enqueue(len(self._queue))
             self._not_empty.notify()
 
-            logger.debug(
-                "Enqueued event %s (priority=%d, queue_size=%d)",
-                event.get_id(),
-                event.get_priority(),
-                len(self._queue),
-            )
+            self._log_enqueue(event)
 
     async def dequeue(self) -> AbstractEvent:
         """
@@ -410,25 +420,12 @@ class AsyncEventQueue(AbstractEventQueue):
             QueueEmptyError: If queue is empty
             EventQueueError: If queue is shut down
         """
-        if self._shutdown:
-            raise EventQueueError("Queue is shut down")
+        self._check_shutdown()
 
         start_time = time.time()
         async with self._lock:
-            if not self._queue:
-                raise QueueEmptyError("Queue is empty")
-
-            event = heapq.heappop(self._queue).event
-            wait_time = time.time() - start_time
-            self._stats.record_dequeue(wait_time)
+            event = self._handle_dequeue(start_time)
             self._not_full.notify()
-
-            logger.debug(
-                "Dequeued event %s (wait_time=%.3fs, queue_size=%d)",
-                event.get_id(),
-                wait_time,
-                len(self._queue),
-            )
             return event
 
     async def try_dequeue(self, timeout: Optional[float] = None) -> Optional[AbstractEvent]:
@@ -441,8 +438,7 @@ class AsyncEventQueue(AbstractEventQueue):
         Returns:
             Event if available, None if timeout or queue is empty
         """
-        if self._shutdown:
-            raise EventQueueError("Queue is shut down")
+        self._check_shutdown()
 
         start_time = time.time()
         async with self._lock:
@@ -456,9 +452,7 @@ class AsyncEventQueue(AbstractEventQueue):
                 if not self._queue:
                     return None
 
-            event = heapq.heappop(self._queue).event
-            wait_time = time.time() - start_time
-            self._stats.record_dequeue(wait_time)
+            event = self._handle_dequeue(start_time)
             self._not_full.notify()
             return event
 
@@ -469,7 +463,7 @@ class AsyncEventQueue(AbstractEventQueue):
         Any blocked operations will be woken up and raise EventQueueError.
         """
         async with self._lock:
-            self._shutdown = True
+            self._handle_shutdown()
             self._not_empty.notify_all()
             self._not_full.notify_all()
 
