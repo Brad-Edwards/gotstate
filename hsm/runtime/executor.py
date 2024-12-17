@@ -159,6 +159,7 @@ class Executor:
         transitions: List[AbstractTransition],
         initial_state: AbstractState,
         max_queue_size: Optional[int] = None,
+        thread_join_timeout: float = 1.0,
     ):
         """
         Initialize the executor.
@@ -168,6 +169,7 @@ class Executor:
             transitions: List of allowed transitions
             initial_state: Starting state
             max_queue_size: Optional maximum event queue size
+            thread_join_timeout: Timeout in seconds for thread join operations (default: 1.0)
 
         Raises:
             ValueError: If configuration is invalid
@@ -176,6 +178,8 @@ class Executor:
             raise ValueError("States, transitions, and initial state are required")
         if initial_state not in states:
             raise ValueError("Initial state must be in states list")
+        if thread_join_timeout <= 0:
+            raise ValueError("Thread join timeout must be positive")
 
         self._states = {state.get_id(): state for state in states}
         self._transitions = transitions
@@ -186,6 +190,7 @@ class Executor:
         self._worker_thread: Optional[threading.Thread] = None
         self._state_changes: List[StateChange] = []
         self._max_state_history: int = 1000  # Configurable
+        self._thread_join_timeout = thread_join_timeout
 
         # Initialize timer with default callback
         def timer_callback(timer_id: str, event: AbstractEvent) -> None:
@@ -227,21 +232,58 @@ class Executor:
         Exits the current state and stops event processing.
 
         Raises:
-            ExecutorError: If executor is not running
+            ExecutorError: If executor is not running or stop operation times out
         """
         if self._context.state != ExecutorState.RUNNING:
             raise ExecutorError("Executor is not running")
 
         self._context.state = ExecutorState.STOPPING
+        stop_start_time = time.time()
+
         try:
+            # Calculate remaining time for operations
+            def get_remaining_timeout() -> float:
+                elapsed = time.time() - stop_start_time
+                remaining = self._thread_join_timeout - elapsed
+                if remaining <= 0:
+                    raise ExecutorError("Failed to stop executor: operation timed out")
+                return remaining
+
+            # Exit current state with timeout
             if self._current_state:
-                self._current_state.on_exit()
-            self._event_queue.shutdown()
+                timeout = get_remaining_timeout()
+                exit_thread = threading.Thread(target=self._current_state.on_exit)
+                exit_thread.start()
+                exit_thread.join(timeout=timeout)
+                if exit_thread.is_alive():
+                    raise ExecutorError("Failed to stop executor: state exit timed out")
+
+            # Shutdown event queue with timeout
+            timeout = get_remaining_timeout()
+            queue_thread = threading.Thread(target=self._event_queue.shutdown)
+            queue_thread.start()
+            queue_thread.join(timeout=timeout)
+            if queue_thread.is_alive():
+                raise ExecutorError("Failed to stop executor: event queue shutdown timed out")
+
+            # Shutdown timer if available
             if hasattr(self._timer, "shutdown"):
-                self._timer.shutdown()
+                timeout = get_remaining_timeout()
+                timer_thread = threading.Thread(target=self._timer.shutdown)
+                timer_thread.start()
+                timer_thread.join(timeout=timeout)
+                if timer_thread.is_alive():
+                    raise ExecutorError("Failed to stop executor: timer shutdown timed out")
+
+            # Join worker thread with remaining timeout
             if self._worker_thread:
-                self._worker_thread.join(timeout=1.0)
+                timeout = get_remaining_timeout()
+                self._worker_thread.join(timeout=timeout)
+                if self._worker_thread.is_alive():
+                    raise ExecutorError("Failed to stop executor: worker thread did not terminate")
+
             self._context.state = ExecutorState.STOPPED
+
         except Exception as e:
             self._context.state = ExecutorState.ERROR
             raise ExecutorError(f"Failed to stop executor: {str(e)}") from e

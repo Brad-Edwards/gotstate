@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-coverage run --branch --source=myfsm -m pytest
-coverage report --fail-under=0
+
+# Run pytest with coverage
+coverage run --branch --source=hsm -m pytest
+
+# Generate coverage report
+coverage report --fail-under=90
+
+# Generate HTML report for detailed view
+coverage html
