@@ -372,8 +372,9 @@ async def test_queue_concurrent_stress(queue_class, is_async):
         nonlocal operations_completed
         for _ in range(20):
             try:
-                if random.random() < 0.5:  # 50% chance to enqueue
-                    event = Event("stress_test", priority=random.randint(1, 3))
+                # 50% chance to enqueue, no security risk in a test, bad RNG is fine
+                if random.random() < 0.5:  # noqa: S2245
+                    event = Event("stress_test", priority=random.randint(1, 3))  # noqa: S2245
                     if is_async:
                         await queue.enqueue(event)
                     else:
