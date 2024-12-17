@@ -15,12 +15,14 @@ from hsm.runtime.async_support import (
     AsyncAction,
     AsyncGuard,
     AsyncHSMError,
+    AsyncLockManager,
     AsyncState,
     AsyncStateError,
     AsyncStateMachine,
     AsyncTransition,
     AsyncTransitionError,
 )
+from hsm.runtime.event_queue import AsyncEventQueue, EventQueueError
 
 # -----------------------------------------------------------------------------
 # TEST FIXTURES
@@ -79,6 +81,33 @@ async def running_state_machine(basic_state_machine):
     await basic_state_machine.start()
     yield basic_state_machine
     await basic_state_machine.stop()
+
+
+@pytest.fixture
+def mock_callback():
+    """Fixture providing a state change callback."""
+    calls = []
+
+    def callback(source_id: StateID, target_id: StateID):
+        calls.append((source_id, target_id))
+
+    callback.calls = calls
+    return callback
+
+
+@pytest.fixture
+def error_prone_components():
+    """Fixture providing components that raise errors."""
+
+    class ErrorGuard(AsyncGuard):
+        async def check(self, event: AbstractEvent, state_data: Any) -> bool:
+            raise RuntimeError("Guard error")
+
+    class ErrorAction(AsyncAction):
+        async def execute(self, event: AbstractEvent, state_data: Any) -> None:
+            raise RuntimeError("Action error")
+
+    return {"guard": ErrorGuard(), "action": ErrorAction()}
 
 
 # -----------------------------------------------------------------------------
@@ -340,3 +369,122 @@ async def assert_machine_state(machine: AsyncStateMachine, should_be_running: bo
         pass
     else:
         assert machine.get_current_state() is not None
+
+
+@pytest.mark.asyncio
+async def test_async_lock_manager():
+    """Test AsyncLockManager functionality."""
+    manager = AsyncLockManager()
+    counter = 0
+
+    async def increment():
+        nonlocal counter
+        await asyncio.sleep(0.1)  # Simulate work
+        counter += 1
+        return counter
+
+    # Test concurrent operations are properly locked
+    tasks = [manager.with_lock("test", increment) for _ in range(5)]
+
+    results = await asyncio.gather(*tasks)
+    assert results == [1, 2, 3, 4, 5]  # Should be sequential
+
+    # Test context manager
+    async with manager:
+        assert True  # Should not raise
+
+
+@pytest.mark.asyncio
+async def test_state_change_callbacks(basic_state_machine: AsyncStateMachine, mock_callback, mock_event):
+    """Test state change callback functionality."""
+    basic_state_machine.add_state_change_callback(mock_callback)
+
+    # Create a second state and transition
+    second_state = AsyncState("second_state")
+    transition = AsyncTransition("test_state", "second_state")
+
+    # Add them to the state machine
+    basic_state_machine._states[second_state.get_id()] = second_state
+    basic_state_machine._transitions.append(transition)
+
+    await basic_state_machine.start()
+    await basic_state_machine.process_event(mock_event)
+    await asyncio.sleep(0.1)  # Allow event processing
+
+    assert len(mock_callback.calls) > 0
+    assert mock_callback.calls[0] == ("test_state", "second_state")
+
+
+@pytest.mark.asyncio
+async def test_guard_and_action_errors(
+    basic_state_machine: AsyncStateMachine, error_prone_components, mock_event: AbstractEvent
+):
+    """Test error handling in guards and actions."""
+    # Add error-prone transition
+    transition = AsyncTransition(
+        "test_state", "test_state", guard=error_prone_components["guard"], actions=[error_prone_components["action"]]
+    )
+    basic_state_machine._transitions.append(transition)
+
+    await basic_state_machine.start()
+    await basic_state_machine.process_event(mock_event)
+    await asyncio.sleep(0.1)  # Allow error to propagate
+
+    # The state machine should still be running despite errors
+    assert basic_state_machine.is_running()
+
+
+@pytest.mark.asyncio
+async def test_event_queue_errors(basic_state_machine: AsyncStateMachine, mock_event: AbstractEvent):
+    """Test event queue error handling."""
+    # Create a full queue scenario
+    basic_state_machine._event_queue = AsyncEventQueue(max_size=1)
+    await basic_state_machine.start()
+
+    # Fill the queue
+    await basic_state_machine.process_event(mock_event)
+
+    # This should raise an error due to full queue
+    with pytest.raises(AsyncHSMError):
+        await basic_state_machine.process_event(mock_event)
+
+
+@pytest.mark.asyncio
+async def test_debug_info_completeness(basic_state_machine: AsyncStateMachine):
+    """Test debug info contains all expected information."""
+    await basic_state_machine.start()
+    debug_info = await basic_state_machine.get_debug_info()
+
+    expected_keys = {"current_state", "running", "state_changes", "queue_size", "states", "transitions"}
+
+    assert all(key in debug_info for key in expected_keys)
+    assert isinstance(debug_info["transitions"], list)
+    assert isinstance(debug_info["states"], list)
+    assert isinstance(debug_info["queue_size"], int)
+
+
+@pytest.mark.asyncio
+async def test_state_data_operations(mock_state: AsyncState):
+    """Test state data operations in detail."""
+    # Test setting data
+    mock_state.set_data("test_key", "test_value")
+    assert mock_state.data["test_key"] == "test_value"
+
+    # Test data immutability
+    data = mock_state.data
+    data["new_key"] = "new_value"
+    assert "new_key" not in mock_state.data
+
+    # Test multiple data operations
+    mock_state.set_data("key1", 1)
+    mock_state.set_data("key2", 2)
+    assert mock_state.data == {"test_key": "test_value", "key1": 1, "key2": 2}
+
+
+@pytest.mark.asyncio
+async def test_transition_validation(basic_state_machine: AsyncStateMachine):
+    """Test transition validation."""
+    invalid_transition = AsyncTransition("nonexistent", "also_nonexistent")
+
+    with pytest.raises(ValueError):
+        basic_state_machine._validate_transition(invalid_transition, basic_state_machine._states)

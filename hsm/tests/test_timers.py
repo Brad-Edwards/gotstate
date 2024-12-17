@@ -374,3 +374,170 @@ def test_timer_info_remaining_time(timer: Timer, event: Event) -> None:
 
     timer.cancel_timeout(event.get_id())
     assert timer.get_info().remaining is None
+
+
+@pytest.mark.asyncio
+async def test_async_timer_shutdown(async_timer: AsyncTimer, event: Event) -> None:
+    """Test AsyncTimer shutdown functionality."""
+    await async_timer.schedule_timeout(1.0, event)
+    assert async_timer.get_info().state == TimerState.RUNNING
+
+    await async_timer.shutdown()
+    assert async_timer.get_info().state == TimerState.IDLE
+    assert async_timer.get_info().start_time is None
+    assert async_timer.get_info().duration is None
+
+
+def test_timer_callback_error_handling(timer: Timer, event: Event) -> None:
+    """Test timer behavior when callback raises an error."""
+
+    def error_callback(timer_id: str, evt: Event) -> None:
+        raise RuntimeError("Callback error")
+
+    error_timer = Timer("error_timer", error_callback)
+    error_timer.schedule_timeout(0.1, event)
+    time.sleep(0.2)  # Wait for callback
+
+    assert error_timer.get_info().state == TimerState.ERROR
+
+
+@pytest.mark.asyncio
+async def test_async_timer_callback_error_handling(async_timer: AsyncTimer, event: Event) -> None:
+    """Test async timer behavior when callback raises an error."""
+
+    def error_callback(timer_id: str, evt: Event) -> None:
+        raise RuntimeError("Callback error")
+
+    error_timer = AsyncTimer("error_timer", error_callback)
+    await error_timer.schedule_timeout(0.1, event)
+    await asyncio.sleep(0.2)  # Wait for callback
+
+    assert error_timer.get_info().state == TimerState.ERROR
+
+
+def test_timer_invalid_operations(timer: Timer, event: Event) -> None:
+    """Test timer behavior with invalid operations."""
+    # Test scheduling when already running
+    timer.schedule_timeout(1.0, event)
+    with pytest.raises(TimerSchedulingError):
+        timer.schedule_timeout(1.0, event)
+
+    # Test scheduling with invalid duration
+    with pytest.raises(ValueError):
+        timer.schedule_timeout(-1.0, event)
+
+    # Clean up
+    timer.cancel_timeout(event.get_id())
+
+
+@pytest.mark.asyncio
+async def test_async_timer_invalid_operations(async_timer: AsyncTimer, event: Event) -> None:
+    """Test async timer behavior with invalid operations."""
+    # Test scheduling when already running
+    await async_timer.schedule_timeout(1.0, event)
+    with pytest.raises(TimerSchedulingError):
+        await async_timer.schedule_timeout(1.0, event)
+
+    # Test scheduling with invalid duration
+    with pytest.raises(ValueError):
+        await async_timer.schedule_timeout(-1.0, event)
+
+    # Clean up
+    await async_timer.cancel_timeout(event.get_id())
+
+
+def test_timer_manager_concurrent_timer_creation(timer_manager: TimerManager) -> None:
+    """Test concurrent timer creation in TimerManager."""
+
+    def callback(timer_id: str, evt: Event) -> None:
+        pass
+
+    def create_timer(idx: int) -> None:
+        try:
+            timer_manager.create_timer(f"timer_{idx}", callback)
+        except ValueError:
+            pass  # Expected for duplicate IDs
+
+    threads = [threading.Thread(target=create_timer, args=(i,)) for i in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Verify we have some successfully created timers
+    timers = timer_manager.get_all_timers()
+    assert len(timers) > 0
+
+
+def test_timer_manager_remove_active_timer(timer_manager: TimerManager, event: Event) -> None:
+    """Test removing an active timer from TimerManager."""
+
+    def callback(timer_id: str, evt: Event) -> None:
+        pass
+
+    timer = timer_manager.create_timer("test_timer", callback)
+    timer.schedule_timeout(1.0, event)
+
+    with pytest.raises(TimerError):
+        timer_manager.remove_timer("test_timer")
+
+    # Clean up
+    timer.cancel_timeout(event.get_id())
+    timer_manager.remove_timer("test_timer")
+
+
+def test_timer_state_transitions_detailed(timer: Timer, event: Event) -> None:
+    """Test detailed timer state transitions."""
+    # Initial state
+    assert timer.get_info().state == TimerState.IDLE
+
+    # Schedule -> Running
+    timer.schedule_timeout(1.0, event)
+    assert timer.get_info().state == TimerState.RUNNING
+
+    # Running -> Cancelled
+    timer.cancel_timeout(event.get_id())
+    assert timer.get_info().state == TimerState.CANCELLED
+
+    # Can schedule again after cancellation
+    timer.schedule_timeout(0.1, event)
+    assert timer.get_info().state == TimerState.RUNNING
+
+    # Wait for completion
+    time.sleep(0.2)
+    assert timer.get_info().state == TimerState.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_async_timer_state_transitions_detailed(async_timer: AsyncTimer, event: Event) -> None:
+    """Test detailed async timer state transitions."""
+    # Initial state
+    assert async_timer.get_info().state == TimerState.IDLE
+
+    # Schedule -> Running
+    await async_timer.schedule_timeout(1.0, event)
+    assert async_timer.get_info().state == TimerState.RUNNING
+
+    # Running -> Cancelled
+    await async_timer.cancel_timeout(event.get_id())
+    assert async_timer.get_info().state == TimerState.CANCELLED
+
+    # Can schedule again after cancellation
+    await async_timer.schedule_timeout(0.1, event)
+    assert async_timer.get_info().state == TimerState.RUNNING
+
+    # Wait for completion
+    await asyncio.sleep(0.2)
+    assert async_timer.get_info().state == TimerState.COMPLETED
+
+
+def test_timer_info_immutability(timer: Timer, event: Event) -> None:
+    """Test that TimerInfo objects are immutable."""
+    timer.schedule_timeout(1.0, event)
+    info = timer.get_info()
+
+    with pytest.raises(Exception):  # dataclass is frozen
+        info.state = TimerState.COMPLETED  # type: ignore
+
+    with pytest.raises(Exception):
+        info.duration = 2.0  # type: ignore
