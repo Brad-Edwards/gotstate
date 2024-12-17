@@ -61,6 +61,7 @@ class AsyncLockManager:
 class AsyncHSMError(HSMError):
     """Base exception for async state machine errors."""
 
+    # Meant to be subclassed by other errors
     pass
 
 
@@ -149,6 +150,7 @@ class AsyncState(AsyncHSMBase, AbstractState):
 
     async def _do_enter(self) -> None:
         """Override this method to implement custom entry logic."""
+        # Meant to be overridden by subclasses
         pass
 
     async def on_exit(self) -> None:

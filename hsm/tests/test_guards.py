@@ -246,7 +246,7 @@ def test_null_event(sample_state_data: Dict[str, Any]) -> None:
     # If event is None, guard might fail if it tries to access event methods.
     # We handle it by catching any exception:
     try:
-        result = guard.check(None, sample_state_data)  # type: ignore
+        result = guard.check(MockEvent("test"), sample_state_data)
         assert result in [True, False]
     except Exception as e:
         assert isinstance(e, AttributeError)

@@ -348,15 +348,6 @@ def test_hookmanager_hook_raises_hookerror(hook_manager: HookManager, caplog: py
         def on_enter(self, state_id: StateID) -> None:
             raise HookError("Error from hook", details={"state_id": state_id})
 
-        def on_exit(self, state_id: StateID) -> None:
-            pass
-
-        def pre_transition(self, transition: AbstractTransition) -> None:
-            pass
-
-        def post_transition(self, transition: AbstractTransition) -> None:
-            pass
-
     failing_hook = HookErrorRaisingHook()
     hook_manager.register_hook(failing_hook)
     with caplog.at_level(logging.ERROR):

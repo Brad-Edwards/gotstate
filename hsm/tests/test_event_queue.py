@@ -5,6 +5,7 @@
 import asyncio
 import inspect
 import logging
+import random
 import threading
 import time
 from contextlib import contextmanager
@@ -279,75 +280,127 @@ async def test_queue_logging(queue_class, is_async, caplog: Any):
     assert "wait_time" in caplog.text
 
 
-# Replace the separate concurrency tests with a parametrized version
 @pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
 @pytest.mark.asyncio
-async def test_queue_concurrency(queue_class, is_async):
-    """Test concurrency for both sync and async queues."""
+async def test_async_queue_concurrent_operations(queue_class, is_async):
+    """Test concurrent operations for async queue."""
+    if not is_async:
+        pytest.skip("This test is for async queues only")
+
     queue = queue_class(max_size=5)
 
+    async def producer() -> None:
+        for i in range(50):
+            try:
+                await queue.enqueue(Event(f"event{i}", priority=i % 3))
+                await asyncio.sleep(0.001)
+            except QueueFullError:
+                pass
+
+    async def consumer() -> None:
+        for _ in range(50):
+            try:
+                await queue.dequeue()
+                await asyncio.sleep(0.001)
+            except QueueEmptyError:
+                pass
+
+    tasks = [
+        asyncio.create_task(producer()),
+        asyncio.create_task(producer()),
+        asyncio.create_task(consumer()),
+        asyncio.create_task(consumer()),
+    ]
+
+    await asyncio.gather(*tasks)
+
+    # Queue should be in a consistent state
+    assert await queue.size() >= 0
+    assert await queue.size() <= queue._max_size
+
+
+@pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
+def test_sync_queue_concurrent_operations(queue_class, is_async):
+    """Test concurrent operations for sync queue."""
     if is_async:
+        pytest.skip("This test is for sync queues only")
 
-        async def producer() -> None:
-            for i in range(50):
-                try:
-                    await queue.enqueue(Event(f"event{i}", priority=i % 3))
-                    await asyncio.sleep(0.001)
-                except QueueFullError:
-                    pass
+    queue = queue_class(max_size=5)
 
-        async def consumer() -> None:
-            for _ in range(50):
-                try:
-                    await queue.dequeue()
-                    await asyncio.sleep(0.001)
-                except QueueEmptyError:
-                    pass
+    def producer() -> None:
+        for i in range(50):
+            try:
+                queue.enqueue(Event(f"event{i}", priority=i % 3))
+                time.sleep(0.001)
+            except QueueFullError:
+                pass
 
-        tasks = [
-            asyncio.create_task(producer()),
-            asyncio.create_task(producer()),
-            asyncio.create_task(consumer()),
-            asyncio.create_task(consumer()),
-        ]
+    def consumer() -> None:
+        for _ in range(50):
+            try:
+                queue.dequeue()
+                time.sleep(0.001)
+            except QueueEmptyError:
+                pass
 
-        await asyncio.gather(*tasks)
+    threads = [
+        threading.Thread(target=producer),
+        threading.Thread(target=producer),
+        threading.Thread(target=consumer),
+        threading.Thread(target=consumer),
+    ]
 
-        # Queue should be in a consistent state
-        assert await queue.size() >= 0
-        assert await queue.size() <= queue._max_size
+    for thread in threads:
+        thread.start()
 
+    for thread in threads:
+        thread.join()
+
+    # Queue should be in a consistent state
+    assert queue.size() >= 0
+    assert queue.size() <= queue._max_size
+
+
+@pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
+@pytest.mark.asyncio
+async def test_queue_concurrent_stress(queue_class, is_async):
+    """Test queue behavior under concurrent stress with rapid enqueue/dequeue."""
+    queue = queue_class(max_size=5)
+    operations_completed = 0
+
+    async def worker() -> None:
+        nonlocal operations_completed
+        for _ in range(20):
+            try:
+                # 50% chance to enqueue, no security risk in a test, bad RNG is fine
+                if random.random() < 0.5:  # NOSONAR
+                    event = Event("stress_test", priority=random.randint(1, 3))  # NOSONAR
+                    if is_async:
+                        await queue.enqueue(event)
+                    else:
+                        queue.enqueue(event)
+                else:  # 50% chance to dequeue
+                    if is_async:
+                        await queue.try_dequeue(timeout=0.001)
+                    else:
+                        queue.try_dequeue(timeout=0.001)
+                operations_completed += 1
+                await asyncio.sleep(0.001) if is_async else time.sleep(0.001)
+            except (QueueFullError, QueueEmptyError):
+                continue
+
+    if is_async:
+        workers = [asyncio.create_task(worker()) for _ in range(4)]
+        await asyncio.gather(*workers)
     else:
+        threads = [threading.Thread(target=lambda: asyncio.run(worker())) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
-        def producer() -> None:
-            for i in range(50):
-                try:
-                    queue.enqueue(Event(f"event{i}", priority=i % 3))
-                    time.sleep(0.001)
-                except QueueFullError:
-                    pass
-
-        def consumer() -> None:
-            for _ in range(50):
-                try:
-                    queue.dequeue()
-                    time.sleep(0.001)
-                except QueueEmptyError:
-                    pass
-
-        threads = [
-            threading.Thread(target=producer),
-            threading.Thread(target=producer),
-            threading.Thread(target=consumer),
-            threading.Thread(target=consumer),
-        ]
-
-        for thread in threads:
-            thread.start()
-
-        for thread in threads:
-            thread.join()
-
-        # Queue should be in a consistent state
-        assert queue.size() >= 0
-        assert queue.size() <= queue._max_size
+    # Verify the test did meaningful work
+    assert operations_completed > 0
+    # Verify queue remains in valid state
+    size = await queue.size() if is_async else queue.size()
+    assert 0 <= size <= queue._max_size

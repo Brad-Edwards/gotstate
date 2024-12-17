@@ -37,6 +37,7 @@ class MockGuard(AbstractGuard):
 
 class MockAction(AbstractAction):
     def execute(self, event: AbstractEvent, state_data: Any) -> None:
+        # Mock needed for protocol conformance, impl not needed
         pass
 
 
@@ -121,8 +122,8 @@ class InvalidReturnTypeEvent:
 class InvalidGuard(AbstractGuard):
     """Guard that returns a string instead of bool."""
 
-    def check(self, event: AbstractEvent, state_data: Any) -> bool:
-        return "not a bool"  # Incorrect return type
+    def check(self, event: AbstractEvent, state_data: Any) -> bool:  # NOSONAR
+        return "not a bool"  # Incorrect return type - intentional for testing
 
 
 class InvalidValidator(AbstractValidator):
@@ -357,7 +358,7 @@ def test_cleanup_procedures() -> None:
     # Simulate cleanup after error
     try:
         raise InvalidTransitionError("Cleanup needed", "S1", "S2", event="E4")
-    except InvalidTransitionError as e:
+    except InvalidTransitionError:
         # Simulate cleanup here
         # In real code, you might revert partial changes or release locks.
         cleanup_done = True
@@ -384,7 +385,7 @@ def test_maximum_recursion_scenario() -> None:
 # -----------------------------------------------------------------------------
 def test_event_protocol_negative_type_check() -> None:
     """Test that an event with incorrect return types does not conform."""
-    invalid_evt = InvalidReturnTypeEvent()
+    InvalidReturnTypeEvent()
     # Although the protocol uses runtime_checkable, it won't catch return type mismatches at runtime.
     # The best we can do is assert(that logically this shouldn't conform.
     # Protocol checks structural attributes, not runtime return type correctness.

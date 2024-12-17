@@ -26,12 +26,6 @@ class MockState(AbstractState):
     def data(self) -> Dict[str, Any]:
         return self._data  # Return the actual dictionary reference
 
-    def on_enter(self) -> None:
-        pass
-
-    def on_exit(self) -> None:
-        pass
-
 
 class MockTransition(AbstractTransition):
     def __init__(
