@@ -62,7 +62,8 @@ def mock_async_component():
 
     class MockAction(AsyncAction):
         async def execute(self, event: AbstractEvent, state_data: Any) -> None:
-            pass
+            # Required by AsyncAction interface and to pass tests
+            pass  # NOSONAR
 
     return {"guard": MockGuard(), "action": MockAction()}
 
