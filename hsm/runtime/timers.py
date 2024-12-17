@@ -306,6 +306,14 @@ class AsyncTimer(BaseTimer):
         async with self._lock:
             self._handle_cancel(event_id)
 
+    async def shutdown(self) -> None:
+        """Shutdown the timer, cancelling any pending timeouts."""
+        async with self._lock:
+            if self._timer:
+                self._timer.cancel()
+            self._cleanup()
+            self._state = TimerState.IDLE
+
 
 class TimerManager:
     """

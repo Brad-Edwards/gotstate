@@ -16,6 +16,7 @@ from typing import (
     Optional,
     Protocol,
     Set,
+    Type,
     TypeVar,
     runtime_checkable,
 )
@@ -30,13 +31,10 @@ from hsm.runtime.timers import AsyncTimer
 
 logger = logging.getLogger(__name__)
 
-# Type variable for generic async operations
 T = TypeVar("T")
 
 # Forward references
 if TYPE_CHECKING:
-    from typing import Type
-
     AsyncTransitionType = Type["AsyncTransition"]
     AsyncStateType = Type["AsyncState"]
 
@@ -52,6 +50,12 @@ class AsyncLockManager:
         lock = self._locks.get(name) or self._locks.setdefault(name, asyncio.Lock())
         async with lock:
             return await operation()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
 class AsyncHSMError(HSMError):
@@ -162,7 +166,11 @@ class AsyncState(AsyncHSMBase, AbstractState):
     @property
     def data(self) -> Dict[str, Any]:
         """Access state data dictionary."""
-        return self._data.copy()
+        return self._data.copy()  # Return a copy to maintain immutability
+
+    def set_data(self, key: str, value: Any) -> None:
+        """Safely set a value in the state data."""
+        self._data[key] = value
 
     def get_id(self) -> StateID:
         """Get state identifier."""
@@ -215,17 +223,23 @@ class AsyncStateMachine(AsyncHSMBase):
         max_queue_size: Optional[int] = None,
     ):
         """Initialize async state machine."""
-        if not states or not transitions or not initial_state:
+        if not states or transitions is None or not initial_state:
             raise ValueError("States, transitions, and initial state are required")
         if initial_state not in states:
             raise ValueError("Initial state must be in states list")
 
         self._states = {state.get_id(): state for state in states}
-        self._transitions = transitions
+        self._transitions = transitions  # Keep the original list, but allow it to be empty
         self._initial_state = initial_state
         self._current_state: Optional[AsyncState] = None
         self._event_queue = AsyncEventQueue(max_size=max_queue_size)
-        self._timer = AsyncTimer()
+
+        # Initialize timer with default callback
+        def timer_callback(timer_id: str, event: AbstractEvent) -> None:
+            if self._running and self._current_state:
+                asyncio.create_task(self.process_event(event))
+
+        self._timer = AsyncTimer("state_machine_timer", timer_callback)
         self._running = False
         self._state_changes: Set[StateID] = set()
         self._state_change_callbacks: List[Callable[[StateID, StateID], None]] = []
@@ -254,8 +268,10 @@ class AsyncStateMachine(AsyncHSMBase):
         try:
             if self._current_state:
                 await self._current_state.on_exit()
-            await self._event_queue.shutdown()
+            await self._event_queue.shutdown()  # Use shutdown instead of clear
             await self._timer.shutdown()
+            # Wait for event processing loop to complete
+            await asyncio.sleep(0)  # Give the event loop a chance to finish
         except Exception as e:
             logger.error("Error during state machine shutdown: %s", str(e))
             raise AsyncHSMError(f"Failed to stop state machine: {str(e)}") from e
@@ -275,20 +291,26 @@ class AsyncStateMachine(AsyncHSMBase):
         while self._running:
             try:
                 event = await self._event_queue.dequeue()
-                await self._lock_manager.with_lock("processing", lambda e=event: self._handle_event(e))
+                if event:  # Check if we got a valid event
+                    await self._lock_manager.with_lock("processing", lambda e=event: self._handle_event(e))
+            except EventQueueError:
+                # Queue being empty is a normal condition, just continue
+                await asyncio.sleep(0)  # Yield control to other tasks
             except Exception as e:
-                logger.error("Error processing event: %s", str(e))
-                if not isinstance(e, EventQueueError):
-                    logger.exception("Unexpected error in event processing loop")
+                logger.error("Unexpected error in event processing loop: %s", str(e))
+                logger.exception("Stack trace:")
+                await asyncio.sleep(0)  # Yield control to other tasks
 
     async def _handle_event(self, event: AbstractEvent) -> None:
         """Handle a single event."""
         if not self._current_state:
             return
 
-        async with self._lock_manager.with_lock("transition", lambda: self._find_valid_transition(event)) as transition:
-            if transition:
-                await self._execute_transition(transition, event)
+        # Get the transition first
+        transition = await self._lock_manager.with_lock("transition", lambda: self._find_valid_transition(event))
+
+        if transition:
+            await self._execute_transition(transition, event)
 
     async def _find_valid_transition(self, event: AbstractEvent) -> Optional[AsyncTransition]:
         """Find the highest priority valid transition for the current event."""
@@ -348,7 +370,7 @@ class AsyncStateMachine(AsyncHSMBase):
 
         self._current_state = None
         self._state_changes.clear()
-        await self._event_queue.clear()
+        await self._event_queue.shutdown()  # Use shutdown instead of clear
         await self.start()
 
     async def __aenter__(self) -> "AsyncStateMachine":
@@ -365,8 +387,8 @@ class AsyncStateMachine(AsyncHSMBase):
         """Validate state machine configuration."""
         if not self._states:
             raise ValueError("No states defined")
-        if not self._transitions:
-            raise ValueError("No transitions defined")
+        if self._transitions is None:  # Only check if transitions is None, allow empty list
+            raise ValueError("Transitions list cannot be None")
 
         # Validate all transitions reference valid states
         for transition in self._transitions:
@@ -375,13 +397,13 @@ class AsyncStateMachine(AsyncHSMBase):
             if transition.get_target_state_id() not in self._states:
                 raise ValueError(f"Invalid target state: {transition.get_target_state_id()}")
 
-    def get_debug_info(self) -> Dict[str, Any]:
+    async def get_debug_info(self) -> Dict[str, Any]:
         """Get debug information about the state machine."""
         return {
             "current_state": self._current_state.get_id() if self._current_state else None,
             "running": self._running,
             "state_changes": list(self._state_changes),
-            "queue_size": self._event_queue.size(),
+            "queue_size": await self._event_queue.size(),
             "states": list(self._states.keys()),
             "transitions": [
                 {"source": t.get_source_state_id(), "target": t.get_target_state_id(), "priority": t.get_priority()}
