@@ -3,11 +3,12 @@
 # Licensed under the MIT License - see LICENSE file for details
 
 import asyncio
+import inspect
 import logging
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, Generator, Optional
+from typing import Any, Callable, Dict, Generator, Optional, Union
 
 import pytest
 
@@ -28,27 +29,15 @@ from hsm.runtime.event_queue import (
 
 
 @pytest.fixture
-def event_queue() -> EventQueue:
-    """Fixture providing a standard event queue for testing."""
-    return EventQueue(max_size=5)
-
-
-@pytest.fixture
-def async_event_queue() -> AsyncEventQueue:
-    """Fixture providing an async event queue for testing."""
-    return AsyncEventQueue(max_size=5)
-
-
-@pytest.fixture
-def test_event() -> Event:
-    """Fixture providing a standard test event."""
-    return Event("test_event", payload={"test": "data"}, priority=1)
-
-
-@pytest.fixture
 def queue_stats() -> QueueStats:
     """Fixture providing clean queue statistics."""
     return QueueStats()
+
+
+@pytest.fixture
+def queue_types():
+    """Fixture providing both queue types for parametrized tests."""
+    return [(EventQueue, False), (AsyncEventQueue, True)]
 
 
 # -----------------------------------------------------------------------------
@@ -135,321 +124,230 @@ def test_prioritized_event_equality() -> None:
 
 
 # -----------------------------------------------------------------------------
-# SYNCHRONOUS QUEUE TESTS
+# PARAMETRIZED TESTS
 # -----------------------------------------------------------------------------
 
 
-def test_event_queue_initialization() -> None:
-    """Test EventQueue initialization with various parameters."""
-    queue = EventQueue(max_size=5)
-    assert queue.size() == 0
-    assert not queue.is_full()
-    assert queue.is_empty()
+@pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
+@pytest.mark.asyncio
+async def test_queue_initialization(queue_class, is_async):
+    """Test queue initialization for both sync and async queues."""
+    queue = queue_class(max_size=5)
+
+    size = await async_wrapper(queue.size) if is_async else queue.size()
+    is_empty = await async_wrapper(queue.is_empty) if is_async else queue.is_empty()
+
+    assert size == 0
+    assert is_empty
 
     with pytest.raises(ValueError):
-        EventQueue(max_size=0)
+        queue_class(max_size=0)
 
     with pytest.raises(ValueError):
-        EventQueue(max_size=-1)
+        queue_class(max_size=-1)
 
 
-def test_event_queue_enqueue_dequeue(event_queue: EventQueue, test_event: Event) -> None:
-    """Test basic enqueue and dequeue operations."""
-    event_queue.enqueue(test_event)
-    assert not event_queue.is_empty()
-    assert event_queue.size() == 1
+@pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
+@pytest.mark.asyncio
+async def test_queue_basic_operations(queue_class, is_async):
+    """Test basic operations for both sync and async queues."""
+    queue = queue_class(max_size=5)
+    test_event = Event("test_event", payload={"test": "data"}, priority=1)
 
-    dequeued = event_queue.dequeue()
+    # Test enqueue
+    if is_async:
+        await queue.enqueue(test_event)
+        assert not await queue.is_empty()
+        assert await queue.size() == 1
+    else:
+        queue.enqueue(test_event)
+        assert not queue.is_empty()
+        assert queue.size() == 1
+
+    # Test dequeue
+    dequeued = await async_wrapper(queue.dequeue) if is_async else queue.dequeue()
     assert dequeued.get_id() == test_event.get_id()
-    assert event_queue.is_empty()
+    assert await async_wrapper(queue.is_empty) if is_async else queue.is_empty()
 
 
-def test_event_queue_priority_ordering(event_queue: EventQueue) -> None:
-    """Test that events are dequeued in priority order."""
-    event1 = Event("event1", priority=2)
-    event2 = Event("event2", priority=1)
-    event3 = Event("event3", priority=3)
+@pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
+@pytest.mark.asyncio
+async def test_queue_priority_ordering(queue_class, is_async):
+    """Test priority ordering for both sync and async queues."""
+    queue = queue_class(max_size=5)
+    events = [Event("event1", priority=2), Event("event2", priority=1), Event("event3", priority=3)]
 
-    event_queue.enqueue(event1)
-    event_queue.enqueue(event2)
-    event_queue.enqueue(event3)
-
-    assert event_queue.dequeue().get_id() == "event2"  # Priority 1
-    assert event_queue.dequeue().get_id() == "event1"  # Priority 2
-    assert event_queue.dequeue().get_id() == "event3"  # Priority 3
-
-
-def test_event_queue_full_error(event_queue: EventQueue) -> None:
-    """Test queue full error handling."""
-    for i in range(5):
-        event_queue.enqueue(Event(f"event{i}"))
-
-    with pytest.raises(QueueFullError) as exc_info:
-        event_queue.enqueue(Event("overflow"))
-    assert exc_info.value.max_size == 5
-    assert exc_info.value.current_size == 5
-
-
-def test_event_queue_empty_error(event_queue: EventQueue) -> None:
-    """Test queue empty error handling."""
-    with pytest.raises(QueueEmptyError):
-        event_queue.dequeue()
-
-
-def test_event_queue_shutdown(event_queue: EventQueue, test_event: Event) -> None:
-    """Test queue shutdown behavior."""
-    event_queue.enqueue(test_event)
-    event_queue.shutdown()
-
-    with pytest.raises(EventQueueError):
-        event_queue.enqueue(test_event)
-
-    with pytest.raises(EventQueueError):
-        event_queue.dequeue()
-
-
-def test_event_queue_clear(event_queue: EventQueue) -> None:
-    """Test queue clear operation."""
-    for i in range(3):
-        event_queue.enqueue(Event(f"event{i}"))
-
-    event_queue.clear()
-    assert event_queue.is_empty()
-    assert event_queue.size() == 0
-
-
-def test_event_queue_peek(event_queue: EventQueue, test_event: Event) -> None:
-    """Test queue peek operation."""
-    event_queue.enqueue(test_event)
-
-    peeked = event_queue.peek()
-    assert peeked is not None
-    assert peeked.get_id() == test_event.get_id()
-    assert event_queue.size() == 1  # Peek shouldn't remove the event
-
-
-def test_event_queue_try_dequeue(event_queue: EventQueue, test_event: Event) -> None:
-    """Test try_dequeue operation with timeout."""
-    assert event_queue.try_dequeue(timeout=0.1) is None
-
-    event_queue.enqueue(test_event)
-    dequeued = event_queue.try_dequeue(timeout=0.1)
-    assert dequeued is not None
-    assert dequeued.get_id() == test_event.get_id()
-
-
-def test_event_queue_atomic_operations(event_queue: EventQueue) -> None:
-    """Test that queue operations maintain atomicity."""
-    events = [Event(f"event{i}", priority=i) for i in range(3)]
-
-    # Test atomic enqueue
     for event in events:
-        event_queue.enqueue(event)
+        if is_async:
+            await queue.enqueue(event)
+        else:
+            queue.enqueue(event)
 
-    # Verify queue state
-    assert event_queue.size() == 3
-    assert not event_queue.is_full()
-
-    # Test atomic dequeue
-    dequeued_events = []
-    while not event_queue.is_empty():
-        dequeued_events.append(event_queue.dequeue())
-
-    # Verify ordering
-    assert len(dequeued_events) == 3
-    assert [e.get_priority() for e in dequeued_events] == [0, 1, 2]
+    # Verify priority ordering
+    expected_order = ["event2", "event1", "event3"]
+    for expected_id in expected_order:
+        dequeued = await async_wrapper(queue.dequeue) if is_async else queue.dequeue()
+        assert dequeued.get_id() == expected_id
 
 
-# -----------------------------------------------------------------------------
-# ASYNCHRONOUS QUEUE TESTS
-# -----------------------------------------------------------------------------
+async def async_wrapper(func: Callable, *args, **kwargs):
+    """Helper to handle both async and sync functions."""
+    if inspect.iscoroutinefunction(func):
+        return await func(*args, **kwargs)
+    return func(*args, **kwargs)
 
 
+async def queue_op(queue, operation: str, *args, is_async=False, **kwargs):
+    """Helper for queue operations that handles both sync and async cases."""
+    func = getattr(queue, operation)
+    if is_async:
+        return await func(*args, **kwargs)
+    return func(*args, **kwargs)
+
+
+@pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
 @pytest.mark.asyncio
-async def test_async_event_queue_initialization() -> None:
-    """Test AsyncEventQueue initialization."""
-    queue = AsyncEventQueue(max_size=5)
-    assert await queue.size() == 0
-    assert await queue.is_empty()
+async def test_queue_error_conditions(queue_class, is_async):
+    """Test queue error conditions for both sync and async queues."""
+    queue = queue_class(max_size=2)
+    test_event = Event("test_event")
 
-    with pytest.raises(ValueError):
-        AsyncEventQueue(max_size=0)
-
-
-@pytest.mark.asyncio
-async def test_async_event_queue_enqueue_dequeue(async_event_queue: AsyncEventQueue, test_event: Event) -> None:
-    """Test async enqueue and dequeue operations."""
-    await async_event_queue.enqueue(test_event)
-    assert not await async_event_queue.is_empty()
-    assert await async_event_queue.size() == 1
-
-    dequeued = await async_event_queue.dequeue()
-    assert dequeued.get_id() == test_event.get_id()
-    assert await async_event_queue.is_empty()
-
-
-@pytest.mark.asyncio
-async def test_async_event_queue_priority_ordering(async_event_queue: AsyncEventQueue) -> None:
-    """Test async queue priority ordering."""
-    event1 = Event("event1", priority=2)
-    event2 = Event("event2", priority=1)
-    event3 = Event("event3", priority=3)
-
-    await async_event_queue.enqueue(event1)
-    await async_event_queue.enqueue(event2)
-    await async_event_queue.enqueue(event3)
-
-    assert (await async_event_queue.dequeue()).get_id() == "event2"  # Priority 1
-    assert (await async_event_queue.dequeue()).get_id() == "event1"  # Priority 2
-    assert (await async_event_queue.dequeue()).get_id() == "event3"  # Priority 3
-
-
-@pytest.mark.asyncio
-async def test_async_event_queue_full_error(async_event_queue: AsyncEventQueue) -> None:
-    """Test async queue full error handling."""
-    for i in range(5):
-        await async_event_queue.enqueue(Event(f"event{i}"))
+    # Test queue full error
+    await queue_op(queue, "enqueue", test_event, is_async=is_async)
+    await queue_op(queue, "enqueue", test_event, is_async=is_async)
 
     with pytest.raises(QueueFullError) as exc_info:
-        await async_event_queue.enqueue(Event("overflow"))
-    assert exc_info.value.max_size == 5
-    assert exc_info.value.current_size == 5
+        await queue_op(queue, "enqueue", test_event, is_async=is_async)
+    assert exc_info.value.max_size == 2
+    assert exc_info.value.current_size == 2
 
-
-@pytest.mark.asyncio
-async def test_async_event_queue_empty_error(async_event_queue: AsyncEventQueue) -> None:
-    """Test async queue empty error handling."""
+    # Test queue empty error
+    queue = queue_class(max_size=2)  # Fresh queue
     with pytest.raises(QueueEmptyError):
-        await async_event_queue.dequeue()
+        await queue_op(queue, "dequeue", is_async=is_async)
 
 
+@pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
 @pytest.mark.asyncio
-async def test_async_event_queue_shutdown(async_event_queue: AsyncEventQueue, test_event: Event) -> None:
-    """Test async queue shutdown behavior."""
-    await async_event_queue.enqueue(test_event)
-    await async_event_queue.shutdown()
+async def test_queue_shutdown_behavior(queue_class, is_async):
+    """Test shutdown behavior for both sync and async queues."""
+    queue = queue_class(max_size=2)
+    test_event = Event("test_event")
+
+    await queue_op(queue, "enqueue", test_event, is_async=is_async)
+    await queue_op(queue, "shutdown", is_async=is_async)
 
     with pytest.raises(EventQueueError):
-        await async_event_queue.enqueue(test_event)
+        await queue_op(queue, "enqueue", test_event, is_async=is_async)
 
     with pytest.raises(EventQueueError):
-        await async_event_queue.dequeue()
+        await queue_op(queue, "dequeue", is_async=is_async)
 
 
+@pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
 @pytest.mark.asyncio
-async def test_async_event_queue_try_dequeue(async_event_queue: AsyncEventQueue, test_event: Event) -> None:
-    """Test async try_dequeue operation."""
-    assert await async_event_queue.try_dequeue(timeout=0.1) is None
+async def test_queue_try_dequeue(queue_class, is_async):
+    """Test try_dequeue behavior for both sync and async queues."""
+    queue = queue_class(max_size=2)
+    test_event = Event("test_event")
 
-    await async_event_queue.enqueue(test_event)
-    dequeued = await async_event_queue.try_dequeue(timeout=0.1)
+    # Try dequeue on empty queue
+    result = await queue_op(queue, "try_dequeue", timeout=0.1, is_async=is_async)
+    assert result is None
+
+    # Try dequeue with event
+    await queue_op(queue, "enqueue", test_event, is_async=is_async)
+    dequeued = await queue_op(queue, "try_dequeue", timeout=0.1, is_async=is_async)
     assert dequeued is not None
     assert dequeued.get_id() == test_event.get_id()
 
 
-# -----------------------------------------------------------------------------
-# CONCURRENCY TESTS
-# -----------------------------------------------------------------------------
-
-
-def test_event_queue_thread_safety(event_queue: EventQueue) -> None:
-    """Test thread safety of EventQueue operations."""
-
-    def producer() -> None:
-        for i in range(50):
-            try:
-                event_queue.enqueue(Event(f"event{i}", priority=i % 3))
-                time.sleep(0.001)
-            except QueueFullError:
-                pass
-
-    def consumer() -> None:
-        for _ in range(50):
-            try:
-                event_queue.dequeue()
-                time.sleep(0.001)
-            except QueueEmptyError:
-                pass
-
-    threads = [
-        threading.Thread(target=producer),
-        threading.Thread(target=producer),
-        threading.Thread(target=consumer),
-        threading.Thread(target=consumer),
-    ]
-
-    for thread in threads:
-        thread.start()
-
-    for thread in threads:
-        thread.join()
-
-    # Queue should be in a consistent state
-    assert event_queue.size() >= 0
-    assert event_queue.size() <= event_queue._max_size
-
-
+@pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
 @pytest.mark.asyncio
-async def test_async_event_queue_concurrency(async_event_queue: AsyncEventQueue) -> None:
-    """Test concurrency of AsyncEventQueue operations."""
-
-    async def producer() -> None:
-        for i in range(50):
-            try:
-                await async_event_queue.enqueue(Event(f"event{i}", priority=i % 3))
-                await asyncio.sleep(0.001)
-            except QueueFullError:
-                pass
-
-    async def consumer() -> None:
-        for _ in range(50):
-            try:
-                await async_event_queue.dequeue()
-                await asyncio.sleep(0.001)
-            except QueueEmptyError:
-                pass
-
-    tasks = [
-        asyncio.create_task(producer()),
-        asyncio.create_task(producer()),
-        asyncio.create_task(consumer()),
-        asyncio.create_task(consumer()),
-    ]
-
-    await asyncio.gather(*tasks)
-
-    # Queue should be in a consistent state
-    assert await async_event_queue.size() >= 0
-    assert await async_event_queue.size() <= async_event_queue._max_size
-
-
-# -----------------------------------------------------------------------------
-# LOGGING TESTS
-# -----------------------------------------------------------------------------
-
-
-def test_event_queue_logging(caplog: Any, event_queue: EventQueue, test_event: Event) -> None:
-    """Test that queue operations are properly logged."""
+async def test_queue_logging(queue_class, is_async, caplog: Any):
+    """Test logging behavior for both sync and async queues."""
+    queue = queue_class(max_size=2)
+    test_event = Event("test_event")
     caplog.set_level(logging.DEBUG)
 
-    event_queue.enqueue(test_event)
+    await queue_op(queue, "enqueue", test_event, is_async=is_async)
     assert "Enqueued event" in caplog.text
     assert test_event.get_id() in caplog.text
 
-    event_queue.dequeue()
+    await queue_op(queue, "dequeue", is_async=is_async)
     assert "Dequeued event" in caplog.text
     assert "wait_time" in caplog.text
 
 
+# Replace the separate concurrency tests with a parametrized version
+@pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
 @pytest.mark.asyncio
-async def test_async_event_queue_logging(caplog: Any, async_event_queue: AsyncEventQueue, test_event: Event) -> None:
-    """Test that async queue operations are properly logged."""
-    caplog.set_level(logging.DEBUG)
+async def test_queue_concurrency(queue_class, is_async):
+    """Test concurrency for both sync and async queues."""
+    queue = queue_class(max_size=5)
 
-    await async_event_queue.enqueue(test_event)
-    assert "Enqueued event" in caplog.text
-    assert test_event.get_id() in caplog.text
+    if is_async:
 
-    await async_event_queue.dequeue()
-    assert "Dequeued event" in caplog.text
-    assert "wait_time" in caplog.text
+        async def producer() -> None:
+            for i in range(50):
+                try:
+                    await queue.enqueue(Event(f"event{i}", priority=i % 3))
+                    await asyncio.sleep(0.001)
+                except QueueFullError:
+                    pass
+
+        async def consumer() -> None:
+            for _ in range(50):
+                try:
+                    await queue.dequeue()
+                    await asyncio.sleep(0.001)
+                except QueueEmptyError:
+                    pass
+
+        tasks = [
+            asyncio.create_task(producer()),
+            asyncio.create_task(producer()),
+            asyncio.create_task(consumer()),
+            asyncio.create_task(consumer()),
+        ]
+
+        await asyncio.gather(*tasks)
+
+        # Queue should be in a consistent state
+        assert await queue.size() >= 0
+        assert await queue.size() <= queue._max_size
+
+    else:
+
+        def producer() -> None:
+            for i in range(50):
+                try:
+                    queue.enqueue(Event(f"event{i}", priority=i % 3))
+                    time.sleep(0.001)
+                except QueueFullError:
+                    pass
+
+        def consumer() -> None:
+            for _ in range(50):
+                try:
+                    queue.dequeue()
+                    time.sleep(0.001)
+                except QueueEmptyError:
+                    pass
+
+        threads = [
+            threading.Thread(target=producer),
+            threading.Thread(target=producer),
+            threading.Thread(target=consumer),
+            threading.Thread(target=consumer),
+        ]
+
+        for thread in threads:
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        # Queue should be in a consistent state
+        assert queue.size() >= 0
+        assert queue.size() <= queue._max_size
