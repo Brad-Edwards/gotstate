@@ -227,13 +227,17 @@ class AsyncStateLock:
             LockAcquisitionError: If lock cannot be acquired and blocking is True
         """
         try:
+            timeout_value = None
+            if not blocking:
+                timeout_value = 0
+            elif timeout is not None:
+                timeout_value = timeout
+
             if blocking and timeout is None:
                 await self._lock.acquire()
                 success = True
             else:
-                success = await asyncio.wait_for(
-                    self._lock.acquire(), timeout=timeout if timeout else 0 if not blocking else None
-                )
+                success = await asyncio.wait_for(self._lock.acquire(), timeout=timeout_value)
 
             if success:
                 self._owner = threading.get_ident()
