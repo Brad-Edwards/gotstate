@@ -288,35 +288,42 @@ async def test_async_queue_concurrent_operations(queue_class, is_async):
         pytest.skip("This test is for async queues only")
 
     queue = queue_class(max_size=5)
-
-    async def producer() -> None:
-        for i in range(50):
-            try:
-                await queue.enqueue(Event(f"event{i}", priority=i % 3))
-                await asyncio.sleep(0.001)
-            except QueueFullError:
-                pass
-
-    async def consumer() -> None:
-        for _ in range(50):
-            try:
-                await queue.dequeue()
-                await asyncio.sleep(0.001)
-            except QueueEmptyError:
-                pass
-
-    tasks = [
-        asyncio.create_task(producer()),
-        asyncio.create_task(producer()),
-        asyncio.create_task(consumer()),
-        asyncio.create_task(consumer()),
-    ]
-
+    tasks = await create_producer_consumer_tasks(queue)
     await asyncio.gather(*tasks)
 
     # Queue should be in a consistent state
     assert await queue.size() >= 0
     assert await queue.size() <= queue._max_size
+
+
+async def create_producer_consumer_tasks(queue):
+    """Create producer and consumer tasks for async queue testing."""
+    return [
+        asyncio.create_task(async_producer(queue)),
+        asyncio.create_task(async_producer(queue)),
+        asyncio.create_task(async_consumer(queue)),
+        asyncio.create_task(async_consumer(queue)),
+    ]
+
+
+async def async_producer(queue) -> None:
+    """Async producer function for queue testing."""
+    for i in range(50):
+        try:
+            await queue.enqueue(Event(f"event{i}", priority=i % 3))
+            await asyncio.sleep(0.001)
+        except QueueFullError:
+            pass
+
+
+async def async_consumer(queue) -> None:
+    """Async consumer function for queue testing."""
+    for _ in range(50):
+        try:
+            await queue.dequeue()
+            await asyncio.sleep(0.001)
+        except QueueEmptyError:
+            pass
 
 
 @pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
@@ -326,29 +333,7 @@ def test_sync_queue_concurrent_operations(queue_class, is_async):
         pytest.skip("This test is for sync queues only")
 
     queue = queue_class(max_size=5)
-
-    def producer() -> None:
-        for i in range(50):
-            try:
-                queue.enqueue(Event(f"event{i}", priority=i % 3))
-                time.sleep(0.001)
-            except QueueFullError:
-                pass
-
-    def consumer() -> None:
-        for _ in range(50):
-            try:
-                queue.dequeue()
-                time.sleep(0.001)
-            except QueueEmptyError:
-                pass
-
-    threads = [
-        threading.Thread(target=producer),
-        threading.Thread(target=producer),
-        threading.Thread(target=consumer),
-        threading.Thread(target=consumer),
-    ]
+    threads = create_producer_consumer_threads(queue)
 
     for thread in threads:
         thread.start()
@@ -361,46 +346,99 @@ def test_sync_queue_concurrent_operations(queue_class, is_async):
     assert queue.size() <= queue._max_size
 
 
+def create_producer_consumer_threads(queue):
+    """Create producer and consumer threads for sync queue testing."""
+    return [
+        threading.Thread(target=sync_producer, args=(queue,)),
+        threading.Thread(target=sync_producer, args=(queue,)),
+        threading.Thread(target=sync_consumer, args=(queue,)),
+        threading.Thread(target=sync_consumer, args=(queue,)),
+    ]
+
+
+def sync_producer(queue) -> None:
+    """Sync producer function for queue testing."""
+    for i in range(50):
+        try:
+            queue.enqueue(Event(f"event{i}", priority=i % 3))
+            time.sleep(0.001)
+        except QueueFullError:
+            pass
+
+
+def sync_consumer(queue) -> None:
+    """Sync consumer function for queue testing."""
+    for _ in range(50):
+        try:
+            queue.dequeue()
+            time.sleep(0.001)
+        except QueueEmptyError:
+            pass
+
+
 @pytest.mark.parametrize("queue_class,is_async", [(EventQueue, False), (AsyncEventQueue, True)])
 @pytest.mark.asyncio
 async def test_queue_concurrent_stress(queue_class, is_async):
     """Test queue behavior under concurrent stress with rapid enqueue/dequeue."""
     queue = queue_class(max_size=5)
-    operations_completed = 0
-
-    async def worker() -> None:
-        nonlocal operations_completed
-        for _ in range(20):
-            try:
-                # 50% chance to enqueue, no security risk in a test, bad RNG is fine
-                if random.random() < 0.5:  # NOSONAR
-                    event = Event("stress_test", priority=random.randint(1, 3))  # NOSONAR
-                    if is_async:
-                        await queue.enqueue(event)
-                    else:
-                        queue.enqueue(event)
-                else:  # 50% chance to dequeue
-                    if is_async:
-                        await queue.try_dequeue(timeout=0.001)
-                    else:
-                        queue.try_dequeue(timeout=0.001)
-                operations_completed += 1
-                await asyncio.sleep(0.001) if is_async else time.sleep(0.001)
-            except (QueueFullError, QueueEmptyError):
-                continue
+    stats = {"operations_completed": 0}
 
     if is_async:
-        workers = [asyncio.create_task(worker()) for _ in range(4)]
-        await asyncio.gather(*workers)
+        await run_async_stress_test(queue, stats)
     else:
-        threads = [threading.Thread(target=lambda: asyncio.run(worker())) for _ in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        run_sync_stress_test(queue, stats)
 
     # Verify the test did meaningful work
-    assert operations_completed > 0
+    assert stats["operations_completed"] > 0
     # Verify queue remains in valid state
     size = await queue.size() if is_async else queue.size()
     assert 0 <= size <= queue._max_size
+
+
+async def run_async_stress_test(queue, stats):
+    """Run stress test with async workers."""
+    workers = [asyncio.create_task(stress_worker(queue, stats, is_async=True)) for _ in range(4)]
+    await asyncio.gather(*workers)
+
+
+def run_sync_stress_test(queue, stats):
+    """Run stress test with sync workers."""
+    threads = [
+        threading.Thread(target=lambda: asyncio.run(stress_worker(queue, stats, is_async=False))) for _ in range(4)
+    ]
+
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+
+async def stress_worker(queue, stats: dict, is_async: bool) -> None:
+    """Worker function for stress testing the queue."""
+    for _ in range(20):
+        try:
+            if random.random() < 0.5:  # NOSONAR
+                await handle_enqueue_operation(queue, is_async)
+            else:
+                await handle_dequeue_operation(queue, is_async)
+            stats["operations_completed"] += 1
+            await asyncio.sleep(0.001) if is_async else time.sleep(0.001)
+        except (QueueFullError, QueueEmptyError):
+            continue
+
+
+async def handle_enqueue_operation(queue, is_async: bool):
+    """Handle enqueue operation for stress testing."""
+    event = Event("stress_test", priority=random.randint(1, 3))  # NOSONAR
+    if is_async:
+        await queue.enqueue(event)
+    else:
+        queue.enqueue(event)
+
+
+async def handle_dequeue_operation(queue, is_async: bool):
+    """Handle dequeue operation for stress testing."""
+    if is_async:
+        await queue.try_dequeue(timeout=0.001)
+    else:
+        queue.try_dequeue(timeout=0.001)
