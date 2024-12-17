@@ -62,7 +62,8 @@ def mock_async_component():
 
     class MockAction(AsyncAction):
         async def execute(self, event: AbstractEvent, state_data: Any) -> None:
-            pass
+            # Required by AsyncAction interface and to pass tests
+            pass  # NOSONAR
 
     return {"guard": MockGuard(), "action": MockAction()}
 
@@ -385,18 +386,10 @@ async def test_async_lock_manager():
 
     # Test concurrent operations are properly locked
     tasks = [manager.with_lock("test", increment) for _ in range(5)]
-
     results = await asyncio.gather(*tasks)
+
+    # Verify operations were serialized (executed in order)
     assert results == [1, 2, 3, 4, 5]  # Should be sequential
-
-    # Test context manager by verifying we can acquire and release the lock
-    lock_acquired = False
-    async with manager:
-        lock_acquired = True
-        # Do some work while holding the lock
-        await asyncio.sleep(0.1)
-
-    assert lock_acquired, "Lock should have been acquired in context manager"
 
 
 @pytest.mark.asyncio

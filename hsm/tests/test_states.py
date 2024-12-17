@@ -364,7 +364,7 @@ def test_composite_state_history_validation():
 
     # Set None as last active
     with pytest.raises(ValueError, match="state must be a substate"):
-        composite.set_last_active(None)  # type: ignore
+        composite.set_last_active(None)  # type: ignore # NOSONAR
 
 
 def test_composite_state_empty_validation():

@@ -8,7 +8,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Callable, Dict, List, Optional, Set, Type, TypeVar
+from typing import Any, Callable, Dict, Generator, List, Optional, Set, Type, TypeVar
 
 from hsm.core.errors import HSMError
 from hsm.interfaces.abc import AbstractEvent, AbstractState, AbstractTransition
@@ -19,6 +19,8 @@ from hsm.runtime.timers import Timer
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+EXECUTOR_IS_NOT_RUNNING = "Executor is not running"
+NOT_IDLE_ERROR_MSG = "Executor is not in IDLE state"
 
 
 class ExecutorError(HSMError):
@@ -213,7 +215,7 @@ class Executor:
             ExecutorError: If executor is already running
         """
         if self._context.state != ExecutorState.IDLE:
-            raise ExecutorError("Executor is not in IDLE state")
+            raise ExecutorError(NOT_IDLE_ERROR_MSG)
 
         try:
             self._current_state = self._initial_state
@@ -235,7 +237,7 @@ class Executor:
             ExecutorError: If executor is not running or stop operation times out
         """
         if self._context.state != ExecutorState.RUNNING:
-            raise ExecutorError("Executor is not running")
+            raise ExecutorError(EXECUTOR_IS_NOT_RUNNING)
 
         self._context.state = ExecutorState.STOPPING
         stop_start_time = time.time()
@@ -291,7 +293,7 @@ class Executor:
             EventQueueError: If event queue is full
         """
         if self._context.state != ExecutorState.RUNNING:
-            raise ExecutorError("Executor is not running")
+            raise ExecutorError(EXECUTOR_IS_NOT_RUNNING)
 
         try:
             self._event_queue.enqueue(event)
@@ -406,7 +408,7 @@ class Executor:
             )
 
     @contextmanager
-    def pause(self) -> None:
+    def pause(self) -> Generator[None, None, None]:
         """
         Temporarily pause event processing.
 
@@ -419,7 +421,7 @@ class Executor:
             # Event processing resumes
         """
         if self._context.state != ExecutorState.RUNNING:
-            raise ExecutorError("Executor is not running")
+            raise ExecutorError(EXECUTOR_IS_NOT_RUNNING)
 
         try:
             self._context.state = ExecutorState.PAUSED

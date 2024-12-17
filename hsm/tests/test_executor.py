@@ -28,10 +28,12 @@ def mock_state() -> State:
 
     class TestState(State):
         def on_enter(self) -> None:
-            pass
+            # Request by some tests
+            pass  # NOSONAR
 
         def on_exit(self) -> None:
-            pass
+            # Request by some tests
+            pass  # NOSONAR
 
     return TestState("test_state")
 
@@ -42,10 +44,12 @@ def mock_states() -> List[State]:
 
     class TestState(State):
         def on_enter(self) -> None:
-            pass
+            # Request by some tests
+            pass  # NOSONAR
 
         def on_exit(self) -> None:
-            pass
+            # Request by some tests
+            pass  # NOSONAR
 
     return [
         TestState("state1"),
@@ -334,7 +338,8 @@ def test_pause_when_not_running(executor: Executor) -> None:
     """Test pausing when executor is not running."""
     with pytest.raises(ExecutorError, match="Executor is not running"):
         with executor.pause():
-            pass
+            # We never reach this point because an error is raised
+            pass  # NOSONAR
 
 
 # -----------------------------------------------------------------------------
