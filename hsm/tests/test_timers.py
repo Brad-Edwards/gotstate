@@ -449,9 +449,6 @@ async def test_async_timer_invalid_operations(async_timer: AsyncTimer, event: Ev
 def test_timer_manager_concurrent_timer_creation(timer_manager: TimerManager) -> None:
     """Test concurrent timer creation in TimerManager."""
 
-    def callback(timer_id: str, evt: Event) -> None:
-        pass
-
     def create_timer(idx: int) -> None:
         try:
             timer_manager.create_timer(f"timer_{idx}", callback)

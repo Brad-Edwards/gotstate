@@ -25,7 +25,7 @@ from hsm.interfaces.abc import AbstractEvent, AbstractState, AbstractTransition
 
 
 @pytest.fixture
-def TestState() -> type:
+def StateFixture() -> type:
     """Fixture that returns a TestState class."""
 
     class _TestState(State):
@@ -44,9 +44,9 @@ def TestState() -> type:
 
 
 @pytest.fixture
-def basic_states(TestState) -> List[AbstractState]:
+def basic_states(StateFixture) -> List[AbstractState]:
     """Create a basic set of test states."""
-    return [TestState("state1"), TestState("state2"), TestState("state3")]
+    return [StateFixture("state1"), StateFixture("state2"), StateFixture("state3")]
 
 
 @pytest.fixture
@@ -72,18 +72,18 @@ def test_state_machine_init_empty_states() -> None:
         StateMachine([], [], None)
 
 
-def test_state_machine_init_empty_transitions(TestState) -> None:
+def test_state_machine_init_empty_transitions(StateFixture) -> None:
     """Test that initializing with empty transitions raises ValueError."""
-    states = [TestState("state1")]
+    states = [StateFixture("state1")]
     with pytest.raises(ValueError, match="Transitions list cannot be empty"):
         StateMachine(states, [], states[0])
 
 
-def test_state_machine_init_invalid_initial_state(TestState) -> None:
+def test_state_machine_init_invalid_initial_state(StateFixture) -> None:
     """Test that initializing with invalid initial state raises ValueError."""
-    states = [TestState("state1")]
+    states = [StateFixture("state1")]
     transitions = [Transition("state1", "state1")]
-    invalid_initial = TestState("state2")
+    invalid_initial = StateFixture("state2")
 
     with pytest.raises(ValueError, match="Initial state must be in states list"):
         StateMachine(states, transitions, invalid_initial)
