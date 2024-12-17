@@ -78,12 +78,7 @@ class MockLock(LockProtocol):
 
     def get_info(self) -> LockInfo:
         state = LockState.LOCKED if self._locked else LockState.UNLOCKED
-        return LockInfo(
-            id=self.id,
-            state=state,
-            owner=self._owner,
-            acquisition_time=self._acquisition_time
-        )
+        return LockInfo(id=self.id, state=state, owner=self._owner, acquisition_time=self._acquisition_time)
 
 
 # -----------------------------------------------------------------------------
@@ -158,38 +153,48 @@ def test_state_lock_context_manager(state_lock: StateLock) -> None:
 def test_state_lock_release_wrong_thread(state_lock: StateLock) -> None:
     """Test releasing lock from wrong thread."""
     state_lock.acquire()
-    
+
     def release_in_thread() -> None:
         with pytest.raises(LockReleaseError):
             state_lock.release()
-    
+
     thread = threading.Thread(target=release_in_thread)
     thread.start()
     thread.join()
-    
+
     state_lock.release()
 
 
 def test_state_lock_timeout(state_lock: StateLock) -> None:
     """Test lock acquisition with timeout."""
     state_lock.acquire()
-    
+
     def acquire_in_thread() -> None:
         with pytest.raises(LockAcquisitionError):
             state_lock.acquire(timeout=0.1)
-    
+
     thread = threading.Thread(target=acquire_in_thread)
     thread.start()
     thread.join()
-    
+
     state_lock.release()
 
 
-def test_state_lock_non_blocking(state_lock: StateLock) -> None:
-    """Test non-blocking lock acquisition."""
-    state_lock.acquire()
-    assert not state_lock.acquire(blocking=False)
-    state_lock.release()
+def test_state_lock_non_blocking() -> None:
+    """Test non-blocking lock acquisition with non-reentrant lock."""
+    lock = StateLock("test_lock", reentrant=False)
+    lock.acquire()
+    assert not lock.acquire(blocking=False)
+    lock.release()
+
+
+def test_state_lock_reentrant() -> None:
+    """Test reentrant lock acquisition."""
+    lock = StateLock("test_lock", reentrant=True)
+    lock.acquire()
+    assert lock.acquire(blocking=False)  # Should succeed
+    lock.release()
+    lock.release()
 
 
 # -----------------------------------------------------------------------------
@@ -232,10 +237,10 @@ async def test_async_lock_context_manager(async_lock: AsyncStateLock) -> None:
 async def test_async_lock_timeout(async_lock: AsyncStateLock) -> None:
     """Test async lock acquisition with timeout."""
     await async_lock.acquire()
-    
+
     with pytest.raises(LockAcquisitionError):
         await async_lock.acquire(timeout=0.1)
-    
+
     async_lock.release()
 
 
@@ -291,14 +296,14 @@ def test_lock_manager_get_all_locks(lock_manager: LockManager) -> None:
     """Test retrieving all managed locks."""
     lock1 = lock_manager.create_lock("lock1")
     lock2 = lock_manager.create_lock("lock2")
-    
+
     lock1.acquire()
     locks = lock_manager.get_all_locks()
-    
+
     assert len(locks) == 2
     assert locks["lock1"].state == LockState.LOCKED
     assert locks["lock2"].state == LockState.UNLOCKED
-    
+
     lock1.release()
 
 
@@ -326,7 +331,7 @@ def test_lock_protocol_compliance() -> None:
     """Test that mock lock implements LockProtocol correctly."""
     mock = MockLock("test")
     assert isinstance(mock, LockProtocol)
-    
+
     # Test protocol methods
     assert mock.acquire()
     assert mock.locked()
@@ -341,43 +346,37 @@ def test_lock_protocol_compliance() -> None:
 # -----------------------------------------------------------------------------
 def test_concurrent_lock_access(lock_manager: LockManager) -> None:
     """Test concurrent access to locks."""
+
     def worker(lock_id: str) -> None:
         lock = lock_manager.create_lock(f"worker_{lock_id}")
         for _ in range(10):
             with lock:
                 time.sleep(0.01)
 
-    threads = [
-        threading.Thread(target=worker, args=(str(i),))
-        for i in range(5)
-    ]
-    
+    threads = [threading.Thread(target=worker, args=(str(i),)) for i in range(5)]
+
     for t in threads:
         t.start()
     for t in threads:
         t.join()
 
     assert len(lock_manager.get_all_locks()) == 5
-    assert all(not lock.state == LockState.LOCKED 
-              for lock in lock_manager.get_all_locks().values())
+    assert all(not lock.state == LockState.LOCKED for lock in lock_manager.get_all_locks().values())
 
 
 @pytest.mark.asyncio
 async def test_concurrent_async_lock_access(lock_manager: LockManager) -> None:
     """Test concurrent access to async locks."""
+
     async def worker(lock_id: str) -> None:
         lock = lock_manager.create_async_lock(f"worker_{lock_id}")
         for _ in range(10):
             async with lock:
                 await asyncio.sleep(0.01)
 
-    tasks = [
-        asyncio.create_task(worker(str(i)))
-        for i in range(5)
-    ]
-    
+    tasks = [asyncio.create_task(worker(str(i))) for i in range(5)]
+
     await asyncio.gather(*tasks)
 
     assert len(lock_manager.get_all_locks()) == 5
-    assert all(not lock.state == LockState.LOCKED 
-              for lock in lock_manager.get_all_locks().values()) 
+    assert all(not lock.state == LockState.LOCKED for lock in lock_manager.get_all_locks().values())

@@ -4,12 +4,12 @@
 
 import asyncio
 import threading
+import time
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Dict, Generator, Optional, Protocol, TypeVar, runtime_checkable
+from typing import Any, AsyncGenerator, Dict, Generator, Optional, Protocol, TypeVar, runtime_checkable
 
-from collections.abc import AsyncGenerator
 from hsm.core.errors import HSMError
 
 
@@ -100,136 +100,80 @@ T = TypeVar("T")
 
 
 class StateLock:
-    """Thread-safe lock implementation for state machine operations.
+    """Thread-safe lock implementation for state machine operations."""
 
-    This lock provides reentrant locking with timeout support and
-    owner tracking. It can be used both as a context manager and
-    explicitly via acquire/release methods.
-
-    Runtime Invariants:
-    - Lock operations are atomic
-    - Lock state is consistent across threads
-    - Owner information is accurate
-    - Reentrant locking is supported
-    - Deadlock prevention via timeout
-
-    Example:
-        lock = StateLock("state_a")
-        with lock:
-            # Critical section here
-            pass
-
-        # Or explicitly:
-        if lock.acquire(timeout=1.0):
-            try:
-                # Critical section here
-                pass
-            finally:
-                lock.release()
-    """
-
-    def __init__(self, lock_id: str):
-        """Initialize the lock.
-
-        Args:
-            lock_id: Unique identifier for this lock
-        """
+    def __init__(self, lock_id: str, reentrant: bool = True):
         if not lock_id:
             raise ValueError("lock_id cannot be empty")
-
         self._id = lock_id
-        self._lock = threading.RLock()  # Use RLock for reentrant locking
+        self._reentrant = reentrant
+        self._lock = threading.RLock() if reentrant else threading.Lock()
         self._owner: Optional[int] = None
         self._acquisition_time: Optional[float] = None
+        self._owner_lock = threading.Lock()
+        self._locked = False
+        self._lock_count = 0  # Track reentrant lock count
 
     def acquire(self, blocking: bool = True, timeout: Optional[float] = None) -> bool:
-        """Acquire the lock.
+        try:
+            success = self._lock.acquire(blocking=blocking, timeout=timeout if timeout else -1)
 
-        Args:
-            blocking: If True, block until lock is acquired
-            timeout: Maximum time to wait for lock acquisition
+            if not success:
+                if blocking and timeout is not None:
+                    raise LockAcquisitionError(f"Failed to acquire lock {self._id} after {timeout}s", self._id, timeout)
+                return False
 
-        Returns:
-            True if lock was acquired, False otherwise
-
-        Raises:
-            LockAcquisitionError: If lock cannot be acquired and blocking is True
-        """
-        import time
-
-        success = self._lock.acquire(blocking=blocking, timeout=timeout if timeout else -1)
-        
-        if success:
-            self._owner = threading.get_ident()
-            self._acquisition_time = time.time()
+            with self._owner_lock:
+                if not self._locked:
+                    self._owner = threading.get_ident()
+                    self._acquisition_time = time.time()
+                self._locked = True
+                self._lock_count += 1
             return True
-        
-        if blocking:
-            raise LockAcquisitionError(
-                f"Failed to acquire lock {self._id} after {timeout}s",
-                self._id,
-                timeout
-            )
-        
-        return False
+
+        except TimeoutError:
+            if blocking and timeout is not None:
+                raise LockAcquisitionError(f"Failed to acquire lock {self._id} after {timeout}s", self._id, timeout)
+            return False
 
     def release(self) -> None:
-        """Release the lock.
-
-        Raises:
-            LockReleaseError: If current thread is not the lock owner
-        """
         current_thread = threading.get_ident()
-        if self._owner != current_thread:
-            raise LockReleaseError(
-                f"Lock {self._id} cannot be released by non-owner thread",
-                self._id,
-                self._owner
-            )
 
-        self._lock.release()
-        if not self._lock._is_owned():  # Check if completely released
-            self._owner = None
-            self._acquisition_time = None
+        with self._owner_lock:
+            if not self._locked:
+                return
+
+            if self._owner != current_thread:
+                raise LockReleaseError(f"Lock {self._id} cannot be released by non-owner thread", self._id, self._owner)
+
+            try:
+                self._lock.release()
+                self._lock_count -= 1
+
+                if self._lock_count == 0:
+                    self._owner = None
+                    self._acquisition_time = None
+                    self._locked = False
+
+            except RuntimeError:
+                raise LockReleaseError(f"Lock {self._id} cannot be released by non-owner thread", self._id, self._owner)
 
     def locked(self) -> bool:
-        """Check if the lock is currently held.
-
-        Returns:
-            True if locked, False otherwise
-        """
-        return self._lock._is_owned()
+        with self._owner_lock:
+            return self._locked
 
     def get_info(self) -> LockInfo:
-        """Get current lock information.
+        with self._owner_lock:
+            state = LockState.LOCKED if self._locked else LockState.UNLOCKED
+            return LockInfo(id=self._id, state=state, owner=self._owner, acquisition_time=self._acquisition_time)
 
-        Returns:
-            LockInfo object with current state
-        """
-        if self.locked():
-            state = LockState.LOCKED
-        else:
-            state = LockState.UNLOCKED
-
-        return LockInfo(
-            id=self._id,
-            state=state,
-            owner=self._owner,
-            acquisition_time=self._acquisition_time
-        )
-
-    @contextmanager
-    def __enter__(self) -> Generator["StateLock", None, None]:
-        """Context manager support for 'with' statement."""
-        self.acquire()
-        try:
-            yield self
-        finally:
-            self.release()
+    def __enter__(self) -> "StateLock":
+        self.acquire(blocking=True)
+        return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Exit the context manager."""
-        self.release()
+        if self.locked() and self._owner == threading.get_ident():
+            self.release()
 
 
 class AsyncStateLock:
@@ -262,14 +206,8 @@ class AsyncStateLock:
     """
 
     def __init__(self, lock_id: str):
-        """Initialize the async lock.
-
-        Args:
-            lock_id: Unique identifier for this lock
-        """
         if not lock_id:
             raise ValueError("lock_id cannot be empty")
-
         self._id = lock_id
         self._lock = asyncio.Lock()
         self._owner: Optional[int] = None
@@ -288,32 +226,24 @@ class AsyncStateLock:
         Raises:
             LockAcquisitionError: If lock cannot be acquired and blocking is True
         """
-        import time
-
         try:
             if blocking and timeout is None:
                 await self._lock.acquire()
                 success = True
             else:
                 success = await asyncio.wait_for(
-                    self._lock.acquire(),
-                    timeout=timeout if timeout else 0 if not blocking else None
+                    self._lock.acquire(), timeout=timeout if timeout else 0 if not blocking else None
                 )
+
+            if success:
+                self._owner = threading.get_ident()
+                self._acquisition_time = time.time()
+            return success
+
         except asyncio.TimeoutError:
-            if blocking:
-                raise LockAcquisitionError(
-                    f"Failed to acquire lock {self._id} after {timeout}s",
-                    self._id,
-                    timeout
-                )
+            if blocking and timeout is not None:
+                raise LockAcquisitionError(f"Failed to acquire lock {self._id} after {timeout}s", self._id, timeout)
             return False
-
-        if success:
-            self._owner = threading.get_ident()
-            self._acquisition_time = time.time()
-            return True
-
-        return False
 
     def release(self) -> None:
         """Release the lock.
@@ -323,11 +253,7 @@ class AsyncStateLock:
         """
         current_thread = threading.get_ident()
         if self._owner != current_thread:
-            raise LockReleaseError(
-                f"Lock {self._id} cannot be released by non-owner task",
-                self._id,
-                self._owner
-            )
+            raise LockReleaseError(f"Lock {self._id} cannot be released by non-owner task", self._id, self._owner)
 
         self._lock.release()
         self._owner = None
@@ -352,25 +278,15 @@ class AsyncStateLock:
         else:
             state = LockState.UNLOCKED
 
-        return LockInfo(
-            id=self._id,
-            state=state,
-            owner=self._owner,
-            acquisition_time=self._acquisition_time
-        )
+        return LockInfo(id=self._id, state=state, owner=self._owner, acquisition_time=self._acquisition_time)
 
-    @asynccontextmanager
-    async def __aenter__(self) -> AsyncGenerator["AsyncStateLock", None]:
-        """Async context manager support for 'async with' statement."""
+    async def __aenter__(self) -> "AsyncStateLock":
         await self.acquire()
-        try:
-            yield self
-        finally:
-            self.release()
+        return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Exit the async context manager."""
-        self.release()
+        if self.locked() and self._owner == threading.get_ident():
+            self.release()
 
 
 class LockManager:
@@ -458,15 +374,11 @@ class LockManager:
         with self._manager_lock:
             if lock_id not in self._locks:
                 raise ValueError(f"Lock with id {lock_id} does not exist")
-            
+
             lock = self._locks[lock_id]
             if lock.locked():
-                raise LockReleaseError(
-                    f"Cannot remove locked lock {lock_id}",
-                    lock_id,
-                    lock.get_info().owner
-                )
-            
+                raise LockReleaseError(f"Cannot remove locked lock {lock_id}", lock_id, lock.get_info().owner)
+
             del self._locks[lock_id]
 
     def get_all_locks(self) -> Dict[str, LockInfo]:
@@ -476,7 +388,4 @@ class LockManager:
             Dictionary mapping lock IDs to their current state
         """
         with self._manager_lock:
-            return {
-                lock_id: lock.get_info()
-                for lock_id, lock in self._locks.items()
-            }
+            return {lock_id: lock.get_info() for lock_id, lock in self._locks.items()}
