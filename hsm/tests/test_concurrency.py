@@ -361,7 +361,7 @@ def test_concurrent_lock_access(lock_manager: LockManager) -> None:
         t.join()
 
     assert len(lock_manager.get_all_locks()) == 5
-    assert all(not lock.state == LockState.LOCKED for lock in lock_manager.get_all_locks().values())
+    assert all(lock.state != LockState.LOCKED for lock in lock_manager.get_all_locks().values())
 
 
 @pytest.mark.asyncio
@@ -379,4 +379,4 @@ async def test_concurrent_async_lock_access(lock_manager: LockManager) -> None:
     await asyncio.gather(*tasks)
 
     assert len(lock_manager.get_all_locks()) == 5
-    assert all(not lock.state == LockState.LOCKED for lock in lock_manager.get_all_locks().values())
+    assert all(lock.state != LockState.LOCKED for lock in lock_manager.get_all_locks().values())
