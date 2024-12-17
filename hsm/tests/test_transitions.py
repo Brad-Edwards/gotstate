@@ -143,7 +143,7 @@ def test_guard_evaluation(guarded_transition: Transition, mock_event: MockEvent)
 
 def test_failing_guard(mock_event: MockEvent) -> None:
     failing_guard = MockGuard(return_value=False)
-    transition = Transition("source", "target", guard=failing_guard)
+    Transition("source", "target", guard=failing_guard)
 
     state_data = {"test": "data"}
     result = failing_guard.check(mock_event, state_data)
@@ -184,7 +184,7 @@ def test_multiple_actions_execution(complex_transition: Transition, mock_event: 
 
 def test_failing_action(mock_event: MockEvent) -> None:
     failing_action = MockAction(should_raise=True)
-    transition = Transition("source", "target", actions=[failing_action])
+    Transition("source", "target", actions=[failing_action])
 
     with pytest.raises(RuntimeError) as exc_info:
         failing_action.execute(mock_event, {"test": "data"})
