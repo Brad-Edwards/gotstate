@@ -123,7 +123,8 @@ class InvalidGuard(AbstractGuard):
     """Guard that returns a string instead of bool."""
 
     def check(self, event: AbstractEvent, state_data: Any) -> bool:  # NOSONAR
-        return "not a bool"  # Incorrect return type - intentional for testing
+        # Incorrect return type - intentional for testing
+        return "not a bool"  # NOSONAR
 
 
 class InvalidValidator(AbstractValidator):
