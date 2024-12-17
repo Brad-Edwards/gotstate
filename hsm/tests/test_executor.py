@@ -4,7 +4,7 @@
 import logging
 import threading
 import time
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type
 
 import pytest
 
@@ -79,6 +79,62 @@ def mock_transitions(mock_states: List[State]) -> List[Transition]:
 def executor(mock_states: List[State], mock_transitions: List[Transition]) -> Executor:
     """Fixture providing a configured executor instance."""
     return Executor(mock_states, mock_transitions, mock_states[0])
+
+
+@pytest.fixture
+def configurable_state():
+    """Fixture providing a configurable state implementation."""
+
+    class ConfigurableState(State):
+        def __init__(self, state_id: str, enter_delay: float = 0, exit_delay: float = 0):
+            super().__init__(state_id)
+            self.enter_delay = enter_delay
+            self.exit_delay = exit_delay
+            self.enter_called = False
+            self.exit_called = False
+
+        def on_enter(self) -> None:
+            time.sleep(self.enter_delay)
+            self.enter_called = True
+
+        def on_exit(self) -> None:
+            time.sleep(self.exit_delay)
+            self.exit_called = True
+
+    return ConfigurableState
+
+
+@pytest.fixture
+def make_executor(configurable_state):
+    """Factory fixture for creating executors with custom states."""
+
+    def _make_executor(
+        num_states: int = 3,
+        enter_delay: float = 0,
+        exit_delay: float = 0,
+        max_queue_size: Optional[int] = None,
+        thread_join_timeout: float = 1.0,
+    ) -> Executor:
+        states = [configurable_state(f"state{i}", enter_delay, exit_delay) for i in range(num_states)]
+        transitions = [
+            Transition(
+                source_id=states[i].get_id(),
+                target_id=states[i + 1].get_id(),
+                guard=NoOpGuard(),
+                actions=[NoOpAction()],
+                priority=i,
+            )
+            for i in range(len(states) - 1)
+        ]
+        return Executor(states, transitions, states[0], max_queue_size, thread_join_timeout)
+
+    return _make_executor
+
+
+def assert_executor_error(expected_pattern: str, callable_obj: Callable, *args, **kwargs) -> None:
+    """Helper to assert ExecutorError with message pattern."""
+    with pytest.raises(ExecutorError, match=expected_pattern):
+        callable_obj(*args, **kwargs)
 
 
 # -----------------------------------------------------------------------------
@@ -199,16 +255,26 @@ def test_event_processing_when_stopped(executor: Executor) -> None:
         executor.process_event(Event("test_event"))
 
 
-def test_state_change_tracking(executor: Executor) -> None:
+def test_state_change_tracking(make_executor):
     """Test state change history tracking."""
+    executor = make_executor(num_states=3)
     executor.start()
-    event = Event("test_event")
-    executor.process_event(event)
-    time.sleep(0.1)  # Allow state change to complete
+
+    # Generate multiple state changes
+    for i in range(5):
+        executor.process_event(Event(f"event{i}"))
+        time.sleep(0.1)
 
     history = executor.get_state_history()
     assert len(history) > 0
-    assert isinstance(history[0], StateChange)
+
+    # Verify state change record attributes
+    change = history[0]
+    assert isinstance(change.source_id, str)
+    assert isinstance(change.target_id, str)
+    assert isinstance(change.timestamp, float)
+    assert isinstance(change.event_id, str)
+
     executor.stop()
 
 
@@ -539,62 +605,19 @@ def test_executor_context_error_handler_thread_safety() -> None:
 # -----------------------------------------------------------------------------
 
 
-def test_executor_stop_timeout(executor: Executor) -> None:
+def test_executor_stop_timeout(make_executor):
     """Test executor stop behavior with worker thread timeout."""
-
-    class SlowState(State):
-        def on_enter(self) -> None:
-            pass
-
-        def on_exit(self) -> None:
-            time.sleep(2.0)  # Shorter sleep but still longer than timeout
-
-        def get_id(self) -> str:
-            return "slow"
-
-    # Create a mock event queue that takes a long time to shutdown
-    class SlowEventQueue:
-        def __init__(self) -> None:
-            self._shutdown = False
-
-        def enqueue(self, event: AbstractEvent) -> None:
-            if self._shutdown:
-                raise RuntimeError("Queue is shut down")
-
-        def try_dequeue(self, timeout: Optional[float] = None) -> Optional[AbstractEvent]:
-            if self._shutdown:
-                raise RuntimeError("Queue is shut down")
-            return None
-
-        def shutdown(self) -> None:
-            time.sleep(2.0)  # Shorter sleep but still longer than timeout
-            self._shutdown = True
-
-    # Replace current state and event queue with slow versions
-    executor._states = {"slow": SlowState("slow")}
-    executor._initial_state = executor._states["slow"]
-    executor._event_queue = SlowEventQueue()  # type: ignore
-
-    # Set a very short thread join timeout to force timeout condition
-    executor._thread_join_timeout = 0.1  # Add this line to executor class if needed
-
+    executor = make_executor(exit_delay=2.0, thread_join_timeout=0.1)
     executor.start()
-    time.sleep(0.1)  # Ensure executor is fully started
-
-    with pytest.raises(ExecutorError, match="Failed to stop executor"):
-        executor.stop()
-
-    # Cleanup
-    executor._context.state = ExecutorState.STOPPED
-    if executor._worker_thread and executor._worker_thread.is_alive():
-        executor._worker_thread.join(timeout=0.1)
+    assert_executor_error("Failed to stop executor", executor.stop)
 
 
-def test_executor_invalid_target_state(executor: Executor) -> None:
+def test_executor_invalid_target_state(make_executor):
     """Test transition to non-existent target state."""
+    executor = make_executor(num_states=2)
     # Create transition to non-existent state
     invalid_transition = Transition(
-        source_id=executor._transitions[0].get_source_state_id(),
+        source_id="state0",
         target_id="non_existent_state",
         guard=NoOpGuard(),
         actions=[NoOpAction()],
@@ -604,28 +627,21 @@ def test_executor_invalid_target_state(executor: Executor) -> None:
 
     executor.start()
     executor.process_event(Event("test_event"))
-    time.sleep(0.1)
+    time.sleep(0.1)  # Allow event processing
 
+    # Check that executor entered error state
     assert executor._context.state == ExecutorState.ERROR
-    # Force state to allow clean stop
+
+    # Reset state to allow clean stop
     executor._context.state = ExecutorState.RUNNING
     executor.stop()
 
 
-def test_executor_max_queue_size(executor: Executor) -> None:
+def test_executor_max_queue_size(make_executor):
     """Test executor with maximum queue size limit."""
-    executor = Executor(
-        states=executor._states.values(),
-        transitions=executor._transitions,
-        initial_state=executor._initial_state,
-        max_queue_size=1,
-    )
-
+    executor = make_executor(max_queue_size=1)
     executor.start()
     executor.process_event(Event("event1"))
 
-    with pytest.raises(ExecutorError, match="Failed to enqueue event"):
-        for _ in range(10):
-            executor.process_event(Event("event_overflow"))
-
+    assert_executor_error("Failed to enqueue event", executor.process_event, Event("event_overflow"))
     executor.stop()
