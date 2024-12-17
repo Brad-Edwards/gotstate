@@ -408,7 +408,7 @@ def test_validator_negative_return_type() -> None:
     """Test that a validator returning wrong types is logically invalid."""
     validator = InvalidValidator()
     structure_result = validator.validate_structure()
-    assert (structure_result == ["invalid"], "Invalid return type from validator")
+    assert structure_result == ["invalid"], "Invalid return type from validator"
 
 
 # -----------------------------------------------------------------------------
