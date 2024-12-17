@@ -151,7 +151,7 @@ def test_nested_composite_states():
     """Test nested composite state structures."""
     inner_state = ConcreteState("inner")
     middle_state = ConcreteCompositeState("middle", [inner_state], inner_state)
-    outer_state = ConcreteCompositeState("outer", [middle_state], middle_state)
+    outer_state: ConcreteCompositeState = ConcreteCompositeState("outer", [middle_state], middle_state)
 
     assert len(outer_state.get_substates()) == 1
     assert isinstance(outer_state.get_substates()[0], CompositeState)
