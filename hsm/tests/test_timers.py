@@ -82,9 +82,15 @@ def test_timer_error_inheritance() -> None:
 
 def test_timer_error_attributes() -> None:
     """Test timer error attributes."""
+    # Test with details
     error = TimerError("test message", {"key": "value"})
-    assert str(error) == "test message"
+    assert str(error) == "test message (details: {'key': 'value'})"
     assert error.details == {"key": "value"}
+
+    # Test without details
+    error = TimerError("test message")
+    assert str(error) == "test message"
+    assert error.details == {}
 
 
 def test_timer_cancellation_error() -> None:

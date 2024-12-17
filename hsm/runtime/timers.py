@@ -28,6 +28,11 @@ class TimerError(HSMError):
         self.message = message
         self.details = details or {}
 
+    def __str__(self) -> str:
+        if self.details:
+            return f"{self.message} (details: {self.details})"
+        return self.message
+
 
 class TimerCancellationError(TimerError):
     """Raised when a timer cannot be cancelled.
@@ -41,6 +46,9 @@ class TimerCancellationError(TimerError):
         super().__init__(message, {"timer_id": timer_id, "state": state})
         self.timer_id = timer_id
         self.state = state
+
+    def __str__(self) -> str:
+        return f"{self.message} (timer_id: {self.timer_id}, state: {self.state})"
 
 
 class TimerSchedulingError(TimerError):
@@ -57,6 +65,9 @@ class TimerSchedulingError(TimerError):
         self.timer_id = timer_id
         self.duration = duration
         self.reason = reason
+
+    def __str__(self) -> str:
+        return f"{self.message} (timer_id: {self.timer_id}, duration: {self.duration}, reason: {self.reason})"
 
 
 class TimerState(Enum):
