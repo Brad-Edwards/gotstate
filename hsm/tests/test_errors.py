@@ -140,14 +140,20 @@ def error_context() -> Generator[None, None, None]:
     try:
         yield
     except HSMError as e:
-        raise e
+        # Add useful handling like logging or error transformation
+        logging.error(f"HSM error occurred: {str(e)}")
+        # Could also add context or transform the error
+        e.details["handled_by"] = "error_context"
+        raise
 
 
 def test_error_context_manager():
     """Test errors within context manager."""
-    with pytest.raises(InvalidStateError):
+    with pytest.raises(InvalidStateError) as exc_info:
         with error_context():
             raise InvalidStateError("Context test", "STATE_A", "test_op")
+
+    assert exc_info.value.details["handled_by"] == "error_context"
 
 
 # -----------------------------------------------------------------------------
