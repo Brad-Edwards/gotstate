@@ -21,6 +21,7 @@ from hsm.interfaces.abc import AbstractEvent, AbstractState, AbstractTransition
 
 # -----------------------------------------------------------------------------
 # TEST FIXTURES AND HELPERS
+
 # -----------------------------------------------------------------------------
 
 
