@@ -128,7 +128,7 @@ def test_timeout_event_creation(sample_timeout_event: TimeoutEvent) -> None:
     assert sample_timeout_event.get_id() == "timeout_event"
     assert sample_timeout_event.get_payload() == {"info": "test"}
     assert sample_timeout_event.get_priority() == 10
-    assert sample_timeout_event.get_timeout() == 1.5
+    assert abs(sample_timeout_event.get_timeout() - 1.5) < 1e-10  # Use small epsilon for comparison
 
 
 def test_event_immutability() -> None:
