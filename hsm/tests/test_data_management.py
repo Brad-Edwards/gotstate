@@ -355,7 +355,6 @@ def test_type_hints_on_data_manager() -> None:
 
     This doesn't fully ensure correctness like mypy would, but it can catch missing hints.
     """
-    hints = get_type_hints(DataManager)
     # Check that certain attributes have type hints
     # Note: The class-level attributes won't show up here if defined in __init__.
     # Instead, we can check methods.
