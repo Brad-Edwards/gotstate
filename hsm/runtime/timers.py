@@ -5,9 +5,10 @@
 import asyncio
 import threading
 import time
+from abc import abstractmethod
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Callable, Dict, Optional, Protocol, Set, Union, runtime_checkable
+from typing import Any, Callable, Dict, Optional, Protocol, Set, Type, Union, runtime_checkable
 
 from hsm.core.errors import HSMError
 from hsm.interfaces.abc import AbstractTimer
@@ -108,7 +109,14 @@ class TimerCallback(Protocol):
 
 
 class BaseTimer(AbstractTimer):
-    """Base class for Timer implementations with common functionality."""
+    """Base class for timer implementations.
+
+    Runtime Invariants:
+    - Timer state transitions are atomic
+    - Callbacks are executed exactly once
+    - Cancellation is always possible
+    - Resource cleanup is guaranteed
+    """
 
     def __init__(self, timer_id: str, callback: TimerCallback):
         if not timer_id:
@@ -159,16 +167,73 @@ class BaseTimer(AbstractTimer):
                 "invalid_state",
             )
 
+    def _on_timeout(self) -> None:
+        """Handle timer expiration."""
+        if self._state != TimerState.RUNNING or not self._event:
+            return
+
+        try:
+            self._callback(self._id, self._event)
+            self._state = TimerState.COMPLETED
+        except Exception:
+            self._state = TimerState.ERROR
+        finally:
+            self._cleanup()
+
+    def _handle_cancel(self, event_id: EventID) -> None:
+        """Common cancellation logic."""
+        if self._state not in (TimerState.SCHEDULED, TimerState.RUNNING):
+            return
+
+        if not self._event or self._event.get_id() != event_id:
+            return
+
+        try:
+            if self._timer:
+                self._timer.cancel()
+            self._state = TimerState.CANCELLED
+            self._cleanup()
+        except Exception as e:
+            self._state = TimerState.ERROR
+            raise TimerCancellationError(f"Failed to cancel timer {self._id}: {str(e)}", self._id, self._state) from e
+
+    def _schedule_timer(self, duration: float, event: Event) -> None:
+        """Common scheduling setup logic."""
+        self._validate_schedule(duration)
+        self._start_time = time.time()
+        self._duration = duration
+        self._event = event
+        self._state = TimerState.SCHEDULED
+
+    def _handle_schedule_error(self, e: Exception, duration: float) -> None:
+        """Common schedule error handling."""
+        self._state = TimerState.ERROR
+        raise TimerSchedulingError(
+            f"Failed to schedule timer {self._id}: {str(e)}", self._id, duration, "scheduling_failed"
+        ) from e
+
+    def _create_and_start_timer(self, duration: float) -> None:
+        """Template method for creating and starting a timer."""
+        try:
+            self._timer = self._create_timer(duration)
+            self._start_timer()
+            self._state = TimerState.RUNNING
+        except Exception as e:
+            self._handle_schedule_error(e, duration)
+
+    @abstractmethod
+    def _create_timer(self, duration: float) -> Union[threading.Timer, asyncio.TimerHandle]:
+        """Create a timer instance."""
+        pass
+
+    @abstractmethod
+    def _start_timer(self) -> None:
+        """Start the timer."""
+        pass
+
 
 class Timer(BaseTimer):
-    """
-    Thread-safe timer implementation for state machine timeouts.
-
-    Runtime Invariants:
-    - Timer state transitions are atomic
-    - Callbacks are executed exactly once
-    - Cancellation is always possible
-    - Resource cleanup is guaranteed
+    """Thread-safe timer implementation for state machine timeouts.
 
     Example:
         timer = Timer("timeout_1", callback_fn)
@@ -181,75 +246,29 @@ class Timer(BaseTimer):
         super().__init__(timer_id, callback)
         self._lock = threading.RLock()
 
+    def _create_timer(self, duration: float) -> threading.Timer:
+        return threading.Timer(duration, self._on_timeout)
+
+    def _start_timer(self) -> None:
+        if isinstance(self._timer, threading.Timer):
+            self._timer.start()
+
     def schedule_timeout(self, duration: float, event: Event) -> None:
         with self._lock:
-            self._validate_schedule(duration)
-            self._start_time = time.time()
-            self._duration = duration
-            self._event = event
-            self._state = TimerState.SCHEDULED
-
-            try:
-                self._timer = threading.Timer(duration, self._on_timeout)
-                self._timer.start()
-                self._state = TimerState.RUNNING
-            except Exception as e:
-                self._state = TimerState.ERROR
-                raise TimerSchedulingError(
-                    f"Failed to schedule timer {self._id}: {str(e)}", self._id, duration, "scheduling_failed"
-                ) from e
+            self._schedule_timer(duration, event)
+            self._create_and_start_timer(duration)
 
     def cancel_timeout(self, event_id: EventID) -> None:
-        """Cancel a scheduled timeout.
-
-        Args:
-            event_id: ID of the event to cancel
-
-        Raises:
-            TimerCancellationError: If timer cannot be cancelled
-        """
-        if self._state not in (TimerState.SCHEDULED, TimerState.RUNNING):
-            return
-
-        if not self._event or self._event.get_id() != event_id:
-            return
-
-        try:
-            if self._timer:
-                self._timer.cancel()
-            self._state = TimerState.CANCELLED
-            self._cleanup()
-        except Exception as e:
-            self._state = TimerState.ERROR
-            raise TimerCancellationError(f"Failed to cancel timer {self._id}: {str(e)}", self._id, self._state) from e
-
-    def _on_timeout(self) -> None:
-        """Handle timer expiration."""
-        if self._state != TimerState.RUNNING or not self._event:
-            return
-
-        try:
-            self._callback(self._id, self._event)
-            self._state = TimerState.COMPLETED
-        except Exception:
-            self._state = TimerState.ERROR
-        finally:
-            self._cleanup()
+        """Cancel a scheduled timeout."""
+        with self._lock:
+            self._handle_cancel(event_id)
 
 
 class AsyncTimer(BaseTimer):
-    """
-    Asynchronous timer implementation for state machine timeouts.
+    """Asynchronous timer implementation for state machine timeouts.
 
     This class provides the same functionality as Timer but for
     async/await code. It uses asyncio primitives internally.
-
-    Runtime Invariants:
-    - Timer operations are atomic
-    - Callbacks are executed exactly once
-    - Cancellation is always possible
-    - Resource cleanup is guaranteed
-    - Compatible with asyncio event loop
 
     Example:
         timer = AsyncTimer("timeout_1", callback_fn)
@@ -262,33 +281,18 @@ class AsyncTimer(BaseTimer):
         super().__init__(timer_id, callback)
         self._lock = asyncio.Lock()
 
+    def _create_timer(self, duration: float) -> asyncio.TimerHandle:
+        loop = asyncio.get_running_loop()
+        return loop.call_later(duration, self._on_timeout)
+
+    def _start_timer(self) -> None:
+        pass  # asyncio timers start immediately on creation
+
     async def schedule_timeout(self, duration: float, event: Event) -> None:
-        """Schedule a timeout event asynchronously.
-
-        Args:
-            duration: Time in seconds until timeout
-            event: Event to trigger on timeout
-
-        Raises:
-            TimerSchedulingError: If timer cannot be scheduled
-            ValueError: If duration is negative
-        """
+        """Schedule a timeout event asynchronously."""
         async with self._lock:
-            self._validate_schedule(duration)
-            self._start_time = time.time()
-            self._duration = duration
-            self._event = event
-            self._state = TimerState.SCHEDULED
-
-            try:
-                loop = asyncio.get_running_loop()
-                self._timer = loop.call_later(duration, self._on_timeout)
-                self._state = TimerState.RUNNING
-            except Exception as e:
-                self._state = TimerState.ERROR
-                raise TimerSchedulingError(
-                    f"Failed to schedule timer {self._id}: {str(e)}", self._id, duration, "scheduling_failed"
-                ) from e
+            self._schedule_timer(duration, event)
+            self._create_and_start_timer(duration)
 
     async def cancel_timeout(self, event_id: EventID) -> None:
         """Cancel a scheduled timeout asynchronously.
@@ -299,33 +303,8 @@ class AsyncTimer(BaseTimer):
         Raises:
             TimerCancellationError: If timer cannot be cancelled
         """
-        if self._state not in (TimerState.SCHEDULED, TimerState.RUNNING):
-            return
-
-        if not self._event or self._event.get_id() != event_id:
-            return
-
-        try:
-            if self._timer:
-                self._timer.cancel()
-            self._state = TimerState.CANCELLED
-            self._cleanup()
-        except Exception as e:
-            self._state = TimerState.ERROR
-            raise TimerCancellationError(f"Failed to cancel timer {self._id}: {str(e)}", self._id, self._state) from e
-
-    def _on_timeout(self) -> None:
-        """Handle timer expiration."""
-        if self._state != TimerState.RUNNING or not self._event:
-            return
-
-        try:
-            self._callback(self._id, self._event)
-            self._state = TimerState.COMPLETED
-        except Exception:
-            self._state = TimerState.ERROR
-        finally:
-            self._cleanup()
+        async with self._lock:
+            self._handle_cancel(event_id)
 
 
 class TimerManager:
@@ -352,45 +331,26 @@ class TimerManager:
         self._timers: Dict[str, Union[Timer, AsyncTimer]] = {}
         self._manager_lock = threading.Lock()
 
-    def create_timer(self, timer_id: str, callback: TimerCallback) -> Timer:
-        """Create a new synchronous timer.
+    def _validate_timer_id(self, timer_id: str) -> None:
+        """Validate timer ID is unique."""
+        if timer_id in self._timers:
+            raise ValueError(f"Timer with id {timer_id} already exists")
 
-        Args:
-            timer_id: Unique identifier for the timer
-            callback: Function to call when timer expires
-
-        Returns:
-            New Timer instance
-
-        Raises:
-            ValueError: If timer_id already exists
-        """
+    def _create_timer_common(
+        self, timer_id: str, callback: TimerCallback, timer_class: Type[Union[Timer, AsyncTimer]]
+    ) -> Union[Timer, AsyncTimer]:
+        """Common timer creation logic."""
         with self._manager_lock:
-            if timer_id in self._timers:
-                raise ValueError(f"Timer with id {timer_id} already exists")
-            timer = Timer(timer_id, callback)
+            self._validate_timer_id(timer_id)
+            timer = timer_class(timer_id, callback)
             self._timers[timer_id] = timer
             return timer
+
+    def create_timer(self, timer_id: str, callback: TimerCallback) -> Timer:
+        return self._create_timer_common(timer_id, callback, Timer)  # type: ignore
 
     def create_async_timer(self, timer_id: str, callback: TimerCallback) -> AsyncTimer:
-        """Create a new asynchronous timer.
-
-        Args:
-            timer_id: Unique identifier for the timer
-            callback: Function to call when timer expires
-
-        Returns:
-            New AsyncTimer instance
-
-        Raises:
-            ValueError: If timer_id already exists
-        """
-        with self._manager_lock:
-            if timer_id in self._timers:
-                raise ValueError(f"Timer with id {timer_id} already exists")
-            timer = AsyncTimer(timer_id, callback)
-            self._timers[timer_id] = timer
-            return timer
+        return self._create_timer_common(timer_id, callback, AsyncTimer)  # type: ignore
 
     def get_timer(self, timer_id: str) -> Optional[Union[Timer, AsyncTimer]]:
         """Get an existing timer by ID.
