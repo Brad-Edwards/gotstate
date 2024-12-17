@@ -97,7 +97,7 @@ def test_lock_acquisition_error() -> None:
     timeout = 1.0
     error = LockAcquisitionError("acquisition failed", lock_id, timeout)
     assert error.lock_id == lock_id
-    assert error.timeout == timeout
+    assert abs(error.timeout - timeout) < 1e-9
     assert error.details == {"lock_id": lock_id, "timeout": timeout}
 
 
