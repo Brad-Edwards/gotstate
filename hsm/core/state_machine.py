@@ -22,6 +22,8 @@ from hsm.core.validation import ValidationSeverity, Validator
 from hsm.interfaces.abc import AbstractEvent, AbstractState, AbstractStateMachine, AbstractTransition
 from hsm.interfaces.types import StateID
 
+logger = logging.getLogger(__name__)
+
 
 class StateMachine(AbstractStateMachine):
     """
@@ -31,7 +33,7 @@ class StateMachine(AbstractStateMachine):
     - Only one state is active at a time
     - State transitions are atomic
     - Event processing is sequential
-    - State data is isolated between states
+    - State data is isolated between states and thread-safe
     - Hooks do not affect core behavior
     - Validation occurs before start
 
@@ -44,7 +46,6 @@ class StateMachine(AbstractStateMachine):
         _data_manager: Manages state data
         _running: Whether machine is processing events
         _logger: Logger instance
-        _state_data: Dictionary to store data for each state.
     """
 
     def __init__(
@@ -79,25 +80,19 @@ class StateMachine(AbstractStateMachine):
 
         # Initialize managers
         self._hook_manager: HookManager = HookManager()
-        self._data_manager: DataManager = DataManager()
+        self._data_manager: DataManager = DataManager()  # Now using DataManager
 
         # Initialize state
         self._running: bool = False
         self._logger: logging.Logger = logging.getLogger("hsm.core.state_machine")
-        self._state_data: Dict[StateID, Any] = {}
+
         self._initialize_state_data()
 
     def _initialize_state_data(self) -> None:
-        """Initialize the _state_data dictionary."""
-        self._state_data = {}
-        for state_id, state in self._states.items():
-            self._state_data[state_id] = {}
-
-    def _get_state_data(self, state_id: StateID) -> Any:
-        """Get the data for the given state."""
-        if state_id not in self._state_data:
-            raise ValueError(f"No data found for state: {state_id}")
-        return self._state_data[state_id]
+        """Initialize the state data using the DataManager."""
+        with self._data_manager.access_data() as data:
+            for state_id in self._states:
+                data[state_id] = {}
 
     def _validate_configuration(self) -> None:
         """
@@ -129,30 +124,31 @@ class StateMachine(AbstractStateMachine):
 
         source_state = transition.get_source_state()
         target_state = transition.get_target_state()
-        source_data = self._get_state_data(source_state.get_id())
-        target_data = self._get_state_data(target_state.get_id())
 
-        try:
-            # Exit states
-            self._exit_states(source_state, target_state, event, source_data)
+        with self._data_manager.access_data() as state_data:  # Use DataManager for thread-safety
+            source_data = state_data[source_state.get_id()]
+            target_data = state_data[target_state.get_id()]
+            try:
+                # Exit states
+                self._exit_states(source_state, target_state, event, source_data)
 
-            # Execute transition actions
-            for action in transition.get_actions():
-                action.execute(event, source_data)
+                # Execute transition actions
+                for action in transition.get_actions():
+                    action.execute(event, source_data)
 
-            # Enter states
-            self._enter_states(source_state, target_state, event, target_data)
+                # Enter states
+                self._enter_states(source_state, target_state, event, target_data)
 
-        except Exception as e:
-            self._handle_operation_error(
-                "Transition",
-                e,
-                {
-                    "source_state": source_state.get_id(),
-                    "target_state": target_state.get_id(),
-                    "event": event.get_id(),
-                },
-            )
+            except Exception as e:
+                self._handle_operation_error(
+                    "Transition",
+                    e,
+                    {
+                        "source_state": source_state.get_id(),
+                        "target_state": target_state.get_id(),
+                        "event": event.get_id(),
+                    },
+                )
 
     def _exit_states(
         self, source_state: AbstractState, target_state: AbstractState, event: AbstractEvent, data: Any
@@ -162,17 +158,29 @@ class StateMachine(AbstractStateMachine):
         """
         current_state = self._current_state
         while current_state and current_state != source_state:
-            current_state.on_exit(event, self._get_state_data(current_state.get_id()))
+            self._hook_manager.call_on_exit(current_state.get_id())
+            current_state.on_exit(event, data)
             if isinstance(current_state, CompositeState):
                 current_state = current_state._parent_state if current_state._parent_state else None
             else:
                 current_state = None
 
         if isinstance(source_state, CompositeState):
+            is_target_substate = False
+            if source_state.get_substates():
+                for substate in source_state.get_substates():
+                    if substate == target_state:
+                        is_target_substate = True
+                        break
             if source_state._current_substate:
+                self._hook_manager.call_on_exit(source_state._current_substate.get_id())
                 source_state._current_substate.on_exit(event, data)
-        source_state.on_exit(event, data)
-        self._current_state = None
+                if not is_target_substate:
+                    source_state._current_substate = None
+            self._hook_manager.call_on_exit(source_state.get_id())
+            source_state.on_exit(event, data)
+            if not is_target_substate:
+                self._current_state = None
 
     def _enter_states(
         self, source_state: AbstractState, target_state: AbstractState, event: AbstractEvent, data: Any
@@ -193,7 +201,8 @@ class StateMachine(AbstractStateMachine):
 
         # Enter all states in the path
         for state in path_to_target:
-            state.on_entry(event, self._get_state_data(state.get_id()))
+            self._hook_manager.call_on_entry(state.get_id())
+            state.on_entry(event, data)
             if isinstance(state, CompositeState):
                 state._enter_substate(event, data)
                 if state.has_history():
@@ -214,16 +223,17 @@ class StateMachine(AbstractStateMachine):
                 and transition.get_source_state() == self._current_state._current_substate
             ):
                 guard = transition.get_guard()
-                if guard:
-                    try:
-                        state_data = self._get_state_data(transition.get_source_state().get_id())
-                        if guard.check(event, state_data):
-                            valid_transitions.append(transition)
-                    except Exception as e:
-                        logger.error("Guard check failed: %s", str(e))
-                        continue
-                else:
-                    valid_transitions.append(transition)
+                with self._data_manager.access_data() as state_data:  # Use DataManager for thread-safety
+                    if guard:
+                        try:
+                            source_data = state_data[transition.get_source_state().get_id()]
+                            if guard.check(event, source_data):
+                                valid_transitions.append(transition)
+                        except Exception as e:
+                            logger.error("Guard check failed: %s", str(e))
+                            continue
+                    else:
+                        valid_transitions.append(transition)
 
         if not valid_transitions:
             return None
@@ -256,16 +266,19 @@ class StateMachine(AbstractStateMachine):
 
         self._running = True
         self._current_state = self._initial_state
+        # Initialize state data for all states
         self._initialize_state_data()
-        try:
-            self._current_state.on_entry(None, self._get_state_data(self._current_state.get_id()))
-            if isinstance(self._current_state, CompositeState):
-                self._current_state._enter_substate(None, self._get_state_data(self._current_state.get_id()))
-        except Exception as e:
-            self._running = False
-            raise InvalidStateError(
-                f"Failed to enter initial state: {str(e)}", self._initial_state.get_id(), "enter", {"error": str(e)}
-            )
+        with self._data_manager.access_data() as state_data:
+            try:
+                self._hook_manager.call_on_entry(self._current_state.get_id())
+                self._current_state.on_entry(None, state_data[self._current_state.get_id()])
+                if isinstance(self._current_state, CompositeState):
+                    self._current_state._enter_substate(None, state_data[self._current_state.get_id()])
+            except Exception as e:
+                self._running = False
+                raise InvalidStateError(
+                    f"Failed to enter initial state: {str(e)}", self._initial_state.get_id(), "enter", {"error": str(e)}
+                )
 
     def stop(self) -> None:
         """
@@ -280,12 +293,13 @@ class StateMachine(AbstractStateMachine):
             raise InvalidStateError("State machine not running", None, "stop")
 
         if self._current_state:
-            try:
-                self._exit_states(
-                    self._current_state, self._current_state, None, self._get_state_data(self._current_state.get_id())
-                )
-            except Exception as e:
-                self._logger.exception("Error during stop: %s", str(e))
+            with self._data_manager.access_data() as state_data:
+                try:
+                    self._exit_states(
+                        self._current_state, self._current_state, None, state_data[self._current_state.get_id()]
+                    )
+                except Exception as e:
+                    self._logger.exception("Error during stop: %s", str(e))
 
         self._running = False
         self._current_state = None
@@ -318,3 +332,21 @@ class StateMachine(AbstractStateMachine):
         if not self._current_state:
             raise InvalidStateError("No current state", "None", "get_current_state_id")
         return self._current_state.get_id()
+
+    def _handle_operation_error(
+        self, operation: str, error: Exception, details: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Handle errors that occur during state machine operations.
+
+        Currently logs the error and raises it.
+
+        Args:
+            operation: The operation during which the error occurred.
+            error: The exception object.
+            details: Optional dictionary containing additional error details.
+        """
+        logger.error(f"Error during operation '{operation}': {error}", exc_info=True)
+        if details:
+            logger.error("Error details: %s", details)
+        raise error  # Re-raise the original exception

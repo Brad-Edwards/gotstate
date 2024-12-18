@@ -1,62 +1,36 @@
 # hsm/interfaces/abc.py
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
+from abc import abstractmethod
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Dict, List, Optional, Protocol, TypeVar, runtime_checkable
 
 from hsm.interfaces.types import EventID, StateID, ValidationResult
 
-
-# Custom exceptions
-class HSMError(Exception):
-    """Base exception for all HSM-related errors"""
-
-    pass
-
-
-class StateError(HSMError):
-    """Errors related to state operations"""
-
-    pass
-
-
-class TransitionError(HSMError):
-    """Errors related to transition operations"""
-
-    pass
-
-
-class ValidationError(HSMError):
-    """Errors related to validation operations"""
-
-    pass
-
-
 # Type variables for generic protocols
 T = TypeVar("T")
 S = TypeVar("S", bound="AbstractState")
 
 
-# Runtime checkable protocols
 @runtime_checkable
-class AbstractStateMachine(Protocol):
+class AbstractEvent(Protocol):
     """
-    Protocol defining the core state machine interface.
+    Protocol for events.
 
     Runtime Invariants:
-    - Only one state is active at a time
-    - State transitions are atomic
-    - Event processing is sequential
+    - Events are immutable after creation
+    - Event IDs are unique within a session
     """
 
-    def start(self) -> None: ...
-    def stop(self) -> None: ...
-    def process_event(self, event: "AbstractEvent") -> None: ...
-    def get_current_state_id(self) -> StateID: ...
-    def get_state(self) -> Optional[AbstractState]: ...
+    def get_id(self) -> EventID: ...
+
+    def get_payload(self) -> Any: ...
+
+    def get_priority(self) -> int: ...
 
 
+# Runtime checkable protocols
 @runtime_checkable
 class AbstractState(Protocol):
     """
@@ -74,6 +48,24 @@ class AbstractState(Protocol):
     def on_exit(self, event: AbstractEvent, data: Any) -> None: ...
 
     def get_id(self) -> StateID: ...
+
+
+@runtime_checkable
+class AbstractStateMachine(Protocol):
+    """
+    Protocol defining the core state machine interface.
+
+    Runtime Invariants:
+    - Only one state is active at a time
+    - State transitions are atomic
+    - Event processing is sequential
+    """
+
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+    def process_event(self, event: "AbstractEvent") -> None: ...
+    def get_current_state_id(self) -> StateID: ...
+    def get_state(self) -> Optional[AbstractState]: ...
 
 
 @runtime_checkable
@@ -99,23 +91,6 @@ class AbstractCompositeState(AbstractState, Protocol):
     def has_history(self) -> bool: ...
 
     def set_history_state(self, state: AbstractState) -> None: ...
-
-
-@runtime_checkable
-class AbstractEvent(Protocol):
-    """
-    Protocol for events.
-
-    Runtime Invariants:
-    - Events are immutable after creation
-    - Event IDs are unique within a session
-    """
-
-    def get_id(self) -> EventID: ...
-
-    def get_payload(self) -> Any: ...
-
-    def get_priority(self) -> int: ...
 
 
 @runtime_checkable

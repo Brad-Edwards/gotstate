@@ -156,6 +156,8 @@ class CompositeState(AbstractCompositeState, State):
 
     def on_exit(self, event: AbstractEvent, data: Any) -> None:
         if self._current_substate:
+            if self.has_history():
+                self.set_history_state(self._current_substate)
             self._current_substate.on_exit(event, data)
 
     def _enter_substate(self, event: AbstractEvent, data: Any) -> None:

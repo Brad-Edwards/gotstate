@@ -19,6 +19,20 @@ class HSMError(Exception):
         self.details = details or {}
 
 
+class ExecutorError(HSMError):
+    """Base exception for executor-related errors.
+
+    Attributes:
+        message: Error description
+        details: Additional error context
+    """
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.details = details or {}
+
+
 class InvalidTransitionError(HSMError):
     """Raised when a state transition is invalid.
 

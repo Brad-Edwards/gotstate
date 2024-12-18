@@ -67,8 +67,8 @@ class LoggingAction(BasicAction):
         self.logger = logging.getLogger(logger_name)
 
     def execute(self, event: Event, state_data: Any) -> None:
-        event_id = event.get_id()
-        self.logger.info("Executing action for event: %s, state_data: %s", event_id, state_data)
+        event_id = event.get_id() if event is not None else "None"
+        self.logger.info(f"Executing action for event: {event_id}, state_data: {state_data}")
 
 
 class SetDataAction(BasicAction):

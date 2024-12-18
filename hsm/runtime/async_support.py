@@ -9,6 +9,7 @@ from functools import wraps
 from typing import (
     TYPE_CHECKING,
     Any,
+    AsyncGenerator,
     Awaitable,
     Callable,
     Dict,
@@ -19,10 +20,11 @@ from typing import (
     Type,
     TypeVar,
     Union,
+    cast,
     runtime_checkable,
 )
 
-from hsm.core.errors import HSMError, InvalidStateError
+from hsm.core.errors import ExecutorError, HSMError, InvalidStateError
 from hsm.core.state_machine import StateMachine
 from hsm.interfaces.abc import (
     AbstractAction,
@@ -40,6 +42,7 @@ from hsm.runtime.timers import AsyncTimer
 
 logger = logging.getLogger(__name__)
 
+EXECUTOR_IS_NOT_RUNNING = "Executor is not running"
 T = TypeVar("T")
 
 
@@ -188,6 +191,8 @@ class AsyncCompositeState(AsyncState, AbstractCompositeState):
 
     async def on_exit(self, event: AbstractEvent, data: Any) -> None:
         if self._current_substate:
+            if self.has_history():
+                self.set_history_state(self._current_substate)
             await self._current_substate.on_exit(event, data)
 
     async def _enter_substate(self, event: AbstractEvent, data: Any) -> None:
@@ -255,13 +260,7 @@ class AsyncTransition(AbstractTransition):
 class AsyncStateMachine(AbstractStateMachine):
     """Async variant of the state machine implementation."""
 
-    def __init__(
-        self,
-        states: List[AsyncState],
-        transitions: List[AsyncTransition],
-        initial_state: AsyncState,
-        max_queue_size: Optional[int] = None,
-    ):
+    def __init__(self, states: List[AsyncState], transitions: List[AsyncTransition], initial_state: AsyncState):
         """Initialize async state machine."""
         if not states:
             raise ValueError("States list cannot be empty")
@@ -272,19 +271,20 @@ class AsyncStateMachine(AbstractStateMachine):
         self._transitions: List[AsyncTransition] = transitions
         self._initial_state: AsyncState = initial_state
         self._current_state: Optional[AsyncState] = None
-        self._event_queue: AsyncEventQueue = AsyncEventQueue(max_size=max_queue_size)
         self._state_data: Dict[StateID, Any] = {}
         self._initialize_state_data()
 
         # Initialize timer with default callback
-        def timer_callback(timer_id: str, event: AbstractEvent) -> None:
-            if self._running and self._current_state:
-                asyncio.create_task(self.process_event(event))
+        async def timer_callback(timer_id: str, event: AbstractEvent) -> None:
+            try:
+                await self.process_event(event)
+            except Exception as e:
+                logger.error("Timer callback failed: %s", str(e))
+                # You might want to handle this error more gracefully, e.g., retry or set an error state
+                # self._context.handle_error(e)
 
         self._timer: AsyncTimer = AsyncTimer("state_machine_timer", timer_callback)
         self._running: bool = False
-        self._state_changes: Set[StateID] = set()
-        self._state_change_callbacks: List[Callable[[StateID, StateID], None]] = []
         self._lock_manager: AsyncLockManager = AsyncLockManager()
 
     def _initialize_state_data(self) -> None:
@@ -310,7 +310,6 @@ class AsyncStateMachine(AbstractStateMachine):
             await self._current_state.on_entry(None, self._get_state_data(self._current_state.get_id()))
             if isinstance(self._current_state, AsyncCompositeState):
                 await self._current_state._enter_substate(None, self._get_state_data(self._current_state.get_id()))
-            asyncio.create_task(self._process_events())
         except Exception as e:
             self._running = False
             raise AsyncHSMError(f"Failed to start state machine: {str(e)}") from e
@@ -323,43 +322,15 @@ class AsyncStateMachine(AbstractStateMachine):
         self._running = False
         try:
             if self._current_state:
-                await self._current_state.on_exit(None, self._get_state_data(self._current_state.get_id()))
-                if isinstance(self._current_state, AsyncCompositeState):
-                    current_substate = self._current_state._current_substate
-                    if current_substate:
-                        await current_substate.on_exit(None, self._get_state_data(current_substate.get_id()))
-            await self._event_queue.shutdown()
+                await self._exit_states(
+                    self._current_state, self._current_state, None, self._get_state_data(self._current_state.get_id())
+                )
             await self._timer.shutdown()
             # Wait for event processing loop to complete
             await asyncio.sleep(0)  # Give the event loop a chance to finish
         except Exception as e:
             logger.error("Error during state machine shutdown: %s", str(e))
             raise AsyncHSMError(f"Failed to stop state machine: {str(e)}") from e
-
-    async def process_event(self, event: AbstractEvent) -> None:
-        """Process an event asynchronously."""
-        if not self._running:
-            raise AsyncHSMError("State machine is not running")
-
-        try:
-            await self._event_queue.enqueue(event)
-        except EventQueueError as e:
-            raise AsyncHSMError(f"Failed to enqueue event: {str(e)}") from e
-
-    async def _process_events(self) -> None:
-        """Event processing loop."""
-        while self._running:
-            try:
-                event = await self._event_queue.dequeue()
-                if event:  # Check if we got a valid event
-                    await self._lock_manager.with_lock("processing", lambda e=event: self._handle_event(e))
-            except EventQueueError:
-                # Queue being empty is a normal condition, just continue
-                await asyncio.sleep(0)  # Yield control to other tasks
-            except Exception as e:
-                logger.error("Unexpected error in event processing loop: %s", str(e))
-                logger.exception("Stack trace:")
-                await asyncio.sleep(0)  # Yield control to other tasks
 
     async def _handle_event(self, event: AbstractEvent) -> None:
         """Handle a single event."""
@@ -437,10 +408,19 @@ class AsyncStateMachine(AbstractStateMachine):
                 current_state = None
 
         if isinstance(source_state, AsyncCompositeState):
+            is_target_substate = False
+            if source_state.get_substates():
+                for substate in source_state.get_substates():
+                    if substate == target_state:
+                        is_target_substate = True
+                        break
             if source_state._current_substate:
                 await source_state._current_substate.on_exit(event, data)
-        await source_state.on_exit(event, data)
-        self._current_state = None
+                if not is_target_substate:
+                    source_state._current_substate = None
+            await source_state.on_exit(event, data)
+            if not is_target_substate:
+                self._current_state = None
 
     async def _enter_states(
         self, source_state: AbstractState, target_state: AbstractState, event: AbstractEvent, data: Any
@@ -476,18 +456,9 @@ class AsyncStateMachine(AbstractStateMachine):
         """Check if the state machine is running."""
         return self._running
 
-    def add_state_change_callback(self, callback: Callable[[StateID, StateID], None]) -> None:
-        self._state_change_callbacks.append(callback)
-
-    def _notify_state_change(self, source_id: StateID, target_id: StateID) -> None:
-        """Notify all callbacks of a state change."""
-        for callback in self._state_change_callbacks:
-            callback(source_id, target_id)
-
     def get_current_state_id(self) -> StateID:
         """
         Get the ID of the current state.
-
         Returns:
             Current state ID or 'None' if no current state
 
@@ -503,8 +474,6 @@ class AsyncStateMachine(AbstractStateMachine):
         return {
             "current_state": self._current_state.get_id() if self._current_state else None,
             "running": self._running,
-            "state_changes": list(self._state_changes),
-            "queue_size": await self._event_queue.size(),
             "states": list(self._states.keys()),
             "transitions": [
                 {
@@ -515,3 +484,116 @@ class AsyncStateMachine(AbstractStateMachine):
                 for t in self._transitions
             ],
         }
+
+
+class AsyncExecutor:
+    """
+    Asynchronous event processor for the async state machine.
+    """
+
+    def __init__(self, state_machine: AsyncStateMachine, max_queue_size: Optional[int] = None):
+        if not state_machine:
+            raise ValueError("state_machine cannot be None")
+        self._state_machine = state_machine
+        self._event_queue: AsyncEventQueue = AsyncEventQueue(max_size=max_queue_size)
+        self._task: Optional[asyncio.Task] = None
+        self._processing_flag: asyncio.Event = asyncio.Event()
+        self._processing_flag.set()
+
+        # Initialize timer with default callback
+        async def timer_callback(timer_id: str, event: AbstractEvent) -> None:
+            try:
+                if self._processing_flag.is_set():
+                    await self.process_event(event)
+            except Exception as e:
+                logger.error("Timer callback failed: %s", str(e))
+                # You might want to handle this error more gracefully, e.g., retry or set an error state
+                # self._context.handle_error(e)
+
+        self._timer: AsyncTimer = AsyncTimer("state_machine_timer", timer_callback)
+
+    async def start(self) -> None:
+        """Start the executor and the state machine."""
+        if self._task is not None:
+            raise ExecutorError("Executor already started")
+
+        await self._state_machine.start()
+        self._task = asyncio.create_task(self._run_forever())
+
+    async def stop(self) -> None:
+        """Stop the executor and the state machine."""
+        if self._task is None:
+            return
+
+        try:
+            await self._state_machine.stop()
+            if self._task:
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass  # Expected when cancelling the task
+        finally:
+            self._task = None
+
+    async def process_event(self, event: AbstractEvent) -> None:
+        """Enqueue an event for processing."""
+        if self._task is None:
+            raise ExecutorError("Executor is not running")
+        await self._event_queue.enqueue(event)
+
+    async def _run_forever(self) -> None:
+        """Main event processing loop."""
+        while True:
+            try:
+                if not self._processing_flag.is_set():
+                    await self._processing_flag.wait()  # Pause until flag is set
+
+                event = await self._event_queue.try_dequeue(timeout=0.1)
+                if event:
+                    try:
+                        await self._state_machine._handle_event(event)
+                    except AsyncHSMError as e:
+                        logger.error("State machine error processing event: %s", str(e))
+                        # Continue processing next events but log the error
+                        continue
+                    except Exception as e:
+                        logger.exception("Unexpected error processing event: %s", str(e))
+                        # For unexpected errors, wait a bit before continuing to prevent tight error loops
+                        await asyncio.sleep(0.1)
+                        continue
+
+            except asyncio.CancelledError:
+                logger.debug("Event processing loop cancelled")
+                break  # Exit loop on cancellation
+            except EventQueueError as e:
+                logger.error("Event queue error: %s", str(e))
+                # Wait a bit before retrying queue operations
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                logger.exception("Critical error in event processing loop: %s", str(e))
+                # Wait longer for critical errors before retrying
+                await asyncio.sleep(1.0)
+
+    @asynccontextmanager
+    async def pause(self) -> AsyncGenerator[None, None]:
+        """Pause event processing."""
+        if not self.is_running():
+            raise ExecutorError(EXECUTOR_IS_NOT_RUNNING)
+
+        self._processing_flag.clear()  # Clear the flag to pause
+        try:
+            yield
+        finally:
+            self._processing_flag.set()
+
+    def resume(self) -> None:
+        """Explicitly resumes event processing (can be called outside of the pause context)."""
+        if not self.is_running():
+            raise ExecutorError("Executor is not running")
+
+        self._processing_flag.set()
+
+    def is_running(self) -> bool:
+        """Check if the executor is running."""
+        return self._task is not None and not self._task.done()
