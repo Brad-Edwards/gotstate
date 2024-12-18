@@ -137,26 +137,29 @@ class StateLock:
             return False
 
     def release(self) -> None:
-        current_thread = threading.get_ident()
+        """Release the lock.
 
-        with self._owner_lock:
-            if not self._locked:
-                return
+        Raises:
+            LockReleaseError: If the lock is not owned by the current thread
+                or if the lock is not currently locked
+        """
+        if not self.locked():
+            raise LockReleaseError("Cannot release an unlocked lock", self._id, threading.get_ident())
 
-            if self._owner != current_thread:
-                raise LockReleaseError(f"Lock {self._id} cannot be released by non-owner thread", self._id, self._owner)
+        if self._owner != threading.get_ident():
+            raise LockReleaseError("Cannot release lock owned by another thread", self._id, self._owner)
 
-            try:
-                self._lock.release()
-                self._lock_count -= 1
+        try:
+            self._lock.release()
+            self._lock_count -= 1
 
-                if self._lock_count == 0:
-                    self._owner = None
-                    self._acquisition_time = None
-                    self._locked = False
+            if self._lock_count == 0:
+                self._owner = None
+                self._acquisition_time = None
+                self._locked = False
 
-            except RuntimeError:
-                raise LockReleaseError(f"Lock {self._id} cannot be released by non-owner thread", self._id, self._owner)
+        except RuntimeError:
+            raise LockReleaseError(f"Lock {self._id} cannot be released by non-owner thread", self._id, self._owner)
 
     def locked(self) -> bool:
         with self._owner_lock:
@@ -224,20 +227,18 @@ class AsyncStateLock:
             True if lock was acquired, False otherwise
 
         Raises:
-            LockAcquisitionError: If lock cannot be acquired and blocking is True
+            LockAcquisitionError: If lock cannot be acquired with blocking=True and timeout>0
         """
         try:
-            timeout_value = None
-            if not blocking:
-                timeout_value = 0
-            elif timeout is not None:
-                timeout_value = timeout
+            # Determine timeout value
+            timeout_value = None if (blocking and timeout is None) else (0 if not blocking else timeout)
 
-            if blocking and timeout is None:
+            # Acquire the lock
+            success = (
                 await self._lock.acquire()
-                success = True
-            else:
-                success = await asyncio.wait_for(self._lock.acquire(), timeout=timeout_value)
+                if timeout_value is None
+                else await asyncio.wait_for(self._lock.acquire(), timeout=timeout_value)
+            )
 
             if success:
                 self._owner = threading.get_ident()
@@ -245,7 +246,7 @@ class AsyncStateLock:
             return success
 
         except asyncio.TimeoutError:
-            if blocking and timeout is not None:
+            if blocking and timeout is not None and timeout > 0:
                 raise LockAcquisitionError(f"Failed to acquire lock {self._id} after {timeout}s", self._id, timeout)
             return False
 
