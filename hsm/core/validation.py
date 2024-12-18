@@ -352,8 +352,8 @@ class Validator(AbstractValidator):
             adjacency[state.get_id()] = set()
 
         for transition in context.transitions:
-            source = transition.get_source_state_id()
-            target = transition.get_target_state_id()
+            source = transition.get_source_state().get_id()
+            target = transition.get_target_state().get_id()
             adjacency[source].add(target)
 
         # Check reachability using BFS
@@ -384,23 +384,23 @@ class Validator(AbstractValidator):
     def _check_valid_transitions(self, context: ValidationContext) -> bool:
         """Verify all transitions reference valid states."""
         for transition in context.transitions:
-            if not context.state_exists(transition.get_source_state_id()):
+            if not context.state_exists(transition.get_source_state().get_id()):
                 context.add_result(
                     ValidationSeverity.ERROR.name,
-                    f"Transition references nonexistent source state: {transition.get_source_state_id()}",
+                    f"Transition references nonexistent source state: {transition.get_source_state().get_id()}",
                     {
-                        "transition_source": transition.get_source_state_id(),
-                        "transition_target": transition.get_target_state_id(),
+                        "transition_source": transition.get_source_state().get_id(),
+                        "transition_target": transition.get_target_state().get_id(),
                     },
                 )
                 return False
-            if not context.state_exists(transition.get_target_state_id()):
+            if not context.state_exists(transition.get_target_state().get_id()):
                 context.add_result(
                     ValidationSeverity.ERROR.name,
-                    f"Transition references nonexistent target state: {transition.get_target_state_id()}",
+                    f"Transition references nonexistent target state: {transition.get_target_state().get_id()}",
                     {
-                        "transition_source": transition.get_source_state_id(),
-                        "transition_target": transition.get_target_state_id(),
+                        "transition_source": transition.get_source_state().get_id(),
+                        "transition_target": transition.get_target_state().get_id(),
                     },
                 )
                 return False
@@ -426,12 +426,13 @@ class Validator(AbstractValidator):
             if guard is not None and not isinstance(guard, AbstractGuard):
                 context.add_result(
                     ValidationSeverity.WARNING.name,
-                    f"Guard in transition {transition.get_source_state_id()}->{transition.get_target_state_id()} "
+                    f"Guard in transition {transition.get_source_state().get_id()}->"
+                    f"{transition.get_target_state().get_id()} "
                     "does not implement AbstractGuard",
                     {
                         "guard_type": str(type(guard)),
-                        "transition_source": transition.get_source_state_id(),
-                        "transition_target": transition.get_target_state_id(),
+                        "transition_source": transition.get_source_state().get_id(),
+                        "transition_target": transition.get_target_state().get_id,
                     },
                 )
                 return False
@@ -444,34 +445,15 @@ class Validator(AbstractValidator):
                 if not isinstance(action, AbstractAction):
                     context.add_result(
                         ValidationSeverity.WARNING.name,
-                        f"Action {i} in transition {transition.get_source_state_id()}->"
-                        f"{transition.get_target_state_id()} "
+                        f"Action {i} in transition {transition.get_source_state().get_id()}->"
+                        f"{transition.get_target_state().get_id()} "
                         "does not implement AbstractAction",
                         {
                             "action_type": str(type(action)),
                             "action_index": i,
-                            "transition_source": transition.get_source_state_id(),
-                            "transition_target": transition.get_target_state_id(),
+                            "transition_source": transition.get_source_state().get_id(),
+                            "transition_target": transition.get_target_state().get_id(),
                         },
                     )
                     return False
-        return True
-
-    def _check_data_isolation(self, context: ValidationContext) -> bool:
-        """Verify state data is properly isolated."""
-        seen_data_ids = {}  # Map data_id to first state that used it
-        for state in context.states:
-            data_id = id(state.data)
-            if data_id in seen_data_ids:
-                context.add_result(
-                    ValidationSeverity.ERROR.name,
-                    f"State {state.get_id()} shares data dictionary with state {seen_data_ids[data_id]}",
-                    {
-                        "data_id": data_id,
-                        "state_id": state.get_id(),
-                        "shared_with_state": seen_data_ids[data_id],
-                    },
-                )
-                return False
-            seen_data_ids[data_id] = state.get_id()
         return True

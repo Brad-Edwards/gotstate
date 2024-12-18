@@ -4,7 +4,7 @@
 
 import asyncio
 import logging
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from functools import wraps
 from typing import (
     TYPE_CHECKING,
@@ -18,12 +18,21 @@ from typing import (
     Set,
     Type,
     TypeVar,
+    Union,
     runtime_checkable,
 )
 
-from hsm.core.errors import HSMError
+from hsm.core.errors import HSMError, InvalidStateError
 from hsm.core.state_machine import StateMachine
-from hsm.interfaces.abc import AbstractAction, AbstractEvent, AbstractGuard, AbstractState, AbstractTransition
+from hsm.interfaces.abc import (
+    AbstractAction,
+    AbstractCompositeState,
+    AbstractEvent,
+    AbstractGuard,
+    AbstractState,
+    AbstractStateMachine,
+    AbstractTransition,
+)
 from hsm.interfaces.protocols import Event
 from hsm.interfaces.types import EventID, StateID
 from hsm.runtime.event_queue import AsyncEventQueue, EventQueueError
@@ -32,11 +41,6 @@ from hsm.runtime.timers import AsyncTimer
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-# Forward references
-if TYPE_CHECKING:
-    AsyncTransitionType = Type["AsyncTransition"]
-    AsyncStateType = Type["AsyncState"]
 
 
 class AsyncLockManager:
@@ -59,30 +63,6 @@ class AsyncHSMError(HSMError):
     pass
 
 
-class AsyncHSMBase:
-    """Base class with common validation and error handling."""
-
-    def _validate_state_id(self, state_id: StateID, context: str) -> None:
-        """Validate state ID."""
-        if not state_id:
-            raise ValueError(f"Invalid state ID in {context}")
-
-    def _validate_transition(self, transition: "AsyncTransition", states: Dict[str, "AsyncState"]) -> None:
-        """Validate transition references valid states."""
-        source_id = transition.get_source_state_id()
-        target_id = transition.get_target_state_id()
-
-        if source_id not in states:
-            raise ValueError(f"Invalid source state: {source_id}")
-        if target_id not in states:
-            raise ValueError(f"Invalid target state: {target_id}")
-
-    @staticmethod
-    def wrap_error(e: Exception, context: str, **kwargs: Any) -> AsyncHSMError:
-        """Wrap exception with context."""
-        return AsyncHSMError(f"Error in {context}: {str(e)}", **kwargs)
-
-
 class AsyncStateError(AsyncHSMError):
     """Raised when async state operations fail."""
 
@@ -98,14 +78,14 @@ class AsyncTransitionError(AsyncHSMError):
     def __init__(
         self,
         message: str,
-        source_id: StateID,
-        target_id: StateID,
+        source_state: AbstractState,
+        target_state: AbstractState,
         event: AbstractEvent,
         details: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__(message)
-        self.source_id = source_id
-        self.target_id = target_id
+        self.source_state = source_state
+        self.target_state = target_state
         self.event = event
         self.details = details or {}
 
@@ -124,53 +104,117 @@ class AsyncAction(Protocol):
     async def execute(self, event: Event, state_data: Any) -> None: ...
 
 
-class AsyncState(AsyncHSMBase, AbstractState):
+class AsyncState(AbstractState):
     """Base class for async states."""
 
     def __init__(self, state_id: StateID):
-        self._validate_state_id(state_id, "state initialization")
+        if not state_id:
+            raise ValueError("Invalid state ID in state initialization")
         self._state_id = state_id
-        self._data: Dict[str, Any] = {}
         self._entry_lock = asyncio.Lock()
         self._exit_lock = asyncio.Lock()
 
-    async def on_enter(self) -> None:
+    async def on_entry(self, event: AbstractEvent, data: Any) -> None:
         """Async state entry handler."""
         async with self._entry_lock:
             try:
-                await self._do_enter()
+                await self._do_enter(event, data)
             except Exception as e:
                 raise AsyncStateError(f"Error during state entry: {str(e)}", self._state_id, {"error": str(e)}) from e
 
-    async def _do_enter(self) -> None:
+    async def _do_enter(self, event: AbstractEvent, data: Any) -> None:
         """Override this method to implement custom entry logic."""
         # Meant to be overridden by subclasses
         pass
 
-    async def on_exit(self) -> None:
+    async def on_exit(self, event: AbstractEvent, data: Any) -> None:
         """Async state exit handler."""
         async with self._exit_lock:
             try:
-                await self._do_exit()
+                await self._do_exit(event, data)
             except Exception as e:
                 raise AsyncStateError(f"Error during state exit: {str(e)}", self._state_id, {"error": str(e)}) from e
 
-    async def _do_exit(self) -> None:
+    async def _do_exit(self, event: AbstractEvent, data: Any) -> None:
         """Override this method to implement custom exit logic."""
         pass
-
-    @property
-    def data(self) -> Dict[str, Any]:
-        """Access state data dictionary."""
-        return self._data.copy()  # Return a copy to maintain immutability
-
-    def set_data(self, key: str, value: Any) -> None:
-        """Safely set a value in the state data."""
-        self._data[key] = value
 
     def get_id(self) -> StateID:
         """Get state identifier."""
         return self._state_id
+
+
+class AsyncCompositeState(AsyncState, AbstractCompositeState):
+    def __init__(
+        self,
+        state_id: StateID,
+        substates: List[AbstractState],
+        initial_state: Optional[AbstractState] = None,
+        has_history: bool = False,
+        parent_state: Optional[AbstractState] = None,
+    ):
+        super().__init__(state_id)
+
+        if initial_state is None and substates:
+            initial_state = substates[0]
+
+        self._substates = substates
+        self._initial_state = initial_state
+        self._has_history = has_history
+        self._history_state: Optional[AbstractState] = None
+        self._current_substate: Optional[AbstractState] = None
+        self._parent_state = parent_state
+
+        # Validate initial state based on whether we have substates
+        if substates:
+            if initial_state is None:
+                raise ValueError("initial_state cannot be None when substates exist")
+            if initial_state not in substates:
+                raise ValueError("initial_state must be one of the substates")
+        else:
+            if initial_state is not None:
+                raise ValueError("initial_state must be None when substates is empty")
+
+    @property
+    def parent_state(self) -> Optional[AbstractState]:
+        return self._parent_state
+
+    @parent_state.setter
+    def parent_state(self, value: AbstractState) -> None:
+        self._parent_state = value
+
+    async def on_entry(self, event: AbstractEvent, data: Any) -> None:
+        await self._enter_substate(event, data)
+
+    async def on_exit(self, event: AbstractEvent, data: Any) -> None:
+        if self._current_substate:
+            await self._current_substate.on_exit(event, data)
+
+    async def _enter_substate(self, event: AbstractEvent, data: Any) -> None:
+        """Enter the appropriate substate."""
+        if self.has_history() and self._history_state:
+            self._current_substate = self._history_state
+        else:
+            self._current_substate = self.get_initial_state()
+
+        if self._current_substate:
+            await self._current_substate.on_entry(event, data)
+
+    def get_substates(self) -> List[AbstractState]:
+        return self._substates
+
+    def get_initial_state(self) -> AbstractState:
+        if self._initial_state is None:
+            raise ValueError("Initial state not set for composite state")
+        return self._initial_state
+
+    def has_history(self) -> bool:
+        return self._has_history
+
+    def set_history_state(self, state: AbstractState) -> None:
+        if state not in self._substates:
+            raise ValueError("State is not a substate of this composite state")
+        self._history_state = state
 
 
 class AsyncTransition(AbstractTransition):
@@ -178,25 +222,25 @@ class AsyncTransition(AbstractTransition):
 
     def __init__(
         self,
-        source_id: StateID,
-        target_id: StateID,
+        source: AbstractState,
+        target: AbstractState,
         guard: Optional[AsyncGuard] = None,
         actions: Optional[List[AsyncAction]] = None,
         priority: int = 0,
     ):
-        if not source_id or not target_id:
-            raise ValueError("State IDs cannot be empty")
-        self._source_id = source_id
-        self._target_id = target_id
+        if source is None or target is None:
+            raise ValueError("Source and target states cannot be None")
+        self._source = source
+        self._target = target
         self._guard = guard
         self._actions = actions or []
         self._priority = priority
 
-    def get_source_state_id(self) -> StateID:
-        return self._source_id
+    def get_source_state(self) -> AbstractState:
+        return self._source
 
-    def get_target_state_id(self) -> StateID:
-        return self._target_id
+    def get_target_state(self) -> AbstractState:
+        return self._target
 
     def get_guard(self) -> Optional[AsyncGuard]:
         return self._guard
@@ -208,7 +252,7 @@ class AsyncTransition(AbstractTransition):
         return self._priority
 
 
-class AsyncStateMachine(AsyncHSMBase):
+class AsyncStateMachine(AbstractStateMachine):
     """Async variant of the state machine implementation."""
 
     def __init__(
@@ -219,27 +263,41 @@ class AsyncStateMachine(AsyncHSMBase):
         max_queue_size: Optional[int] = None,
     ):
         """Initialize async state machine."""
-        if not states or transitions is None or not initial_state:
-            raise ValueError("States, transitions, and initial state are required")
+        if not states:
+            raise ValueError("States list cannot be empty")
         if initial_state not in states:
             raise ValueError("Initial state must be in states list")
 
-        self._states = {state.get_id(): state for state in states}
-        self._transitions = transitions  # Keep the original list, but allow it to be empty
-        self._initial_state = initial_state
+        self._states: Dict[StateID, AsyncState] = {state.get_id(): state for state in states}
+        self._transitions: List[AsyncTransition] = transitions
+        self._initial_state: AsyncState = initial_state
         self._current_state: Optional[AsyncState] = None
-        self._event_queue = AsyncEventQueue(max_size=max_queue_size)
+        self._event_queue: AsyncEventQueue = AsyncEventQueue(max_size=max_queue_size)
+        self._state_data: Dict[StateID, Any] = {}
+        self._initialize_state_data()
 
         # Initialize timer with default callback
         def timer_callback(timer_id: str, event: AbstractEvent) -> None:
             if self._running and self._current_state:
                 asyncio.create_task(self.process_event(event))
 
-        self._timer = AsyncTimer("state_machine_timer", timer_callback)
-        self._running = False
+        self._timer: AsyncTimer = AsyncTimer("state_machine_timer", timer_callback)
+        self._running: bool = False
         self._state_changes: Set[StateID] = set()
         self._state_change_callbacks: List[Callable[[StateID, StateID], None]] = []
-        self._lock_manager = AsyncLockManager()
+        self._lock_manager: AsyncLockManager = AsyncLockManager()
+
+    def _initialize_state_data(self) -> None:
+        """Initialize the _state_data dictionary."""
+        self._state_data = {}
+        for state_id, state in self._states.items():
+            self._state_data[state_id] = {}
+
+    def _get_state_data(self, state_id: StateID) -> Any:
+        """Get the data for the given state."""
+        if state_id not in self._state_data:
+            raise ValueError(f"No data found for state: {state_id}")
+        return self._state_data[state_id]
 
     async def start(self) -> None:
         """Start the state machine."""
@@ -247,9 +305,11 @@ class AsyncStateMachine(AsyncHSMBase):
             return
 
         self._running = True
+        self._current_state = self._initial_state
         try:
-            self._current_state = self._initial_state
-            await self._current_state.on_enter()
+            await self._current_state.on_entry(None, self._get_state_data(self._current_state.get_id()))
+            if isinstance(self._current_state, AsyncCompositeState):
+                await self._current_state._enter_substate(None, self._get_state_data(self._current_state.get_id()))
             asyncio.create_task(self._process_events())
         except Exception as e:
             self._running = False
@@ -263,8 +323,12 @@ class AsyncStateMachine(AsyncHSMBase):
         self._running = False
         try:
             if self._current_state:
-                await self._current_state.on_exit()
-            await self._event_queue.shutdown()  # Use shutdown instead of clear
+                await self._current_state.on_exit(None, self._get_state_data(self._current_state.get_id()))
+                if isinstance(self._current_state, AsyncCompositeState):
+                    current_substate = self._current_state._current_substate
+                    if current_substate:
+                        await current_substate.on_exit(None, self._get_state_data(current_substate.get_id()))
+            await self._event_queue.shutdown()
             await self._timer.shutdown()
             # Wait for event processing loop to complete
             await asyncio.sleep(0)  # Give the event loop a chance to finish
@@ -314,13 +378,13 @@ class AsyncStateMachine(AsyncHSMBase):
         current_state_id = self._current_state.get_id()
 
         for transition in self._transitions:
-            if transition.get_source_state_id() != current_state_id:
+            if transition.get_source_state().get_id() != current_state_id:
                 continue
 
             guard = transition.get_guard()
             if guard:
                 try:
-                    if await guard.check(event, self._current_state.data):
+                    if await guard.check(event, self._get_state_data(transition.get_source_state().get_id())):
                         valid_transitions.append(transition)
                 except Exception as e:
                     logger.error("Guard check failed: %s", str(e))
@@ -338,20 +402,73 @@ class AsyncStateMachine(AsyncHSMBase):
         if not self._current_state:
             return
 
-        source_id = transition.get_source_state_id()
-        target_id = transition.get_target_state_id()
-        target_state = self._states.get(target_id)
-
-        self._validate_transition(transition, self._states)
+        source_state = transition.get_source_state()
+        target_state = transition.get_target_state()
+        source_data = self._get_state_data(source_state.get_id())
+        target_data = self._get_state_data(target_state.get_id())
 
         try:
-            await self._do_transition(self._current_state, target_state, transition, event)
+            # Exit states
+            await self._exit_states(source_state, target_state, event, source_data)
+
+            # Execute transition actions
+            for action in transition.get_actions():
+                await action.execute(event, source_data)
+                # Enter states
+            await self._enter_states(source_state, target_state, event, target_data)
+
         except Exception as e:
-            raise self.wrap_error(
-                e, "transition execution", source_id=source_id, target_id=target_id, event=event
+            raise AsyncTransitionError(
+                f"Error during transition execution: {str(e)}", source_state, target_state, event
             ) from e
 
-    def get_current_state(self) -> Optional[AsyncState]:
+    async def _exit_states(
+        self, source_state: AbstractState, target_state: AbstractState, event: AbstractEvent, data: Any
+    ) -> None:
+        """
+        Helper function for exiting states during a transition.
+        """
+        current_state = self._current_state
+        while current_state and current_state != source_state:
+            await current_state.on_exit(event, self._get_state_data(current_state.get_id()))
+            if isinstance(current_state, AsyncCompositeState):
+                current_state = current_state._parent_state if current_state._parent_state else None
+            else:
+                current_state = None
+
+        if isinstance(source_state, AsyncCompositeState):
+            if source_state._current_substate:
+                await source_state._current_substate.on_exit(event, data)
+        await source_state.on_exit(event, data)
+        self._current_state = None
+
+    async def _enter_states(
+        self, source_state: AbstractState, target_state: AbstractState, event: AbstractEvent, data: Any
+    ) -> None:
+        """
+        Helper function for entering states during a transition.
+        """
+        # Build a path of states to enter from the source state to the target state
+        path_to_target = []
+        current_state = target_state
+        while current_state != source_state:
+            path_to_target.insert(0, current_state)
+            if isinstance(current_state, AsyncCompositeState) and current_state._parent_state:
+                current_state = current_state._parent_state
+            else:
+                current_state = None
+
+        # Enter all states in the path
+        for state in path_to_target:
+            await state.on_entry(event, self._get_state_data(state.get_id()))
+            if isinstance(state, AsyncCompositeState):
+                await state._enter_substate(event, data)
+                if state.has_history():
+                    state.set_history_state(state._current_substate)
+
+        self._current_state = target_state
+
+    def get_state(self) -> Optional[AsyncState]:
         """Get the current state."""
         return self._current_state
 
@@ -359,39 +476,27 @@ class AsyncStateMachine(AsyncHSMBase):
         """Check if the state machine is running."""
         return self._running
 
-    async def reset(self) -> None:
-        """Reset the state machine to its initial state."""
-        if self._running:
-            await self.stop()
-
-        self._current_state = None
-        self._state_changes.clear()
-        await self._event_queue.shutdown()  # Use shutdown instead of clear
-        await self.start()
-
-    async def __aenter__(self) -> "AsyncStateMachine":
-        await self.start()
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        await self.stop()
-
     def add_state_change_callback(self, callback: Callable[[StateID, StateID], None]) -> None:
         self._state_change_callbacks.append(callback)
 
-    def validate(self) -> None:
-        """Validate state machine configuration."""
-        if not self._states:
-            raise ValueError("No states defined")
-        if self._transitions is None:  # Only check if transitions is None, allow empty list
-            raise ValueError("Transitions list cannot be None")
+    def _notify_state_change(self, source_id: StateID, target_id: StateID) -> None:
+        """Notify all callbacks of a state change."""
+        for callback in self._state_change_callbacks:
+            callback(source_id, target_id)
 
-        # Validate all transitions reference valid states
-        for transition in self._transitions:
-            if transition.get_source_state_id() not in self._states:
-                raise ValueError(f"Invalid source state: {transition.get_source_state_id()}")
-            if transition.get_target_state_id() not in self._states:
-                raise ValueError(f"Invalid target state: {transition.get_target_state_id()}")
+    def get_current_state_id(self) -> StateID:
+        """
+        Get the ID of the current state.
+
+        Returns:
+            Current state ID or 'None' if no current state
+
+        Raises:
+            InvalidStateError: If no current state
+        """
+        if not self._current_state:
+            raise InvalidStateError("No current state", "None", "get_current_state_id")
+        return self._current_state.get_id()
 
     async def get_debug_info(self) -> Dict[str, Any]:
         """Get debug information about the state machine."""
@@ -402,54 +507,11 @@ class AsyncStateMachine(AsyncHSMBase):
             "queue_size": await self._event_queue.size(),
             "states": list(self._states.keys()),
             "transitions": [
-                {"source": t.get_source_state_id(), "target": t.get_target_state_id(), "priority": t.get_priority()}
+                {
+                    "source": t.get_source_state().get_id(),
+                    "target": t.get_target_state().get_id(),
+                    "priority": t.get_priority(),
+                }
                 for t in self._transitions
             ],
         }
-
-    async def _handle_async_operation(
-        self, operation: Callable[[], Awaitable[T]], error_class: Type[AsyncHSMError], error_msg: str, **error_kwargs
-    ) -> T:
-        """Helper for consistent error handling of async operations."""
-        try:
-            return await operation()
-        except Exception as e:
-            raise error_class(f"{error_msg}: {str(e)}", **error_kwargs) from e
-
-    def requires_current_state(self, f: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[Optional[T]]]:
-        """Decorator to ensure current state exists before operation."""
-
-        @wraps(f)
-        async def wrapper(*args: Any, **kwargs: Any) -> Optional[T]:
-            if not self._current_state:
-                return None
-            return await f(self, *args, **kwargs)
-
-        return wrapper
-
-    @contextmanager
-    async def _protected_operation(self, lock: asyncio.Lock):
-        """Context manager for lock-protected operations."""
-        async with lock:
-            yield
-
-    def _notify_state_change(self, source_id: StateID, target_id: StateID) -> None:
-        """Notify all callbacks of a state change."""
-        for callback in self._state_change_callbacks:
-            callback(source_id, target_id)
-
-    async def _do_transition(
-        self, current_state: AsyncState, target_state: AsyncState, transition: AsyncTransition, event: AbstractEvent
-    ) -> None:
-        """Execute transition steps."""
-        await current_state.on_exit()
-
-        for action in transition.get_actions():
-            await action.execute(event, current_state.data)
-
-        self._current_state = target_state
-        self._state_changes.add(target_state.get_id())
-
-        await target_state.on_enter()
-
-        self._notify_state_change(current_state.get_id(), target_state.get_id())

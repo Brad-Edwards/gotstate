@@ -2,10 +2,10 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 
-import asyncio
 import logging
+import time
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from hsm.core.actions import ActionExecutionError
 from hsm.core.data_management import DataManager
@@ -17,6 +17,7 @@ from hsm.core.errors import (
     InvalidTransitionError,
 )
 from hsm.core.hooks import HookManager
+from hsm.core.states import CompositeState
 from hsm.core.validation import ValidationSeverity, Validator
 from hsm.interfaces.abc import AbstractEvent, AbstractState, AbstractStateMachine, AbstractTransition
 from hsm.interfaces.types import StateID
@@ -43,6 +44,7 @@ class StateMachine(AbstractStateMachine):
         _data_manager: Manages state data
         _running: Whether machine is processing events
         _logger: Logger instance
+        _state_data: Dictionary to store data for each state.
     """
 
     def __init__(
@@ -60,33 +62,42 @@ class StateMachine(AbstractStateMachine):
             initial_state: Starting state
 
         Raises:
-            ConfigurationError: If configuration is invalid
-            ValueError: If states or transitions are empty
-            TypeError: If arguments have wrong types
+            ValueError: If states or transitions are empty or if initial state is not in the states list.
+            TypeError: If arguments have wrong types.
         """
         if not states:
             raise ValueError("States list cannot be empty")
-        if not transitions:
-            raise ValueError("Transitions list cannot be empty")
+        # Transitions are allowed to be empty
         if initial_state not in states:
             raise ValueError("Initial state must be in states list")
 
         # Initialize core components
         self._states: Dict[StateID, AbstractState] = {state.get_id(): state for state in states}
-        self._transitions = transitions
-        self._initial_state = initial_state
+        self._transitions: List[AbstractTransition] = transitions
+        self._initial_state: AbstractState = initial_state
         self._current_state: Optional[AbstractState] = None
 
         # Initialize managers
-        self._hook_manager = HookManager()
-        self._data_manager = DataManager()
+        self._hook_manager: HookManager = HookManager()
+        self._data_manager: DataManager = DataManager()
 
         # Initialize state
-        self._running = False
-        self._logger = logging.getLogger("hsm.core.state_machine")
+        self._running: bool = False
+        self._logger: logging.Logger = logging.getLogger("hsm.core.state_machine")
+        self._state_data: Dict[StateID, Any] = {}
+        self._initialize_state_data()
 
-        # Validate configuration
-        self._validate_configuration()
+    def _initialize_state_data(self) -> None:
+        """Initialize the _state_data dictionary."""
+        self._state_data = {}
+        for state_id, state in self._states.items():
+            self._state_data[state_id] = {}
+
+    def _get_state_data(self, state_id: StateID) -> Any:
+        """Get the data for the given state."""
+        if state_id not in self._state_data:
+            raise ValueError(f"No data found for state: {state_id}")
+        return self._state_data[state_id]
 
     def _validate_configuration(self) -> None:
         """
@@ -113,59 +124,121 @@ class StateMachine(AbstractStateMachine):
                 "Invalid state machine behavior", "behavior", {r.message: r.context for r in errors}
             )
 
-    @contextmanager
-    def _transition_context(self, transition: AbstractTransition) -> Any:
-        """
-        Context manager for atomic transitions.
+    def _execute_transition(self, transition: AbstractTransition, event: AbstractEvent) -> None:
+        """Execute a transition."""
 
-        Handles:
-        - Hook notifications
-        - State entry/exit
-        - Error recovery
-        - Data cleanup
-
-        Args:
-            transition: The transition being executed
-
-        Yields:
-            None
-
-        Raises:
-            InvalidTransitionError: If transition fails
-        """
-        source_id = transition.get_source_state_id()
-        target_id = transition.get_target_state_id()
-        old_state = self._current_state
+        source_state = transition.get_source_state()
+        target_state = transition.get_target_state()
+        source_data = self._get_state_data(source_state.get_id())
+        target_data = self._get_state_data(target_state.get_id())
 
         try:
-            # Pre-transition hooks
-            self._hook_manager.call_pre_transition(transition)
+            # Exit states
+            self._exit_states(source_state, target_state, event, source_data)
 
-            # Exit current state
-            if old_state:
-                old_state.on_exit()
+            # Execute transition actions
+            for action in transition.get_actions():
+                action.execute(event, source_data)
 
-            yield
-
-            # Enter new state
-            target_state = self._states[target_id]
-            self._current_state = target_state  # Set new state before enter
-            target_state.on_enter()
-
-            # Post-transition hooks
-            self._hook_manager.call_post_transition(transition)
+            # Enter states
+            self._enter_states(source_state, target_state, event, target_data)
 
         except Exception as e:
-            # Attempt recovery
-            self._logger.exception("Transition failed from %s to %s: %s", source_id, target_id, str(e))
-            # Restore previous state
-            self._current_state = old_state
-            if old_state:
-                try:
-                    old_state.on_enter()  # Re-enter previous state
-                except Exception:
-                    self._logger.exception("Recovery failed")
-            raise InvalidTransitionError(f"Transition failed: {str(e)}", source_id, target_id, None, {"error": str(e)})
+            self._handle_operation_error(
+                "Transition",
+                e,
+                {
+                    "source_state": source_state.get_id(),
+                    "target_state": target_state.get_id(),
+                    "event": event.get_id(),
+                },
+            )
+
+    def _exit_states(
+        self, source_state: AbstractState, target_state: AbstractState, event: AbstractEvent, data: Any
+    ) -> None:
+        """
+        Helper function for exiting states during a transition.
+        """
+        current_state = self._current_state
+        while current_state and current_state != source_state:
+            current_state.on_exit(event, self._get_state_data(current_state.get_id()))
+            if isinstance(current_state, CompositeState):
+                current_state = current_state._parent_state if current_state._parent_state else None
+            else:
+                current_state = None
+
+        if isinstance(source_state, CompositeState):
+            if source_state._current_substate:
+                source_state._current_substate.on_exit(event, data)
+        source_state.on_exit(event, data)
+        self._current_state = None
+
+    def _enter_states(
+        self, source_state: AbstractState, target_state: AbstractState, event: AbstractEvent, data: Any
+    ) -> None:
+        """
+        Helper function for entering states during a transition.
+        """
+
+        # Build a path of states to enter from the source state to the target state
+        path_to_target = []
+        current_state = target_state
+        while current_state != source_state:
+            path_to_target.insert(0, current_state)
+            if isinstance(current_state, CompositeState) and current_state._parent_state:
+                current_state = current_state._parent_state
+            else:
+                current_state = None
+
+        # Enter all states in the path
+        for state in path_to_target:
+            state.on_entry(event, self._get_state_data(state.get_id()))
+            if isinstance(state, CompositeState):
+                state._enter_substate(event, data)
+                if state.has_history():
+                    state.set_history_state(state._current_substate)
+
+        self._current_state = target_state
+
+    def _find_valid_transition(self, event: AbstractEvent) -> Optional[AbstractTransition]:
+        """Find the highest priority valid transition for the current event."""
+        if not self._current_state:
+            return None
+
+        valid_transitions = []
+
+        for transition in self._transitions:
+            if transition.get_source_state() == self._current_state or (
+                isinstance(self._current_state, CompositeState)
+                and transition.get_source_state() == self._current_state._current_substate
+            ):
+                guard = transition.get_guard()
+                if guard:
+                    try:
+                        state_data = self._get_state_data(transition.get_source_state().get_id())
+                        if guard.check(event, state_data):
+                            valid_transitions.append(transition)
+                    except Exception as e:
+                        logger.error("Guard check failed: %s", str(e))
+                        continue
+                else:
+                    valid_transitions.append(transition)
+
+        if not valid_transitions:
+            return None
+
+        return max(valid_transitions, key=lambda t: t.get_priority())
+
+    def get_state(self) -> Optional[AbstractState]:
+        """
+        Get the current state.
+
+        Returns:
+            Current state object or None if no current state
+
+        """
+        return self._current_state
 
     def start(self) -> None:
         """
@@ -177,12 +250,17 @@ class StateMachine(AbstractStateMachine):
             InvalidStateError: If machine is already running
         """
         if self._running:
-            raise InvalidStateError("State machine already running", self.get_current_state_id(), "start")
+            raise InvalidStateError(
+                "State machine already running", self.get_state().get_id() if self.get_state() else None, "start"
+            )
 
         self._running = True
         self._current_state = self._initial_state
+        self._initialize_state_data()
         try:
-            self._current_state.on_enter()
+            self._current_state.on_entry(None, self._get_state_data(self._current_state.get_id()))
+            if isinstance(self._current_state, CompositeState):
+                self._current_state._enter_substate(None, self._get_state_data(self._current_state.get_id()))
         except Exception as e:
             self._running = False
             raise InvalidStateError(
@@ -199,38 +277,18 @@ class StateMachine(AbstractStateMachine):
             InvalidStateError: If machine is not running
         """
         if not self._running:
-            raise InvalidStateError(
-                "State machine not running", None, "stop"  # or "None" if StateID is str  # This is the operation name
-            )
+            raise InvalidStateError("State machine not running", None, "stop")
 
         if self._current_state:
             try:
-                self._current_state.on_exit()
+                self._exit_states(
+                    self._current_state, self._current_state, None, self._get_state_data(self._current_state.get_id())
+                )
             except Exception as e:
                 self._logger.exception("Error during stop: %s", str(e))
 
         self._running = False
         self._current_state = None
-
-    def reset(self) -> None:
-        """Reset the state machine to initial state."""
-        was_running = self._running
-
-        if self._current_state:
-            try:
-                self._current_state.on_exit()
-            except Exception as e:
-                self._logger.exception("Error during state exit in reset: %s", str(e))
-
-        # Clear all state data
-        for state in self._states.values():
-            state.data.clear()
-
-        self._current_state = None
-        self._running = False
-
-        if was_running:
-            self.start()
 
     def process_event(self, event: AbstractEvent) -> None:
         """Process an event, potentially triggering a transition."""
@@ -241,46 +299,11 @@ class StateMachine(AbstractStateMachine):
             raise InvalidStateError("No current state", None, "process_event")
 
         # Find eligible transitions
-        current_id = self._current_state.get_id()
-        eligible = [t for t in self._transitions if t.get_source_state_id() == current_id]
+        transition = self._find_valid_transition(event)
 
-        # Check guards
-        valid = []
-        for transition in eligible:
-            guard = transition.get_guard()
-            try:
-                if guard is None or guard.check(event, self._current_state.data):
-                    valid.append(transition)
-            except Exception as e:
-                raise GuardEvaluationError(
-                    f"Guard check failed: {str(e)}", str(guard), self._current_state.data, event, {"error": str(e)}
-                )
-
-        if not valid:
-            return  # No valid transitions
-
-        # Select highest priority transition
-        transition = max(valid, key=lambda t: t.get_priority())
-
-        # Execute transition
-        try:
-            with self._transition_context(transition):
-                # Execute actions
-                for action in transition.get_actions():
-                    try:
-                        action.execute(event, self._current_state.data)
-                    except Exception as e:
-                        raise ActionExecutionError(
-                            f"Action execution failed: {str(e)}",
-                            str(action),
-                            self._current_state.data,
-                            event,
-                            {"error": str(e)},
-                        )
-        except (ActionExecutionError, GuardEvaluationError) as e:
-            raise InvalidTransitionError(
-                str(e), transition.get_source_state_id(), transition.get_target_state_id(), event, e.details
-            )
+        if transition:
+            # Execute transition
+            self._execute_transition(transition, event)
 
     def get_current_state_id(self) -> StateID:
         """
