@@ -58,6 +58,10 @@ class AsyncLockManager:
         async with lock:
             return await operation()
 
+    def get_locks(self) -> Dict[str, asyncio.Lock]:
+        """Get the current locks dictionary."""
+        return self._locks
+
 
 class AsyncHSMError(HSMError):
     """Base exception for async state machine errors."""
@@ -122,8 +126,14 @@ class AsyncState(AbstractState):
         async with self._entry_lock:
             try:
                 await self._do_enter(event, data)
+            except AsyncStateError as e:
+                raise e
             except Exception as e:
-                raise AsyncStateError(f"Error during state entry: {str(e)}", self._state_id, {"error": str(e)}) from e
+                if hasattr(e, "__dict__"):
+                    details = e.__dict__
+                else:
+                    details = {"error": str(e)}
+                raise AsyncStateError(f"Error during state entry: {str(e)}", self._state_id, details) from e
 
     async def _do_enter(self, event: AbstractEvent, data: Any) -> None:
         """Override this method to implement custom entry logic."""
@@ -158,25 +168,25 @@ class AsyncCompositeState(AsyncState, AbstractCompositeState):
     ):
         super().__init__(state_id)
 
-        if initial_state is None and substates:
+        if not substates:
+            raise ValueError("Composite state must have at least one substate")
+
+        if initial_state is None:
             initial_state = substates[0]
+        elif initial_state not in substates:
+            raise ValueError("initial_state must be one of the substates")
 
         self._substates = substates
         self._initial_state = initial_state
         self._has_history = has_history
         self._history_state: Optional[AbstractState] = None
-        self._current_substate: Optional[AbstractState] = None
+        self._current_substate = initial_state
         self._parent_state = parent_state
 
-        # Validate initial state based on whether we have substates
-        if substates:
-            if initial_state is None:
-                raise ValueError("initial_state cannot be None when substates exist")
-            if initial_state not in substates:
-                raise ValueError("initial_state must be one of the substates")
-        else:
-            if initial_state is not None:
-                raise ValueError("initial_state must be None when substates is empty")
+        # Set parent references for all substates
+        for substate in substates:
+            if isinstance(substate, AsyncCompositeState):
+                substate.parent_state = self
 
     @property
     def parent_state(self) -> Optional[AbstractState]:
@@ -220,6 +230,14 @@ class AsyncCompositeState(AsyncState, AbstractCompositeState):
         if state not in self._substates:
             raise ValueError("State is not a substate of this composite state")
         self._history_state = state
+
+    def set_has_history(self, value: bool) -> None:
+        """Set whether this state maintains history."""
+        self._has_history = value
+
+    def get_history_state(self) -> Optional[AbstractState]:
+        """Get the current history state."""
+        return self._history_state
 
 
 class AsyncTransition(AbstractTransition):
@@ -334,43 +352,61 @@ class AsyncStateMachine(AbstractStateMachine):
 
     async def _handle_event(self, event: AbstractEvent) -> None:
         """Handle a single event."""
+        logger.debug("Starting event handling")
         if not self._current_state:
+            logger.debug("No current state, skipping event")
             return
 
-        # Get the transition first
-        transition = await self._lock_manager.with_lock("transition", lambda: self._find_valid_transition(event))
+        try:
+            logger.debug(f"Finding valid transition from state: {self._current_state.get_id()}")
 
-        if transition:
-            await self._execute_transition(transition, event)
+            # Get the transition first
+            async def find_transition():
+                return await self._find_valid_transition(event)
+
+            transition = await self._lock_manager.with_lock("transition", find_transition)
+
+            if transition:
+                logger.debug(f"Found valid transition to: {transition.get_target_state().get_id()}")
+                await self._execute_transition(transition, event)
+                logger.debug("Transition executed successfully")
+            else:
+                logger.debug("No valid transition found for event")
+
+        except Exception as e:
+            logger.error(f"Error handling event: {str(e)}")
+            raise
+        finally:
+            logger.debug("Event handling complete")
 
     async def _find_valid_transition(self, event: AbstractEvent) -> Optional[AsyncTransition]:
-        """Find the highest priority valid transition for the current event."""
-        valid_transitions = []
-        current_state_id = self._current_state.get_id()
-
-        for transition in self._transitions:
-            if transition.get_source_state().get_id() != current_state_id:
-                continue
-
-            guard = transition.get_guard()
-            if guard:
-                try:
-                    if await guard.check(event, self._get_state_data(transition.get_source_state().get_id())):
-                        valid_transitions.append(transition)
-                except Exception as e:
-                    logger.error("Guard check failed: %s", str(e))
-                    continue
-            else:
-                valid_transitions.append(transition)
-
-        if not valid_transitions:
+        """Find a valid transition for the current state and event."""
+        if not self._current_state:
             return None
 
-        return max(valid_transitions, key=lambda t: t.get_priority())
+        for transition in self._transitions:
+            if transition.get_source_state() == self._current_state:
+                try:
+                    guard = transition.get_guard()
+                    if guard:
+                        if not await guard.check(event, self._get_state_data(self._current_state.get_id())):
+                            continue
+                    return transition
+                except Exception as e:
+                    logger.error(f"Guard check failed: {str(e)}")
+                    raise AsyncTransitionError(
+                        f"Guard check failed: {str(e)}",
+                        transition.get_source_state(),
+                        transition.get_target_state(),
+                        event,
+                        {"error": str(e)},
+                    ) from e
+        return None
 
     async def _execute_transition(self, transition: AsyncTransition, event: AbstractEvent) -> None:
         """Execute a transition."""
         if not self._current_state:
+            logger.debug("No current state, skipping transition")
             return
 
         source_state = transition.get_source_state()
@@ -378,17 +414,32 @@ class AsyncStateMachine(AbstractStateMachine):
         source_data = self._get_state_data(source_state.get_id())
         target_data = self._get_state_data(target_state.get_id())
 
+        logger.debug(f"Starting transition from {source_state.get_id()} to {target_state.get_id()}")
+
         try:
             # Exit states
+            logger.debug("Exiting states")
             await self._exit_states(source_state, target_state, event, source_data)
 
-            # Execute transition actions
+            # Execute transition actions sequentially
+            logger.debug("Executing transition actions")
             for action in transition.get_actions():
                 await action.execute(event, source_data)
-                # Enter states
+
+            # Update current state before entering new states
+            logger.debug("Updating current state")
+            self._current_state = target_state
+
+            # Enter states
+            logger.debug("Entering new states")
             await self._enter_states(source_state, target_state, event, target_data)
 
+            logger.debug(f"Transition complete. Current state: {self._current_state.get_id()}")
+
         except Exception as e:
+            logger.error(f"Error during transition: {str(e)}")
+            # Restore original state on error
+            self._current_state = source_state
             raise AsyncTransitionError(
                 f"Error during transition execution: {str(e)}", source_state, target_state, event
             ) from e
@@ -425,28 +476,38 @@ class AsyncStateMachine(AbstractStateMachine):
     async def _enter_states(
         self, source_state: AbstractState, target_state: AbstractState, event: AbstractEvent, data: Any
     ) -> None:
-        """
-        Helper function for entering states during a transition.
-        """
-        # Build a path of states to enter from the source state to the target state
-        path_to_target = []
-        current_state = target_state
-        while current_state != source_state:
-            path_to_target.insert(0, current_state)
-            if isinstance(current_state, AsyncCompositeState) and current_state._parent_state:
-                current_state = current_state._parent_state
-            else:
-                current_state = None
+        """Helper function for entering states during a transition."""
+        try:
+            # Build a path of states to enter from the source state to the target state
+            path_to_target = []
+            current_state = target_state
+            max_depth = 100  # Prevent infinite loops
+            depth = 0
 
-        # Enter all states in the path
-        for state in path_to_target:
-            await state.on_entry(event, self._get_state_data(state.get_id()))
-            if isinstance(state, AsyncCompositeState):
-                await state._enter_substate(event, data)
-                if state.has_history():
-                    state.set_history_state(state._current_substate)
+            while current_state != source_state and depth < max_depth:
+                path_to_target.insert(0, current_state)
+                if isinstance(current_state, AsyncCompositeState) and current_state._parent_state:
+                    current_state = current_state._parent_state
+                else:
+                    break
+                depth += 1
 
-        self._current_state = target_state
+            if depth >= max_depth:
+                raise AsyncStateError("Maximum state nesting depth exceeded", target_state.get_id())
+
+            # Enter all states in the path
+            for state in path_to_target:
+                await state.on_entry(event, self._get_state_data(state.get_id()))
+                if isinstance(state, AsyncCompositeState):
+                    await state._enter_substate(event, data)
+                    if state.has_history():
+                        state.set_history_state(state._current_substate)
+
+            self._current_state = target_state
+
+        except Exception as e:
+            logger.error(f"Error entering states: {str(e)}")
+            raise AsyncStateError(f"Failed to enter states: {str(e)}", target_state.get_id()) from e
 
     def get_state(self) -> Optional[AsyncState]:
         """Get the current state."""

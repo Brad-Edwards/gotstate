@@ -400,7 +400,13 @@ class AsyncEventQueue(BaseEventQueue, AbstractEventQueue):
         self._validate_event(event)
 
         async with self._lock:
-            self._check_full()
+            # Check if queue is full before waiting
+            if self._max_size is not None and len(self._queue) >= self._max_size:
+                raise QueueFullError(
+                    "Queue is at maximum capacity",
+                    max_size=self._max_size,
+                    current_size=len(self._queue),
+                )
 
             priority_event = self._create_priority_event(event)
             heapq.heappush(self._queue, priority_event)
