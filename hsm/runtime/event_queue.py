@@ -93,11 +93,23 @@ class PrioritizedEvent:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, PrioritizedEvent):
             return NotImplemented
+        # Handle None priorities
+        if self.priority is None and other.priority is None:
+            return self.sequence == other.sequence
+        if self.priority is None or other.priority is None:
+            return False
         return (self.priority, self.sequence) == (other.priority, other.sequence)
 
     def __lt__(self, other: "PrioritizedEvent") -> bool:
         if not isinstance(other, PrioritizedEvent):
             return NotImplemented
+        # Handle None priorities - treat None as lowest priority
+        if self.priority is None and other.priority is None:
+            return self.sequence < other.sequence
+        if self.priority is None:
+            return False  # None is lowest priority
+        if other.priority is None:
+            return True  # None is lowest priority
         # Lower priority values should come first (-100 before -99)
         return self.priority < other.priority or (self.priority == other.priority and self.sequence < other.sequence)
 
