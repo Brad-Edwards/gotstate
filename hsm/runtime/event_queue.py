@@ -349,11 +349,10 @@ class EventQueue(BaseEventQueue, AbstractEventQueue):
             return self._max_size is not None and len(self._queue) >= self._max_size
 
     def is_empty(self) -> bool:
-        """
-        Check if queue is empty.
+        """Check if the queue is empty.
 
         Returns:
-            True if queue has no events, False otherwise
+            True if queue is empty, False otherwise
         """
         with self._lock:
             return len(self._queue) == 0
