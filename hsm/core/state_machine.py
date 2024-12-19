@@ -193,8 +193,7 @@ class StateMachine(AbstractStateMachine):
 
                     # Set history only for the immediate parent of the target state
                     parent = getattr(state, "_parent_state", None)
-                    if (parent and isinstance(parent, CompositeState) and 
-                        parent.has_history() and state == target):
+                    if parent and isinstance(parent, CompositeState) and parent.has_history() and state == target:
                         parent.set_history_state(state)
                         parent._current_substate = state
 
@@ -443,19 +442,12 @@ class StateMachine(AbstractStateMachine):
             raise InvalidStateError("No current state", "None", "get_current_state_id")
         return self._current_state.get_id()
 
-    def _handle_operation_error(
-        self, operation: str, err: Exception, details: Optional[dict] = None
-    ) -> None:
+    def _handle_operation_error(self, operation: str, err: Exception, details: Optional[dict] = None) -> None:
         """
         Handle an operation error by logging it and optionally raising it.
         """
         # Adjusted to match the placeholder-based test expectation
-        self._logger.error(
-            "Error during operation '%s': %s",
-            operation,
-            err,
-            exc_info=True
-        )
+        self._logger.error("Error during operation '%s': %s", operation, err, exc_info=True)
 
         if details is not None:
             self._logger.error("Error details: %s", details)

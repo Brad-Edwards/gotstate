@@ -205,12 +205,10 @@ class BaseTimer(AbstractTimer):
         self._event = event
         self._state = TimerState.SCHEDULED
 
-    def _handle_schedule_error(self, e: Exception, duration: float) -> None:
-        """Common schedule error handling."""
-        self._state = TimerState.ERROR
-        raise TimerSchedulingError(
-            f"Failed to schedule timer {self._id}: {str(e)}", self._id, duration, "scheduling_failed"
-        ) from e
+    async def _schedule_timeout_impl(self, duration: float, event: Event) -> None:
+        """Template method for scheduling timeouts."""
+        self._schedule_timer(duration, event)
+        self._create_and_start_timer(duration)
 
     def _create_and_start_timer(self, duration: float) -> None:
         """Template method for creating and starting a timer."""
@@ -219,6 +217,7 @@ class BaseTimer(AbstractTimer):
             self._start_timer()
             self._state = TimerState.RUNNING
         except Exception as e:
+            self._cleanup()
             self._handle_schedule_error(e, duration)
 
     @abstractmethod
@@ -230,6 +229,17 @@ class BaseTimer(AbstractTimer):
     def _start_timer(self) -> None:
         """Start the timer."""
         pass
+
+    def _handle_schedule_error(self, e: Exception, duration: float) -> None:
+        """Common schedule error handling."""
+        self._state = TimerState.ERROR
+        raise TimerSchedulingError(
+            f"Failed to schedule timer {self._id}: {str(e)}", self._id, duration, "scheduling_failed"
+        ) from e
+
+    async def _cancel_timeout_impl(self, event_id: EventID) -> None:
+        """Template method for cancelling timeouts."""
+        self._handle_cancel(event_id)
 
 
 class Timer(BaseTimer):
@@ -254,14 +264,36 @@ class Timer(BaseTimer):
             self._timer.start()
 
     def schedule_timeout(self, duration: float, event: Event) -> None:
+        """Schedule a timeout event."""
         with self._lock:
-            self._schedule_timer(duration, event)
-            self._create_and_start_timer(duration)
+            # Validate duration before attempting async operation
+            if duration < 0:
+                raise ValueError("duration cannot be negative")
+
+            try:
+                asyncio.run(self._schedule_timeout_impl(duration, event))
+            except ValueError as e:
+                # Re-raise ValueError directly
+                raise e
+            except Exception as e:
+                self._state = TimerState.ERROR
+                raise TimerSchedulingError(
+                    f"Failed to schedule timer {self._id}: {str(e)}", self._id, duration, "asyncio_error"
+                ) from e
 
     def cancel_timeout(self, event_id: EventID) -> None:
         """Cancel a scheduled timeout."""
         with self._lock:
-            self._handle_cancel(event_id)
+            try:
+                asyncio.run(self._cancel_timeout_impl(event_id))
+            except ValueError as e:
+                # Re-raise ValueError directly
+                raise e
+            except Exception as e:
+                self._state = TimerState.ERROR
+                raise TimerCancellationError(
+                    f"Failed to cancel timer {self._id}: {str(e)}", self._id, self._state
+                ) from e
 
 
 class AsyncTimer(BaseTimer):
@@ -291,20 +323,12 @@ class AsyncTimer(BaseTimer):
     async def schedule_timeout(self, duration: float, event: Event) -> None:
         """Schedule a timeout event asynchronously."""
         async with self._lock:
-            self._schedule_timer(duration, event)
-            self._create_and_start_timer(duration)
+            await self._schedule_timeout_impl(duration, event)
 
     async def cancel_timeout(self, event_id: EventID) -> None:
-        """Cancel a scheduled timeout asynchronously.
-
-        Args:
-            event_id: ID of the event to cancel
-
-        Raises:
-            TimerCancellationError: If timer cannot be cancelled
-        """
+        """Cancel a scheduled timeout asynchronously."""
         async with self._lock:
-            self._handle_cancel(event_id)
+            await self._cancel_timeout_impl(event_id)
 
     async def shutdown(self) -> None:
         """Shutdown the timer, cancelling any pending timeouts."""

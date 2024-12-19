@@ -5,11 +5,11 @@ import pytest
 from pytest import LogCaptureFixture
 
 from hsm.core.errors import ConfigurationError, InvalidStateError
+from hsm.core.events import Event
 from hsm.core.state_machine import StateMachine
 from hsm.core.states import CompositeState
 from hsm.core.validation import ValidationSeverity
 from hsm.interfaces.abc import AbstractEvent, AbstractState, AbstractTransition
-from hsm.core.events import Event
 
 
 @pytest.fixture
@@ -766,7 +766,7 @@ def test_drill_down_no_substates(test_sm: StateMachine) -> None:
     """Test _drill_down with a non-composite state"""
     state = Mock(spec=AbstractState)
     state.get_id.return_value = "simple_state"
-    
+
     with test_sm._data_manager.access_data() as data:
         data[state.get_id()] = {}
         result = test_sm._drill_down(state, data, None)
@@ -777,36 +777,32 @@ def test_handle_operation_error_with_details(test_sm: StateMachine) -> None:
     """Test error handling with additional details"""
     error = RuntimeError("Test error")
     details = {"key": "value"}
-    
-    with (
-        pytest.raises(RuntimeError, match="Test error"),
-        patch.object(test_sm._logger, "error") as mock_error
-    ):
+
+    with pytest.raises(RuntimeError, match="Test error"), patch.object(test_sm._logger, "error") as mock_error:
         test_sm._handle_operation_error("TestOp", error, details)
-        
+
     # Verify both error messages were logged with correct format
-    mock_error.assert_has_calls([
-        call("Error during operation '%s': %s", 'TestOp', error, exc_info=True),
-        call("Error details: %s", details)
-    ])
+    mock_error.assert_has_calls(
+        [call("Error during operation '%s': %s", "TestOp", error, exc_info=True), call("Error details: %s", details)]
+    )
 
 
 def test_exit_up_with_hook_error(test_sm: StateMachine) -> None:
     """Test _exit_up handles hook errors gracefully"""
     state = Mock(spec=AbstractState)
     state.get_id.return_value = "test_state"
-    
+
     def raise_error(*args):
         raise RuntimeError("Hook error")
-    
+
     with (
         patch.object(test_sm._hook_manager, "call_on_exit", side_effect=raise_error),
-        patch.object(test_sm._logger, "warning") as mock_warning
+        patch.object(test_sm._logger, "warning") as mock_warning,
     ):
         with test_sm._data_manager.access_data() as data:
             data[state.get_id()] = {}
             test_sm._exit_up(state, data)
-            
+
         mock_warning.assert_called_with("Hook error during exit (continuing): Hook error")
 
 
@@ -823,11 +819,11 @@ def test_find_common_ancestor_no_common(test_sm: StateMachine) -> None:
     state1 = Mock(spec=AbstractState)
     state1.get_id.return_value = "state1"
     state1._parent_state = None
-    
+
     state2 = Mock(spec=AbstractState)
     state2.get_id.return_value = "state2"
     state2._parent_state = None
-    
+
     result = test_sm._find_common_ancestor(state1, state2)
     assert result is None
 
@@ -837,7 +833,7 @@ def test_drill_down_composite_no_substate(test_sm: StateMachine) -> None:
     composite = Mock(spec=CompositeState)
     composite.get_id.return_value = "composite"
     composite._current_substate = None
-    
+
     with test_sm._data_manager.access_data() as data:
         data[composite.get_id()] = {}
         result = test_sm._drill_down(composite, data, None)
@@ -848,23 +844,23 @@ def test_enter_states_with_history(test_sm: StateMachine) -> None:
     """Test _enter_states with history-enabled composite state"""
     source = Mock(spec=AbstractState)
     source.get_id.return_value = "source"
-    
+
     substate = Mock(spec=AbstractState)
     substate.get_id.return_value = "substate"
-    
+
     target = Mock(spec=CompositeState)
     target.get_id.return_value = "target"
     target.has_history.return_value = True
     target._current_substate = substate
     target._enter_substate = Mock()
-    
+
     event = Mock(spec=AbstractEvent)
-    
+
     with test_sm._data_manager.access_data() as data:
         data[target.get_id()] = {}
         data[substate.get_id()] = {}
         test_sm._enter_states(source, target, event, data)
-        
+
         target.set_history_state.assert_called_once_with(substate)
 
 
@@ -887,18 +883,15 @@ def test_exit_states_composite_target_substate(test_sm: StateMachine) -> None:
 
     # Set up state machine state
     test_sm._current_state = target
-    test_sm._states = {
-        source.get_id(): source,
-        target.get_id(): target
-    }
+    test_sm._states = {source.get_id(): source, target.get_id(): target}
 
     event = Mock(spec=AbstractEvent)
-    
+
     with test_sm._data_manager.access_data() as data:
         data[source.get_id()] = {}
         data[target.get_id()] = {}
         test_sm._exit_states(source, target, event, data)
-        
+
         # Should not exit source state since target is its substate
         source.on_exit.assert_not_called()
 
@@ -909,21 +902,21 @@ def test_process_event_composite_state_substate_transition(test_sm: StateMachine
     parent = Mock(spec=CompositeState)
     parent.get_id.return_value = "parent"
     parent.on_exit = Mock()
-    
+
     substate = Mock(spec=AbstractState)
     substate.get_id.return_value = "substate"
     substate.on_exit = Mock()
     substate._parent_state = parent
-    
+
     target = Mock(spec=AbstractState)
     target.get_id.return_value = "target"
     target.on_entry = Mock()
     target.on_exit = Mock()
-    
+
     # Set up composite state
     parent._current_substate = substate
     parent.get_substates.return_value = [substate]
-    
+
     # Set up transition
     transition = Mock(spec=AbstractTransition)
     transition.get_source_state.return_value = substate
@@ -931,26 +924,22 @@ def test_process_event_composite_state_substate_transition(test_sm: StateMachine
     transition.get_guard.return_value = None
     transition.get_actions.return_value = []
     transition.get_priority.return_value = 1
-    
+
     # Set up state machine
-    test_sm._states = {
-        parent.get_id(): parent,
-        substate.get_id(): substate,
-        target.get_id(): target
-    }
+    test_sm._states = {parent.get_id(): parent, substate.get_id(): substate, target.get_id(): target}
     test_sm._transitions = [transition]
     test_sm._current_state = substate  # Set current state to substate, not parent
     test_sm._running = True
-    
+
     # Initialize state data
     with test_sm._data_manager.access_data() as data:
         data[parent.get_id()] = {}
         data[substate.get_id()] = {}
         data[target.get_id()] = {}
-    
+
     event = Mock(spec=AbstractEvent)
     test_sm.process_event(event)
-    
+
     # Verify transition execution
     substate.on_exit.assert_called_once()
     target.on_entry.assert_called_once()
@@ -960,24 +949,24 @@ def test_initialize_state_data_composite_hierarchy(test_sm: StateMachine) -> Non
     """Test state data initialization with composite state hierarchy"""
     parent = Mock(spec=CompositeState)
     parent.get_id.return_value = "parent"
-    
+
     child1 = Mock(spec=AbstractState)
     child1.get_id.return_value = "child1"
     child1._parent_state = parent
-    
+
     child2 = Mock(spec=AbstractState)
     child2.get_id.return_value = "child2"
     child2._parent_state = parent
-    
+
     parent.get_substates.return_value = [child1, child2]
-    
+
     with patch("hsm.core.state_machine.Validator") as MockValidator:
         validator_instance = MockValidator.return_value
         validator_instance.validate_structure.return_value = []
         validator_instance.validate_behavior.return_value = []
-        
+
         sm = StateMachine([parent, child1, child2], [Mock(spec=AbstractTransition)], parent)
-        
+
         with sm._data_manager.access_data() as data:
             # Should have data dict for all states including parent and children
             assert data[parent.get_id()] == {}
@@ -992,13 +981,13 @@ def test_rapid_fire_transitions(valid_sm: StateMachine, mock_event: Any, mock_tr
     target_states = []
     transitions = []
     current_source = valid_sm._initial_state
-    
+
     # Create a chain of 5 states with transitions between them
     for i in range(5):
         target = Mock(spec=AbstractState)
         target.get_id.return_value = f"state_{i}"
         target_states.append(target)
-        
+
         trans = Mock(spec=AbstractTransition)
         trans.get_source_state.return_value = current_source
         trans.get_target_state.return_value = target
@@ -1006,28 +995,28 @@ def test_rapid_fire_transitions(valid_sm: StateMachine, mock_event: Any, mock_tr
         trans.get_actions.return_value = []
         trans.get_priority.return_value = 1
         transitions.append(trans)
-        
+
         current_source = target
-    
+
     # Clear existing transitions and states before adding new ones
     valid_sm._transitions = []
     valid_sm._states = {valid_sm._initial_state.get_id(): valid_sm._initial_state}
-    
+
     valid_sm._states.update({state.get_id(): state for state in target_states})
     valid_sm._transitions.extend(transitions)
-    
+
     # Initialize state data for new states
     with valid_sm._data_manager.access_data() as data:
         for state in target_states:
             data[state.get_id()] = {}
-    
+
     valid_sm.start()
-    
+
     # Process events rapidly
     events = [Event("event_" + str(i)) for i in range(5)]
     for event in events:
         valid_sm.process_event(event)
-    
+
     # Verify we ended up in the last state
     assert valid_sm.get_current_state_id() == "state_4"
 
@@ -1038,7 +1027,7 @@ def test_transition_no_guard_no_actions(valid_sm: StateMachine, mock_event: Any)
     source.get_id.return_value = "source"
     target = Mock(spec=AbstractState)
     target.get_id.return_value = "target"
-    
+
     # Create minimal transition
     transition = Mock(spec=AbstractTransition)
     transition.get_source_state.return_value = source
@@ -1046,23 +1035,20 @@ def test_transition_no_guard_no_actions(valid_sm: StateMachine, mock_event: Any)
     transition.get_guard.return_value = None
     transition.get_actions.return_value = None  # Explicitly None instead of empty list
     transition.get_priority.return_value = 1
-    
+
     # Add states and transition to machine
-    valid_sm._states.update({
-        source.get_id(): source,
-        target.get_id(): target
-    })
+    valid_sm._states.update({source.get_id(): source, target.get_id(): target})
     valid_sm._transitions = [transition]
     valid_sm._initial_state = source
-    
+
     # Initialize state data
     with valid_sm._data_manager.access_data() as data:
         data[source.get_id()] = {}
         data[target.get_id()] = {}
-    
+
     valid_sm.start()
     valid_sm.process_event(mock_event)
-    
+
     # Verify transition occurred without errors
     assert valid_sm.get_current_state_id() == "target"
 
@@ -1076,7 +1062,7 @@ def test_multiple_sibling_substates_transitions(valid_sm: StateMachine) -> None:
     sub2.get_id.return_value = "sub2"
     sub3 = Mock(spec=AbstractState)
     sub3.get_id.return_value = "sub3"
-    
+
     # Create parent composite
     parent = Mock(spec=CompositeState)
     parent.get_id.return_value = "parent"
@@ -1084,12 +1070,12 @@ def test_multiple_sibling_substates_transitions(valid_sm: StateMachine) -> None:
     parent._current_substate = sub1
     parent.has_history.return_value = True
     parent._enter_substate = Mock()
-    
+
     # Set parent relationships
     sub1._parent_state = parent
     sub2._parent_state = parent
     sub3._parent_state = parent
-    
+
     # Create transitions between siblings
     t1 = Mock(spec=AbstractTransition)
     t1.get_source_state.return_value = sub1
@@ -1097,44 +1083,40 @@ def test_multiple_sibling_substates_transitions(valid_sm: StateMachine) -> None:
     t1.get_guard.return_value = None
     t1.get_actions.return_value = []
     t1.get_priority.return_value = 1
-    
+
     t2 = Mock(spec=AbstractTransition)
     t2.get_source_state.return_value = sub2
     t2.get_target_state.return_value = sub3
     t2.get_guard.return_value = None
     t2.get_actions.return_value = []
     t2.get_priority.return_value = 1
-    
+
     # Clear existing state machine configuration
     valid_sm._transitions = [t1, t2]
-    valid_sm._states = {
-        parent.get_id(): parent,
-        sub1.get_id(): sub1,
-        sub2.get_id(): sub2,
-        sub3.get_id(): sub3
-    }
+    valid_sm._states = {parent.get_id(): parent, sub1.get_id(): sub1, sub2.get_id(): sub2, sub3.get_id(): sub3}
     valid_sm._initial_state = parent
-    
+
     # Initialize state data
     with valid_sm._data_manager.access_data() as data:
         for state in [parent, sub1, sub2, sub3]:
             data[state.get_id()] = {}
-    
+
     valid_sm.start()
-    
+
     # Verify initial substate
     assert valid_sm.get_current_state_id() == "sub1"
-    
+
     # Mock the parent's behavior for setting current substate
     def update_current_substate(new_state):
         parent._current_substate = new_state
+
     parent.set_history_state.side_effect = update_current_substate
-    
+
     # Transition between siblings
     valid_sm.process_event(Event("next"))
     assert valid_sm.get_current_state_id() == "sub2"
     parent.set_history_state.assert_called_with(sub2)
-    
+
     valid_sm.process_event(Event("next"))
     assert valid_sm.get_current_state_id() == "sub3"
     parent.set_history_state.assert_called_with(sub3)
@@ -1147,7 +1129,7 @@ def test_sibling_transition_with_common_ancestor(valid_sm: StateMachine) -> None
     sub1.get_id.return_value = "sub1"
     sub2 = Mock(spec=AbstractState)
     sub2.get_id.return_value = "sub2"
-    
+
     # Create parent composite
     parent = Mock(spec=CompositeState)
     parent.get_id.return_value = "parent"
@@ -1155,11 +1137,11 @@ def test_sibling_transition_with_common_ancestor(valid_sm: StateMachine) -> None
     parent._current_substate = sub1
     parent.has_history.return_value = True
     parent._enter_substate = Mock()
-    
+
     # Set parent relationships
     sub1._parent_state = parent
     sub2._parent_state = parent
-    
+
     # Create transition between siblings
     transition = Mock(spec=AbstractTransition)
     transition.get_source_state.return_value = sub1
@@ -1167,30 +1149,26 @@ def test_sibling_transition_with_common_ancestor(valid_sm: StateMachine) -> None
     transition.get_guard.return_value = None
     transition.get_actions.return_value = []
     transition.get_priority.return_value = 1
-    
+
     # Configure state machine
     valid_sm._transitions = [transition]
-    valid_sm._states = {
-        parent.get_id(): parent,
-        sub1.get_id(): sub1,
-        sub2.get_id(): sub2
-    }
+    valid_sm._states = {parent.get_id(): parent, sub1.get_id(): sub1, sub2.get_id(): sub2}
     valid_sm._initial_state = parent
-    
+
     # Initialize state data
     with valid_sm._data_manager.access_data() as data:
         for state in [parent, sub1, sub2]:
             data[state.get_id()] = {}
-    
+
     valid_sm.start()
     assert valid_sm.get_current_state_id() == "sub1"
-    
+
     # Reset the mock to clear the initial set_history_state call
     parent.set_history_state.reset_mock()
-    
+
     # Execute transition
     valid_sm.process_event(Event("next"))
-    
+
     # Verify proper transition execution
     assert valid_sm.get_current_state_id() == "sub2"
     sub1.on_exit.assert_called_once()
@@ -1205,21 +1183,21 @@ def test_composite_state_reentry(valid_sm: StateMachine) -> None:
     sub1.get_id.return_value = "sub1"
     sub2 = Mock(spec=AbstractState)
     sub2.get_id.return_value = "sub2"
-    
+
     composite = Mock(spec=CompositeState)
     composite.get_id.return_value = "composite"
     composite.get_substates.return_value = [sub1, sub2]
     composite._current_substate = sub1
     composite.has_history.return_value = True
-    
+
     # Create external state
     external = Mock(spec=AbstractState)
     external.get_id.return_value = "external"
-    
+
     # Set relationships
     sub1._parent_state = composite
     sub2._parent_state = composite
-    
+
     # Create transitions
     t1 = Mock(spec=AbstractTransition)
     t1.get_source_state.return_value = sub1
@@ -1227,47 +1205,47 @@ def test_composite_state_reentry(valid_sm: StateMachine) -> None:
     t1.get_guard.return_value = None
     t1.get_actions.return_value = []
     t1.get_priority.return_value = 1
-    
+
     t2 = Mock(spec=AbstractTransition)
     t2.get_source_state.return_value = sub2
     t2.get_target_state.return_value = external
     t2.get_guard.return_value = None
     t2.get_actions.return_value = []
     t2.get_priority.return_value = 1
-    
+
     t3 = Mock(spec=AbstractTransition)
     t3.get_source_state.return_value = external
     t3.get_target_state.return_value = composite
     t3.get_guard.return_value = None
     t3.get_actions.return_value = []
     t3.get_priority.return_value = 1
-    
+
     # Configure state machine
     valid_sm._transitions = [t1, t2, t3]
     valid_sm._states = {
         composite.get_id(): composite,
         sub1.get_id(): sub1,
         sub2.get_id(): sub2,
-        external.get_id(): external
+        external.get_id(): external,
     }
     valid_sm._initial_state = composite
-    
+
     # Initialize state data
     with valid_sm._data_manager.access_data() as data:
         for state in [composite, sub1, sub2, external]:
             data[state.get_id()] = {}
-    
+
     valid_sm.start()
     assert valid_sm.get_current_state_id() == "sub1"
-    
+
     # Transition to sub2
     valid_sm.process_event(Event("to_sub2"))
     assert valid_sm.get_current_state_id() == "sub2"
-    
+
     # Exit to external state
     valid_sm.process_event(Event("to_external"))
     assert valid_sm.get_current_state_id() == "external"
-    
+
     # Re-enter composite state
     valid_sm.process_event(Event("to_composite"))
     # Should return to sub2 due to history
