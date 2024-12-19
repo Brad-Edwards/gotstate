@@ -2,7 +2,7 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 import logging
-from typing import List
+from typing import Any, Callable, List, TypeVar
 
 from hsm.core.errors import HSMError
 from hsm.interfaces.abc import AbstractHook, AbstractTransition, StateID
@@ -16,6 +16,9 @@ class HookError(HSMError):
     """
 
     pass
+
+
+T = TypeVar("T")  # Type variable for hook method return type
 
 
 class HookManager:
@@ -39,26 +42,43 @@ class HookManager:
 
     def register_hook(self, hook: AbstractHook) -> None:
         """
-        Register a hook.
+        Register a hook. If the hook is already registered, this method does nothing.
+
+        Runtime Invariants:
+        - Registration is idempotent (registering same hook multiple times has no effect)
+        - Hook identity is determined by object identity (is operator)
 
         Raises:
             HookError: If the object does not implement AbstractHook properly.
         """
         if not isinstance(hook, AbstractHook):
             raise HookError("Attempted to register a hook that does not implement AbstractHook.")
-        self._hooks.append(hook)
+        if hook not in self._hooks:  # Use identity comparison
+            self._hooks.append(hook)
 
     def unregister_hook(self, hook: AbstractHook) -> None:
         """
-        Unregister a previously registered hook.
+        Unregister a previously registered hook. Removes all instances of the hook.
 
-        If the hook is not found, this method does nothing.
+        Runtime Invariants:
+        - All instances of the hook are removed
+        - Hook identity is determined by object identity (is operator)
+        - If the hook is not found, this method does nothing
         """
+        self._hooks = [h for h in self._hooks if h is not hook]
+
+    def _call_hook_method(self, method_name: str, hook: AbstractHook, *args: Any) -> None:
+        """Helper method to call a hook method and handle exceptions."""
         try:
-            self._hooks.remove(hook)
-        except ValueError:
-            # Hook not found, just ignore.
-            pass
+            method = getattr(hook, method_name)
+            method(*args)
+        except Exception as e:
+            self._logger.exception("Hook %s failed for args=%s: %s", method_name, args, e)
+
+    def _call_hooks(self, method_name: str, *args: Any) -> None:
+        """Helper method to call a specific method on all hooks."""
+        for hook in self._hooks:
+            self._call_hook_method(method_name, hook, *args)
 
     def call_on_enter(self, state_id: StateID) -> None:
         """
@@ -66,11 +86,7 @@ class HookManager:
 
         Hook failures are caught and logged.
         """
-        for hook in self._hooks:
-            try:
-                hook.on_enter(state_id)
-            except Exception as e:
-                self._logger.exception("Hook on_enter failed for state_id=%s: %s", state_id, e)
+        self._call_hooks("on_enter", state_id)
 
     def call_on_exit(self, state_id: StateID) -> None:
         """
@@ -78,11 +94,7 @@ class HookManager:
 
         Hook failures are caught and logged.
         """
-        for hook in self._hooks:
-            try:
-                hook.on_exit(state_id)
-            except Exception as e:
-                self._logger.exception("Hook on_exit failed for state_id=%s: %s", state_id, e)
+        self._call_hooks("on_exit", state_id)
 
     def call_pre_transition(self, transition: "AbstractTransition") -> None:
         """
@@ -90,11 +102,7 @@ class HookManager:
 
         Hook failures are caught and logged.
         """
-        for hook in self._hooks:
-            try:
-                hook.pre_transition(transition)
-            except Exception as e:
-                self._logger.exception("Hook pre_transition failed for transition=%s: %s", transition, e)
+        self._call_hooks("pre_transition", transition)
 
     def call_post_transition(self, transition: "AbstractTransition") -> None:
         """
@@ -102,8 +110,4 @@ class HookManager:
 
         Hook failures are caught and logged.
         """
-        for hook in self._hooks:
-            try:
-                hook.post_transition(transition)
-            except Exception as e:
-                self._logger.exception("Hook post_transition failed for transition=%s: %s", transition, e)
+        self._call_hooks("post_transition", transition)

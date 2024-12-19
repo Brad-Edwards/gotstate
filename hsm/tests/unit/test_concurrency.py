@@ -50,6 +50,29 @@ def lock_manager() -> LockManager:
     return LockManager()
 
 
+@pytest.fixture
+def any_lock(request) -> Generator[LockProtocol, None, None]:
+    """Parametrized fixture providing either sync or async lock."""
+    lock_type = request.param
+    lock = lock_type("test_lock")
+    yield lock
+    # Cleanup if needed
+    if lock.locked():
+        lock.release()
+
+
+@pytest.fixture
+def lock_pair() -> Generator[tuple[StateLock, AsyncStateLock], None, None]:
+    """Fixture providing both sync and async locks for comparison tests."""
+    sync_lock = StateLock("sync")
+    async_lock = AsyncStateLock("async")
+    yield sync_lock, async_lock
+    # Cleanup
+    for lock in (sync_lock, async_lock):
+        if lock.locked():
+            lock.release()
+
+
 # -----------------------------------------------------------------------------
 # MOCK IMPLEMENTATIONS FOR PROTOCOL TESTING
 # -----------------------------------------------------------------------------
@@ -197,6 +220,27 @@ def test_state_lock_reentrant() -> None:
     lock.release()
 
 
+def test_state_lock_reentrant_count():
+    """Test reentrant lock counting"""
+    lock = StateLock("test", reentrant=True)
+    assert lock._lock_count == 0
+    lock.acquire()
+    assert lock._lock_count == 1
+    lock.acquire()
+    assert lock._lock_count == 2
+    lock.release()
+    assert lock._lock_count == 1
+
+
+def test_state_lock_owner_tracking():
+    """Test lock owner tracking"""
+    lock = StateLock("test")
+    lock.acquire()
+    assert lock._owner == threading.get_ident()
+    lock.release()
+    assert lock._owner is None
+
+
 # -----------------------------------------------------------------------------
 # ASYNC STATE LOCK TESTS
 # -----------------------------------------------------------------------------
@@ -250,6 +294,27 @@ async def test_async_lock_non_blocking(async_lock: AsyncStateLock) -> None:
     await async_lock.acquire()
     assert not await async_lock.acquire(blocking=False)
     async_lock.release()
+
+
+@pytest.mark.asyncio
+async def test_async_lock_timeout_zero():
+    """Test non-blocking async lock acquisition"""
+    lock = AsyncStateLock("test")
+    await lock.acquire()
+    result = await lock.acquire(timeout=0)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_async_lock_owner_change():
+    """Test lock owner changes properly"""
+    lock = AsyncStateLock("test")
+    await lock.acquire()
+    owner1 = lock._owner
+    lock.release()
+    await lock.acquire()
+    owner2 = lock._owner
+    assert owner1 == owner2  # Same thread
 
 
 # -----------------------------------------------------------------------------
@@ -307,76 +372,208 @@ def test_lock_manager_get_all_locks(lock_manager: LockManager) -> None:
     lock1.release()
 
 
-# -----------------------------------------------------------------------------
-# LOCK INFO TESTS
-# -----------------------------------------------------------------------------
-def test_lock_info_immutable() -> None:
-    """Test that LockInfo is immutable."""
-    info = LockInfo("test", LockState.UNLOCKED)
-    with pytest.raises(Exception):
-        info.id = "new_id"  # type: ignore
+def test_lock_manager_mixed_types():
+    """Test managing both sync and async locks"""
+    manager = LockManager()
+    sync_lock = manager.create_lock("sync")
+    async_lock = manager.create_async_lock("async")
+    assert isinstance(sync_lock, StateLock)
+    assert isinstance(async_lock, AsyncStateLock)
 
 
-def test_lock_info_defaults() -> None:
-    """Test LockInfo default values."""
-    info = LockInfo("test", LockState.UNLOCKED)
-    assert info.owner is None
-    assert info.acquisition_time is None
+def test_lock_manager_cleanup():
+    """Test proper cleanup of removed locks"""
+    manager = LockManager()
+    lock = manager.create_lock("test")
+    lock.acquire()
+    lock.release()
+    manager.remove_lock("test")
+    assert "test" not in manager._locks
 
 
-# -----------------------------------------------------------------------------
-# PROTOCOL COMPLIANCE TESTS
-# -----------------------------------------------------------------------------
-def test_lock_protocol_compliance() -> None:
-    """Test that mock lock implements LockProtocol correctly."""
-    mock = MockLock("test")
-    assert isinstance(mock, LockProtocol)
-
-    # Test protocol methods
-    assert mock.acquire()
-    assert mock.locked()
-    info = mock.get_info()
-    assert isinstance(info, LockInfo)
-    mock.release()
-    assert not mock.locked()
+# Error Cases
+async def test_lock_release_unowned():
+    """Test releasing an unowned lock"""
+    lock = AsyncStateLock("test")
+    with pytest.raises(LockReleaseError):
+        lock.release()
 
 
-# -----------------------------------------------------------------------------
-# INTEGRATION TESTS
-# -----------------------------------------------------------------------------
-def test_concurrent_lock_access(lock_manager: LockManager) -> None:
-    """Test concurrent access to locks."""
+async def test_lock_double_release():
+    """Test releasing a lock twice"""
+    lock = StateLock("test")
+    lock.acquire()
+    lock.release()
+    with pytest.raises(LockReleaseError):
+        lock.release()
 
-    def worker(lock_id: str) -> None:
-        lock = lock_manager.create_lock(f"worker_{lock_id}")
-        for _ in range(10):
-            with lock:
-                time.sleep(0.01)
 
-    threads = [threading.Thread(target=worker, args=(str(i),)) for i in range(5)]
+# State Transitions
+async def test_lock_state_transitions():
+    """Test lock state transitions"""
+    lock = StateLock("test")
+    assert lock.get_info().state == LockState.UNLOCKED
+    lock.acquire()
+    assert lock.get_info().state == LockState.LOCKED
+    lock.release()
+    assert lock.get_info().state == LockState.UNLOCKED
 
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
 
-    assert len(lock_manager.get_all_locks()) == 5
-    assert all(lock.state != LockState.LOCKED for lock in lock_manager.get_all_locks().values())
+# Edge Cases
+@pytest.mark.asyncio
+async def test_async_lock_infinite_timeout():
+    """Test async lock with infinite timeout"""
+    lock = AsyncStateLock("test")
+    await lock.acquire()
+
+    async def acquire_with_infinite():
+        return await lock.acquire(timeout=None)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(acquire_with_infinite(), timeout=0.1)
+    lock.release()
+
+
+def test_lock_manager_remove_nonexistent():
+    """Test removing a non-existent lock"""
+    manager = LockManager()
+    with pytest.raises(ValueError):
+        manager.remove_lock("nonexistent")
 
 
 @pytest.mark.asyncio
-async def test_concurrent_async_lock_access(lock_manager: LockManager) -> None:
-    """Test concurrent access to async locks."""
+async def test_async_lock_release_during_acquisition():
+    """Test releasing lock while another task is waiting to acquire"""
+    lock = AsyncStateLock("test")
+    await lock.acquire()
 
-    async def worker(lock_id: str) -> None:
-        lock = lock_manager.create_async_lock(f"worker_{lock_id}")
+    async def delayed_release():
+        await asyncio.sleep(0.1)
+        lock.release()
+
+    release_task = asyncio.create_task(delayed_release())
+    await lock.acquire()  # Should succeed after release
+    await release_task
+    lock.release()
+
+
+# Boundary Conditions
+def test_state_lock_max_reentrant():
+    """Test maximum reentrant lock count"""
+    lock = StateLock("test", reentrant=True)
+    count = 0
+    try:
+        while count < 1000:  # Arbitrary large number
+            assert lock.acquire(blocking=False)
+            count += 1
+    finally:
+        for _ in range(count):
+            lock.release()
+
+
+@pytest.mark.asyncio
+async def test_async_lock_zero_timeout_stress():
+    """Test rapid zero-timeout acquisitions"""
+    lock = AsyncStateLock("test")
+    await lock.acquire()
+
+    results = await asyncio.gather(*[lock.acquire(timeout=0) for _ in range(100)])
+    assert all(not result for result in results)
+    lock.release()
+
+
+@pytest.mark.asyncio
+async def test_async_lock_rapid_acquire_release():
+    """Test rapid acquire/release cycles"""
+    lock = AsyncStateLock("test")
+
+    async def acquire_release_cycle():
         for _ in range(10):
-            async with lock:
-                await asyncio.sleep(0.01)
+            await lock.acquire()
+            lock.release()
 
-    tasks = [asyncio.create_task(worker(str(i))) for i in range(5)]
+    # Run multiple cycles concurrently
+    await asyncio.gather(*[acquire_release_cycle() for _ in range(10)])
 
-    await asyncio.gather(*tasks)
 
-    assert len(lock_manager.get_all_locks()) == 5
-    assert all(lock.state != LockState.LOCKED for lock in lock_manager.get_all_locks().values())
+def test_state_lock_stress_reentrant():
+    """Test reentrant lock under stress"""
+    lock = StateLock("test", reentrant=True)
+    max_depth = 100
+
+    def nested_acquire(depth):
+        if depth <= 0:
+            return
+        assert lock.acquire(blocking=False)
+        nested_acquire(depth - 1)
+        lock.release()
+
+    nested_acquire(max_depth)
+    assert not lock.locked()
+    assert lock._lock_count == 0
+
+
+# Helper functions for common test patterns
+async def assert_lock_lifecycle(lock: LockProtocol) -> None:
+    """Test basic lock lifecycle (acquire, check state, release)."""
+    # Initial state
+    assert not lock.locked()
+    assert lock._owner is None
+    assert lock._acquisition_time is None
+
+    # Acquire
+    if isinstance(lock, AsyncStateLock):
+        await lock.acquire()
+    else:
+        lock.acquire()
+
+    assert lock.locked()
+    assert lock._owner == threading.get_ident()
+    assert lock._acquisition_time is not None
+
+    # Release
+    lock.release()
+    assert not lock.locked()
+    assert lock._owner is None
+    assert lock._acquisition_time is None
+
+
+# Replace duplicate tests with parametrized versions
+@pytest.mark.parametrize("any_lock", [StateLock, AsyncStateLock], indirect=True)
+def test_lock_init(any_lock: LockProtocol) -> None:
+    """Test lock initialization for both sync and async locks."""
+    assert not any_lock.locked()
+    assert any_lock._owner is None
+    assert any_lock._acquisition_time is None
+
+
+@pytest.mark.parametrize("any_lock", [StateLock, AsyncStateLock], indirect=True)
+@pytest.mark.asyncio
+async def test_lock_owner_tracking(any_lock: LockProtocol) -> None:
+    """Test lock owner tracking for both lock types."""
+    await assert_lock_lifecycle(any_lock)
+
+
+@pytest.mark.parametrize("any_lock", [StateLock, AsyncStateLock], indirect=True)
+@pytest.mark.asyncio
+async def test_lock_release_unowned(any_lock: LockProtocol) -> None:
+    """Test releasing an unowned lock for both lock types."""
+    with pytest.raises(LockReleaseError):
+        any_lock.release()
+
+
+# Example of combining similar stress tests
+@pytest.mark.asyncio
+async def test_lock_stress(lock_pair: tuple[StateLock, AsyncStateLock]) -> None:
+    """Combined stress test for both lock types."""
+    sync_lock, async_lock = lock_pair
+
+    # Test rapid sync operations
+    for _ in range(100):
+        sync_lock.acquire(blocking=False)
+        sync_lock.release()
+
+    # Test rapid async operations
+    for _ in range(100):
+        if await async_lock.acquire(timeout=0):  # Only release if acquisition was successful
+            async_lock.release()

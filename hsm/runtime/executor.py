@@ -1,19 +1,17 @@
 # hsm/runtime/executor.py
-# Copyright (c) 2024 Brad Edwards
-# Licensed under the MIT License - see LICENSE file for details
-
 import logging
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum, auto
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Type, TypeVar
 
-from hsm.core.errors import HSMError
-from hsm.interfaces.abc import AbstractEvent, AbstractState, AbstractTransition
-from hsm.interfaces.types import EventID, StateID
-from hsm.runtime.event_queue import EventQueue, EventQueueError
+from hsm.core.errors import ExecutorError
+from hsm.core.state_machine import StateMachine
+from hsm.interfaces.abc import AbstractEvent, AbstractState
+from hsm.interfaces.types import StateID
+from hsm.runtime.event_queue import EventQueue
 from hsm.runtime.timers import Timer
 
 logger = logging.getLogger(__name__)
@@ -23,23 +21,7 @@ EXECUTOR_IS_NOT_RUNNING = "Executor is not running"
 NOT_IDLE_ERROR_MSG = "Executor is not in IDLE state"
 
 
-class ExecutorError(HSMError):
-    """Base exception for executor-related errors.
-
-    Attributes:
-        message: Error description
-        details: Additional error context
-    """
-
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
-        super().__init__(message)
-        self.message = message
-        self.details = details or {}
-
-
 class ExecutorState(Enum):
-    """Possible states of the executor."""
-
     IDLE = auto()
     RUNNING = auto()
     PAUSED = auto()
@@ -50,16 +32,6 @@ class ExecutorState(Enum):
 
 @dataclass(frozen=True)
 class ExecutorStats:
-    """Statistics for monitoring executor performance.
-
-    Attributes:
-        events_processed: Total number of events processed
-        transitions_executed: Total number of transitions executed
-        errors_encountered: Total number of errors encountered
-        avg_processing_time: Average time to process an event
-        last_event_time: Timestamp of last event processed
-    """
-
     events_processed: int = 0
     transitions_executed: int = 0
     errors_encountered: int = 0
@@ -68,15 +40,14 @@ class ExecutorStats:
 
 
 class ExecutorContext:
-    """Context for executor operations.
-
-    Manages shared state and provides thread-safe access to executor resources.
-
-    Runtime Invariants:
-    - Thread-safe access to shared resources
-    - Consistent state transitions
-    - Resource cleanup on shutdown
-    """
+    _VALID_TRANSITIONS = {
+        ExecutorState.IDLE: {ExecutorState.RUNNING, ExecutorState.ERROR},  # Allow IDLE->RUNNING
+        ExecutorState.RUNNING: {ExecutorState.PAUSED, ExecutorState.STOPPING, ExecutorState.ERROR},
+        ExecutorState.PAUSED: {ExecutorState.RUNNING, ExecutorState.STOPPING, ExecutorState.ERROR},
+        ExecutorState.STOPPING: {ExecutorState.STOPPED, ExecutorState.ERROR},
+        ExecutorState.STOPPED: {ExecutorState.IDLE, ExecutorState.ERROR},  # Allow restart (STOPPED->IDLE)
+        ExecutorState.ERROR: {ExecutorState.STOPPING, ExecutorState.STOPPED},
+    }
 
     def __init__(self):
         self._lock = threading.RLock()
@@ -86,48 +57,80 @@ class ExecutorContext:
 
     @property
     def state(self) -> ExecutorState:
-        """Get current executor state."""
         with self._lock:
             return self._state
 
     @state.setter
     def state(self, new_state: ExecutorState) -> None:
-        """Set executor state in a thread-safe manner."""
         with self._lock:
+            if not isinstance(new_state, ExecutorState):
+                raise AttributeError(f"State must be an ExecutorState enum value, got {type(new_state)}")
+
+            if new_state == self._state:
+                return  # Allow same state transitions (no-op)
+
+            valid_transitions = self._VALID_TRANSITIONS.get(self._state, set())
+            if new_state not in valid_transitions:
+                raise ExecutorError(f"Invalid state transition from {self._state} to {new_state}")
+
             self._state = new_state
 
     def update_stats(self, **kwargs: Any) -> None:
-        """Update executor statistics."""
         with self._lock:
             current = self._stats.__dict__.copy()
-            current.update(kwargs)
+            for key, value in kwargs.items():
+                current[key] = value
             self._stats = ExecutorStats(**current)
 
     def get_stats(self) -> ExecutorStats:
-        """Get current executor statistics."""
         with self._lock:
-            return self._stats
+            return replace(self._stats)
 
     def register_error_handler(self, error_type: Type[Exception], handler: Callable[[Exception], None]) -> None:
-        """Register a handler for a specific error type."""
         with self._lock:
             self._error_handlers[error_type] = handler
 
     def handle_error(self, error: Exception) -> None:
-        """Handle an error using registered handlers."""
         with self._lock:
-            handler = self._error_handlers.get(type(error))
-            if handler:
-                handler(error)
+            handler = None
+            if type(error) in self._error_handlers:
+                handler = self._error_handlers[type(error)]
             else:
-                logger.error("Unhandled error in executor: %s", str(error))
-                self.state = ExecutorState.ERROR
+                for etype, h in self._error_handlers.items():
+                    if isinstance(error, etype):
+                        handler = h
+                        break
+            try:
+                if handler:
+                    handler(error)
+                else:
+                    logger.error("Unhandled error in executor: %s", str(error))
+                if self._state != ExecutorState.ERROR:
+                    self._state = ExecutorState.ERROR
+                s = self._stats
+                self.update_stats(
+                    events_processed=s.events_processed,
+                    transitions_executed=s.transitions_executed,
+                    errors_encountered=s.errors_encountered + 1,
+                    avg_processing_time=s.avg_processing_time,
+                    last_event_time=s.last_event_time,
+                )
+            except Exception as e:
+                logger.error("Error handler failed: %s", str(e))
+                if self._state != ExecutorState.ERROR:
+                    self._state = ExecutorState.ERROR
+
+    def force_state(self, new_state: ExecutorState) -> None:
+        """
+        Force the state to a new value without validating transitions.
+        Useful in start/stop if we want to bypass normal validation.
+        """
+        with self._lock:
+            self._state = new_state
 
 
 @dataclass(frozen=True)
 class StateChange:
-    """Record of a state change."""
-
     source_id: StateID
     target_id: StateID
     timestamp: float
@@ -135,66 +138,34 @@ class StateChange:
 
 
 class Executor:
-    """
-    Synchronous event processor for state machines.
-
-    This class manages the event processing loop, state transitions,
-    and error handling for synchronous state machine operations.
-
-    Runtime Invariants:
-    - Only one event is processed at a time
-    - State transitions are atomic
-    - Event processing order follows priority rules
-    - Resource cleanup is guaranteed
-    - Thread-safe operation
-
-    Example:
-        executor = Executor(states, transitions, initial_state)
-        executor.start()
-        executor.process_event(event)
-        executor.stop()
-    """
-
     def __init__(
         self,
-        states: List[AbstractState],
-        transitions: List[AbstractTransition],
-        initial_state: AbstractState,
+        state_machine: StateMachine,
         max_queue_size: Optional[int] = None,
-        thread_join_timeout: float = 1.0,
+        thread_join_timeout: float = 5.0,
     ):
-        """
-        Initialize the executor.
+        if state_machine is None:
+            raise ValueError("state_machine cannot be None")
 
-        Args:
-            states: List of all possible states
-            transitions: List of allowed transitions
-            initial_state: Starting state
-            max_queue_size: Optional maximum event queue size
-            thread_join_timeout: Timeout in seconds for thread join operations (default: 1.0)
-
-        Raises:
-            ValueError: If configuration is invalid
-        """
-        if not states or transitions is None or not initial_state:
-            raise ValueError("States, transitions, and initial state are required")
-        if initial_state not in states:
-            raise ValueError("Initial state must be in states list")
+        if not isinstance(thread_join_timeout, (int, float)):
+            raise TypeError("thread_join_timeout must be a number")
         if thread_join_timeout <= 0:
             raise ValueError("Thread join timeout must be positive")
 
-        self._states = {state.get_id(): state for state in states}
-        self._transitions = transitions
-        self._initial_state = initial_state
-        self._current_state: Optional[AbstractState] = None
+        if max_queue_size is not None and not isinstance(max_queue_size, int):
+            raise TypeError("max_queue_size must be an integer")
+        if max_queue_size is not None and max_queue_size <= 0:
+            raise ValueError("max_queue_size must be positive")
+
+        self._state_machine = state_machine
         self._event_queue = EventQueue(max_size=max_queue_size)
         self._context = ExecutorContext()
         self._worker_thread: Optional[threading.Thread] = None
         self._state_changes: List[StateChange] = []
-        self._max_state_history: int = 1000  # Configurable
+        self._max_state_history: int = 1000
         self._thread_join_timeout = thread_join_timeout
+        self._currently_processing = False
 
-        # Initialize timer with default callback
         def timer_callback(timer_id: str, event: AbstractEvent) -> None:
             try:
                 if self._context.state == ExecutorState.RUNNING:
@@ -206,279 +177,209 @@ class Executor:
         self._timer = Timer("executor_timer", timer_callback)
 
     def start(self) -> None:
-        """
-        Start the executor.
-
-        Initializes the event processing thread and enters the initial state.
-
-        Raises:
-            ExecutorError: If executor is already running
-        """
         if self._context.state != ExecutorState.IDLE:
             raise ExecutorError(NOT_IDLE_ERROR_MSG)
 
+        self._context.force_state(ExecutorState.RUNNING)
         try:
-            self._current_state = self._initial_state
-            self._current_state.on_enter()
-            self._context.state = ExecutorState.RUNNING
+            self._state_machine.start()
             self._worker_thread = threading.Thread(target=self._process_events, daemon=True)
             self._worker_thread.start()
         except Exception as e:
-            self._context.state = ExecutorState.ERROR
+            with self._context._lock:
+                self._context._state = ExecutorState.ERROR
             raise ExecutorError(f"Failed to start executor: {str(e)}") from e
 
-    def stop(self) -> None:
-        """
-        Stop the executor.
-
-        Exits the current state and stops event processing.
-
-        Raises:
-            ExecutorError: If executor is not running or stop operation times out
-        """
-        if self._context.state != ExecutorState.RUNNING:
+    def stop(self, force: bool = False) -> None:
+        if not force and self._context.state not in (ExecutorState.RUNNING, ExecutorState.PAUSED):
             raise ExecutorError(EXECUTOR_IS_NOT_RUNNING)
 
-        self._context.state = ExecutorState.STOPPING
+        # Try to go to STOPPING
+        try:
+            if self._context.state != ExecutorState.ERROR:
+                self._context.state = ExecutorState.STOPPING
+            else:
+                # ERROR->STOPPING also allowed
+                with self._context._lock:
+                    self._context._state = ExecutorState.STOPPING
+        except ExecutorError:
+            if force:
+                with self._context._lock:
+                    self._context._state = ExecutorState.STOPPED
+            else:
+                raise
+
         stop_start_time = time.time()
 
+        def get_remaining_timeout() -> float:
+            elapsed = time.time() - stop_start_time
+            remaining = self._thread_join_timeout - elapsed
+            return max(0, remaining)
+
         try:
-            # Calculate remaining time for operations
-            def get_remaining_timeout() -> float:
-                elapsed = time.time() - stop_start_time
-                remaining = self._thread_join_timeout - elapsed
-                if remaining <= 0:
-                    raise ExecutorError("Failed to stop executor: operation timed out")
-                return remaining
-
-            # Exit current state
-            if self._current_state:
-                exit_thread = threading.Thread(target=self._current_state.on_exit)
-                self._join_thread_with_timeout(exit_thread, "state exit", get_remaining_timeout())
-
-            # Shutdown event queue
-            queue_thread = threading.Thread(target=self._event_queue.shutdown)
-            self._join_thread_with_timeout(queue_thread, "event queue shutdown", get_remaining_timeout())
-
-            # Shutdown timer if available
-            if hasattr(self._timer, "shutdown"):
-                timer_thread = threading.Thread(target=self._timer.shutdown)
-                self._join_thread_with_timeout(timer_thread, "timer shutdown", get_remaining_timeout())
-
-            # Join worker thread
-            if self._worker_thread:
-                self._join_thread_with_timeout(
-                    self._worker_thread, "worker thread", get_remaining_timeout(), start=False
-                )
-
-            self._context.state = ExecutorState.STOPPED
-
+            self._event_queue.shutdown()
         except Exception as e:
-            self._handle_operation_error("Stop", e)
-        finally:
-            self._current_state = None
-            self._worker_thread = None
+            if not force:
+                raise
+            logger.warning(f"Error during event queue shutdown: {e}")
+
+        try:
+            if hasattr(self._timer, "shutdown"):
+                self._timer.shutdown()
+        except Exception as e:
+            if not force:
+                raise
+            logger.warning(f"Error during timer shutdown: {e}")
+
+        thread_stopped = True
+        if self._worker_thread and self._worker_thread.is_alive():
+            try:
+                timeout = 0 if force else get_remaining_timeout()
+                self._worker_thread.join(timeout=timeout)
+                if self._worker_thread.is_alive():
+                    thread_stopped = False
+                    if not force:
+                        raise ExecutorError("Worker thread did not stop within timeout")
+            except TimeoutError:
+                thread_stopped = False
+                if not force:
+                    raise ExecutorError("Worker thread join timed out")
+            except Exception as e:
+                if not force:
+                    raise
+                logger.warning(f"Error during thread join: {e}")
+
+        try:
+            self._state_machine.stop()
+        except Exception as e:
+            if not force:
+                raise
+            logger.warning(f"Error during state machine stop: {e}")
+
+        with self._context._lock:
+            if thread_stopped or force:
+                self._context._state = ExecutorState.STOPPED
+            else:
+                self._context._state = ExecutorState.ERROR
+
+        self._worker_thread = None
 
     def process_event(self, event: AbstractEvent) -> None:
-        """
-        Process an event.
-
-        Thread-safe method to enqueue an event for processing.
-
-        Args:
-            event: Event to process
-
-        Raises:
-            ExecutorError: If executor is not running
-            EventQueueError: If event queue is full
-        """
-        if self._context.state != ExecutorState.RUNNING:
+        if self._context.state not in (ExecutorState.RUNNING, ExecutorState.PAUSED):
             raise ExecutorError(EXECUTOR_IS_NOT_RUNNING)
+        if event is None or not hasattr(event, "get_priority"):
+            raise TypeError("Invalid event")
 
         try:
+            # Ensure event has required methods
+            if not hasattr(event, "get_id"):
+                raise TypeError("Event must have get_id method")
+
             self._event_queue.enqueue(event)
-        except EventQueueError as e:
+        except Exception as e:
             raise ExecutorError(f"Failed to enqueue event: {str(e)}") from e
 
     def _process_events(self) -> None:
-        """Event processing loop with improved state handling."""
-        while self._context.state not in (ExecutorState.STOPPED, ExecutorState.ERROR):
-            try:
-                if self._context.state == ExecutorState.PAUSED:
-                    time.sleep(0.1)  # Reduce CPU usage while paused
-                    continue
-
-                if self._context.state != ExecutorState.RUNNING:
-                    break
-
-                event = self._event_queue.try_dequeue(timeout=0.1)
-                if event:
-                    self._handle_event(event)
-            except Exception as e:
-                logger.exception("Error in event processing loop")
-                self._context.handle_error(e)
-                if self._context.state == ExecutorState.ERROR:
-                    break
+        while True:
+            st = self._context.state
+            if st in (ExecutorState.STOPPED, ExecutorState.ERROR, ExecutorState.STOPPING):
+                break
+            if st == ExecutorState.PAUSED:
+                time.sleep(0.1)
+                continue
+            if st == ExecutorState.RUNNING:
+                try:
+                    event = self._event_queue.try_dequeue(timeout=0.1)
+                    if event:
+                        self._currently_processing = True
+                        try:
+                            if hasattr(event, "get_id"):  # Validate event
+                                self._handle_event(event)
+                            else:
+                                logger.error("Invalid event received: missing get_id method")
+                        finally:
+                            self._currently_processing = False
+                    else:
+                        time.sleep(0.05)
+                except Exception as e:
+                    logger.error("Error processing event: %s", str(e))
+                    self._context.handle_error(e)
+                    time.sleep(0.1)  # Delay after error
+            else:
+                time.sleep(0.1)
 
     def _handle_event(self, event: AbstractEvent) -> None:
-        """Handle a single event."""
-        if not self._current_state:
-            return
-
+        old_stats = self._context.get_stats()
         start_time = time.time()
         try:
-            transition = self._find_valid_transition(event)
-            if transition:
-                self._execute_transition(transition, event)
-                self._context.update_stats(transitions_executed=self._context.get_stats().transitions_executed + 1)
+            old_state = self._state_machine.get_state()
+            old_state_id = old_state.id if (old_state and hasattr(old_state, "id")) else None
+
+            self._state_machine.process_event(event)
+
+            new_state = self._state_machine.get_state()
+            new_state_id = new_state.id if (new_state and hasattr(new_state, "id")) else None
+
+            end_time = time.time()
+            processing_time = end_time - start_time
+
+            # Record state change if we have a new_state
+            if new_state is not None:
+                sc = StateChange(
+                    source_id=old_state_id, target_id=new_state_id, timestamp=end_time, event_id=event.get_id()
+                )
+                self._state_changes.append(sc)
+                if len(self._state_changes) > self._max_state_history:
+                    self._state_changes = self._state_changes[-self._max_state_history :]
+
+            # Update stats atomically
+            with self._context._lock:
+                self._context.update_stats(
+                    events_processed=old_stats.events_processed + 1,
+                    transitions_executed=old_stats.transitions_executed + 1,
+                    errors_encountered=old_stats.errors_encountered,
+                    avg_processing_time=(old_stats.avg_processing_time * old_stats.events_processed + processing_time)
+                    / (old_stats.events_processed + 1),
+                    last_event_time=end_time,
+                )
         except Exception as e:
+            end_time = time.time()
             self._context.handle_error(e)
-        finally:
-            processing_time = time.time() - start_time
-            stats = self._context.get_stats()
-            self._context.update_stats(
-                events_processed=stats.events_processed + 1,
-                avg_processing_time=(
-                    (stats.avg_processing_time * stats.events_processed + processing_time)
-                    / (stats.events_processed + 1)
-                ),
-                last_event_time=time.time(),
-            )
-
-    def _find_valid_transition(self, event: AbstractEvent) -> Optional[AbstractTransition]:
-        """Find the highest priority valid transition for the current event."""
-        if not self._current_state:
-            return None
-
-        valid_transitions = []
-        current_state_id = self._current_state.get_id()
-
-        for transition in self._transitions:
-            if transition.get_source_state_id() != current_state_id:
-                continue
-
-            guard = transition.get_guard()
-            if guard:
-                try:
-                    if guard.check(event, self._current_state.data):
-                        valid_transitions.append(transition)
-                except Exception as e:
-                    logger.error("Guard check failed: %s", str(e))
-                    continue
-            else:
-                valid_transitions.append(transition)
-
-        if not valid_transitions:
-            return None
-
-        return max(valid_transitions, key=lambda t: t.get_priority())
-
-    def _execute_transition(self, transition: AbstractTransition, event: AbstractEvent) -> None:
-        """Execute a transition."""
-        if not self._current_state:
-            return
-
-        source_id = transition.get_source_state_id()
-        target_id = transition.get_target_state_id()
-        target_state = self._states.get(target_id)
-
-        if not target_state:
-            raise ExecutorError(f"Invalid target state: {target_id}")
-
-        try:
-            self._current_state.on_exit()
-            for action in transition.get_actions():
-                action.execute(event, self._current_state.data)
-            self._current_state = target_state
-            self._state_changes.append(
-                StateChange(source_id=source_id, target_id=target_id, timestamp=time.time(), event_id=event.get_id())
-            )
-            if len(self._state_changes) > self._max_state_history:
-                self._state_changes = self._state_changes[-self._max_state_history :]
-            target_state.on_enter()
-        except Exception as e:
-            self._handle_operation_error(
-                "Transition",
-                e,
-                {
-                    "source_state": source_id,
-                    "target_state": target_id,
-                    "event": event.get_id(),
-                },
-            )
 
     @contextmanager
     def pause(self) -> Generator[None, None, None]:
-        """
-        Temporarily pause event processing.
-
-        Context manager that pauses event processing and resumes on exit.
-
-        Example:
-            with executor.pause():
-                # Event processing is paused
-                do_something()
-            # Event processing resumes
-        """
         if self._context.state != ExecutorState.RUNNING:
             raise ExecutorError(EXECUTOR_IS_NOT_RUNNING)
-
         try:
             self._context.state = ExecutorState.PAUSED
             yield
         finally:
             if self._context.state == ExecutorState.PAUSED:
                 self._context.state = ExecutorState.RUNNING
+                # Wait a bit to ensure the worker thread resumes
+                time.sleep(0.1)
 
     def get_stats(self) -> ExecutorStats:
-        """Get current executor statistics."""
         return self._context.get_stats()
 
     def register_error_handler(self, error_type: Type[Exception], handler: Callable[[Exception], None]) -> None:
-        """Register a custom error handler."""
         self._context.register_error_handler(error_type, handler)
 
     def get_current_state(self) -> Optional[AbstractState]:
-        """Get the current state."""
-        return self._current_state
+        with self._context._lock:
+            return self._state_machine.get_state()
 
     def is_running(self) -> bool:
-        """Check if the executor is running."""
         return self._context.state == ExecutorState.RUNNING
 
     def get_state_history(self) -> List[StateChange]:
-        """Get the state change history."""
-        return list(self._state_changes)  # Return copy
+        return list(self._state_changes)
 
-    def _join_thread_with_timeout(
-        self, thread: threading.Thread, operation: str, timeout: float, start: bool = True
-    ) -> None:
-        """Join a thread with timeout.
-
-        Args:
-            thread: Thread to join
-            operation: Description of the operation for error message
-            timeout: Maximum time to wait in seconds
-            start: Whether to start the thread (default: True)
-
-        Raises:
-            ExecutorError: If thread join times out
-        """
-        if start:
-            thread.start()
-        thread.join(timeout=timeout)
-        if thread.is_alive():
-            raise ExecutorError(f"Failed to stop executor: {operation} timed out")
-
-    def _handle_operation_error(
-        self, operation: str, error: Exception, details: Optional[Dict[str, Any]] = None
-    ) -> None:
-        """Handle operation errors consistently.
-
-        Args:
-            operation: Description of the operation that failed
-            error: The exception that occurred
-            details: Optional additional error context
-        """
-        self._context.state = ExecutorState.ERROR
-        raise ExecutorError(f"{operation} failed: {str(error)}", details or {}) from error
+    def wait_for_events(self, timeout: float = 1.0) -> bool:
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            # Check if queue empty and no event currently being processed
+            if self._event_queue.is_empty() and not self._currently_processing:
+                return True
+            time.sleep(0.01)  # Shorter sleep, we're actively checking
+        return False

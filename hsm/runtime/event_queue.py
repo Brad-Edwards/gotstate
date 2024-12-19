@@ -60,22 +60,22 @@ class QueueStats:
     total_dequeued: int = 0
     max_seen_size: int = 0
     total_wait_time: float = 0.0
-    last_operation_time: float = 0.0
+    last_operation_time: float = field(default_factory=time.monotonic)
 
     def record_enqueue(self, queue_size: int) -> None:
         """Record statistics for an enqueue operation."""
         self.total_enqueued += 1
         self.max_seen_size = max(self.max_seen_size, queue_size)
-        self.last_operation_time = time.time()
+        self.last_operation_time = time.monotonic()
 
     def record_dequeue(self, wait_time: float) -> None:
         """Record statistics for a dequeue operation."""
         self.total_dequeued += 1
         self.total_wait_time += wait_time
-        self.last_operation_time = time.time()
+        self.last_operation_time = time.monotonic()
 
 
-@dataclass(order=True)
+@dataclass(order=False)
 class PrioritizedEvent:
     """Wrapper for events that enables priority queue ordering.
 
@@ -86,14 +86,37 @@ class PrioritizedEvent:
     """
 
     priority: int
-    sequence: int = field(compare=True)
+    sequence: int = field(compare=False)
     event: Event = field(compare=False)
-    enqueue_time: float = field(default_factory=time.time, compare=False)
+    enqueue_time: float = field(default_factory=time.monotonic, compare=False)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, PrioritizedEvent):
             return NotImplemented
+        # Handle None priorities
+        if self.priority is None and other.priority is None:
+            return self.sequence == other.sequence
+        if self.priority is None or other.priority is None:
+            return False
         return (self.priority, self.sequence) == (other.priority, other.sequence)
+
+    def __lt__(self, other: "PrioritizedEvent") -> bool:
+        if not isinstance(other, PrioritizedEvent):
+            return NotImplemented
+        # Handle None priorities - treat None as lowest priority
+        if self.priority is None and other.priority is None:
+            return self.sequence < other.sequence
+        if self.priority is None:
+            return False  # None is lowest priority
+        if other.priority is None:
+            return True  # None is lowest priority
+        # Lower priority values should come first (-100 before -99)
+        return self.priority < other.priority or (self.priority == other.priority and self.sequence < other.sequence)
+
+    def __le__(self, other: "PrioritizedEvent") -> bool:
+        if not isinstance(other, PrioritizedEvent):
+            return NotImplemented
+        return self < other or self == other
 
 
 class BaseEventQueue:
@@ -165,15 +188,25 @@ class BaseEventQueue:
         if not self._queue:
             raise QueueEmptyError("Queue is empty")
 
-        event = heapq.heappop(self._queue).event
-        wait_time = time.time() - start_time
+        self._verify_heap()  # Verify heap before dequeue
+        event = heapq.heappop(self._queue)
+        self._verify_heap()  # Verify heap after dequeue
+
+        wait_time = time.monotonic() - start_time
         self._stats.record_dequeue(wait_time)
-        self._log_dequeue(event, wait_time)
-        return event
+        self._log_dequeue(event.event, wait_time)
+        return event.event
 
     def _handle_shutdown(self) -> None:
         """Common shutdown logic."""
         self._shutdown = True
+
+    def _verify_heap(self) -> None:
+        """Verify the heap invariant is maintained."""
+        for i in range(1, len(self._queue)):
+            parent = (i - 1) // 2
+            if not self._queue[parent] <= self._queue[i]:
+                raise EventQueueError(f"Heap property violated at index {i}")
 
 
 class EventQueue(BaseEventQueue, AbstractEventQueue):
@@ -236,10 +269,13 @@ class EventQueue(BaseEventQueue, AbstractEventQueue):
 
             priority_event = self._create_priority_event(event)
             heapq.heappush(self._queue, priority_event)
+            self._verify_heap()  # Verify heap after push
+
             self._stats.record_enqueue(len(self._queue))
             self._not_empty.notify()
 
             self._log_enqueue(event)
+            self._stats.last_operation_time = time.monotonic()
 
     def dequeue(self) -> AbstractEvent:
         """
@@ -256,7 +292,7 @@ class EventQueue(BaseEventQueue, AbstractEventQueue):
         """
         self._check_shutdown()
 
-        start_time = time.time()
+        start_time = time.monotonic()
         with self._lock:
             event = self._handle_dequeue(start_time)
             self._not_full.notify()
@@ -274,7 +310,7 @@ class EventQueue(BaseEventQueue, AbstractEventQueue):
         """
         self._check_shutdown()
 
-        start_time = time.time()
+        start_time = time.monotonic()
         with self._lock:
             if not self._queue:
                 if timeout is None or timeout <= 0:
@@ -314,11 +350,10 @@ class EventQueue(BaseEventQueue, AbstractEventQueue):
             return self._max_size is not None and len(self._queue) >= self._max_size
 
     def is_empty(self) -> bool:
-        """
-        Check if queue is empty.
+        """Check if the queue is empty.
 
         Returns:
-            True if queue has no events, False otherwise
+            True if queue is empty, False otherwise
         """
         with self._lock:
             return len(self._queue) == 0
@@ -400,14 +435,23 @@ class AsyncEventQueue(BaseEventQueue, AbstractEventQueue):
         self._validate_event(event)
 
         async with self._lock:
-            self._check_full()
+            # Check if queue is full before waiting
+            if self._max_size is not None and len(self._queue) >= self._max_size:
+                raise QueueFullError(
+                    "Queue is at maximum capacity",
+                    max_size=self._max_size,
+                    current_size=len(self._queue),
+                )
 
             priority_event = self._create_priority_event(event)
             heapq.heappush(self._queue, priority_event)
+            self._verify_heap()  # Verify heap after push
+
             self._stats.record_enqueue(len(self._queue))
             self._not_empty.notify()
 
             self._log_enqueue(event)
+            self._stats.last_operation_time = time.monotonic()
 
     async def dequeue(self) -> AbstractEvent:
         """
@@ -422,7 +466,7 @@ class AsyncEventQueue(BaseEventQueue, AbstractEventQueue):
         """
         self._check_shutdown()
 
-        start_time = time.time()
+        start_time = time.monotonic()
         async with self._lock:
             event = self._handle_dequeue(start_time)
             self._not_full.notify()
@@ -440,7 +484,7 @@ class AsyncEventQueue(BaseEventQueue, AbstractEventQueue):
         """
         self._check_shutdown()
 
-        start_time = time.time()
+        start_time = time.monotonic()
         async with self._lock:
             if not self._queue:
                 if timeout is None or timeout <= 0:
@@ -496,7 +540,7 @@ class AsyncEventQueue(BaseEventQueue, AbstractEventQueue):
         """Clear all events from the queue asynchronously."""
         async with self._lock:
             self._queue.clear()
-            await self._not_full.notify_all()
+            self._not_full.notify_all()
 
     async def size(self) -> int:
         """

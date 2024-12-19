@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gotstate"
-license = "MIT"
+version = "0.1.0"
+license = {text = "MIT"}
 authors = [
     {name = "Brad Edwards", email = "brad@keplerops.com"}
 ]

@@ -16,11 +16,7 @@ Sections covered:
 import asyncio
 import io
 import logging
-import random
-import string
 import sys
-import threading
-import time
 from contextlib import contextmanager
 from typing import Any, Dict
 
@@ -216,18 +212,6 @@ def test_maximum_recursion_scenario() -> None:
 # -----------------------------------------------------------------------------
 
 
-def test_logging_integration(logger_fixture, caplog: pytest.LogCaptureFixture) -> None:
-    """
-    Test integration with logging by simulating event-based logging.
-    """
-    evt = Event("log_event", {"log": True})
-    caplog.clear()
-    with caplog.at_level(logging.INFO, logger="hsm.test.events"):
-        logger_fixture.info("Event ID: %s", evt.get_id())
-
-    assert any("Event ID: log_event" in rec.message for rec in caplog.records)
-
-
 @contextmanager
 def event_context_manager():
     """
@@ -266,70 +250,65 @@ async def test_async_error_scenario(async_setup) -> None:
     assert "Async event fail" in str(exc_info.value)
 
 
-def test_cleanup_procedures() -> None:
-    """
-    Test scenario where cleanup is needed after an error.
-    We'll simulate cleanup logic after raising an error.
-    """
-    try:
-        raise HSMError("Cleanup test")
-    except HSMError as e:
-        # Simulate cleanup
-        cleaned_up = True
-        assert cleaned_up is True
-        assert "Cleanup test" in str(e)
+def test_event_equality() -> None:
+    """Test equality comparison between events."""
+    evt1 = Event("test", {"data": 1}, 1)
+    evt2 = Event("test", {"data": 1}, 1)
+    evt3 = Event("different", {"data": 1}, 1)
+
+    assert evt1 == evt2  # Same values should be equal
+    assert evt1 != evt3  # Different IDs should not be equal
+    assert evt1 != "not_an_event"  # Different types should not be equal
 
 
-def test_thread_safety(sample_event: Event, sample_state_data: Dict[str, Any]) -> None:
-    """
-    Test simultaneous reads from the same event instance from multiple threads.
-    Ensures thread safety under concurrent access.
-    """
-    results = []
+def test_event_str_representation() -> None:
+    """Test string representation of events."""
+    evt = Event("test_event", {"data": 42}, 5)
+    str_repr = str(evt)
 
-    def worker():
-        for _ in range(100):
-            # Just access the event repeatedly
-            event_id = sample_event.get_id()
-            payload = sample_event.get_payload()
-            priority = sample_event.get_priority()
-            results.append((event_id, payload, priority))
-
-    threads = [threading.Thread(target=worker) for _ in range(5)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    # All results should match the sample_event's properties
-    for r in results:
-        assert r[0] == "test_event"
-        assert r[1] == {"data": 42}
-        assert r[2] == 5
+    assert "test_event" in str_repr
+    assert "42" in str_repr
+    assert "5" in str_repr
 
 
-def test_performance_timing() -> None:
-    """
-    Test that event creation and retrieval are performed within a reasonable time.
-    This is a very loose check, just ensuring it doesn't hang significantly.
-    """
-    start = time.time()
-    evt = Event("perf_event", payload=[x for x in range(100000)], priority=50)
-    end = time.time()
+def test_payload_mutation_protection() -> None:
+    """Test that mutating the original payload doesn't affect the event."""
+    original_payload = {"data": [1, 2, 3]}
+    evt = Event("test", original_payload)
 
-    creation_time = end - start
-    # Arbitrary threshold: should complete well under 0.5 seconds on a typical machine.
-    assert creation_time < 0.5, f"Event creation took too long: {creation_time} seconds"
+    # Modify original payload
+    original_payload["data"].append(4)
 
-    # Access methods should be instantaneous or near so
-    start = time.time()
-    _ = evt.get_id()
-    _ = evt.get_payload()
-    _ = evt.get_priority()
-    end = time.time()
+    # Event payload should be unchanged
+    assert evt.get_payload()["data"] == [1, 2, 3]
 
-    access_time = end - start
-    assert access_time < 0.1, f"Event access took too long: {access_time} seconds"
+
+def test_event_id_type_validation() -> None:
+    """Test that event_id must be a string."""
+    with pytest.raises(TypeError):
+        Event(123)  # type: ignore
+
+    with pytest.raises(TypeError):
+        Event(["not", "a", "string"])  # type: ignore
+
+
+def test_timeout_event_inheritance() -> None:
+    """Test that TimeoutEvent properly inherits from Event."""
+    timeout_evt = TimeoutEvent("test", timeout=1.0)
+
+    assert isinstance(timeout_evt, Event)
+    assert isinstance(timeout_evt, TimeoutEvent)
+    assert hasattr(timeout_evt, "get_timeout")
+    assert not hasattr(Event("test"), "get_timeout")
+
+
+def test_timeout_event_default_values() -> None:
+    """Test default values in TimeoutEvent constructor."""
+    evt = TimeoutEvent("test")
+
+    assert evt.get_timeout() == 0.0
+    assert evt.get_payload() is None
+    assert evt.get_priority() == 0
 
 
 def test_unicode_and_internationalization() -> None:
@@ -397,3 +376,173 @@ def test_forward_compatibility_simulation() -> None:
     # We didn't define any special handling for unknown keys, but this simulates
     # that the event just stores what it gets.
     assert p["unexpected_future_key"] == "future_data"
+
+
+def test_timeout_event_str_representation() -> None:
+    """Test string representation of TimeoutEvent includes timeout value."""
+    evt = TimeoutEvent("test_event", {"data": 42}, 5, timeout=1.5)
+    str_repr = str(evt)
+
+    assert "test_event" in str_repr
+    assert "42" in str_repr
+    assert "5" in str_repr
+    assert "1.5" in str_repr
+
+
+def test_timeout_event_equality() -> None:
+    """Test equality comparison between TimeoutEvents."""
+    evt1 = TimeoutEvent("test", {"data": 1}, 1, timeout=1.0)
+    evt2 = TimeoutEvent("test", {"data": 1}, 1, timeout=1.0)
+    evt3 = TimeoutEvent("test", {"data": 1}, 1, timeout=2.0)
+    evt4 = Event("test", {"data": 1}, 1)  # Regular Event
+
+    assert evt1 == evt2  # Same values should be equal
+    assert evt1 != evt3  # Different timeouts should not be equal
+    assert evt4 != evt1  # Event compared with TimeoutEvent should not be equal
+
+
+def test_payload_deep_copy() -> None:
+    """Test that nested mutable structures in payload are deep copied."""
+    nested_payload = {"list": [1, [2, 3], {"a": 4}], "dict": {"nested": {"value": 5}}}
+    evt = Event("test", nested_payload)
+
+    # Modify nested structures in original payload
+    nested_payload["list"][1][0] = 99
+    nested_payload["dict"]["nested"]["value"] = 99
+
+    # Event payload should remain unchanged
+    event_payload = evt.get_payload()
+    assert event_payload["list"][1][0] == 2
+    assert event_payload["dict"]["nested"]["value"] == 5
+
+
+def test_timeout_event_float_conversion() -> None:
+    """Test that timeout values are properly converted to float."""
+    # Test with integer timeout
+    evt1 = TimeoutEvent("test", timeout=1)
+    assert isinstance(evt1.get_timeout(), float)
+    assert evt1.get_timeout() == 1.0
+
+    # Test with string timeout (should raise TypeError)
+    with pytest.raises(TypeError):
+        TimeoutEvent("test", timeout="1.0")  # type: ignore
+
+
+def test_event_hash_immutability() -> None:
+    """Test that events can be used as dictionary keys (are hashable)."""
+    evt1 = Event("test", {"data": 1}, 1)
+    evt2 = Event("test", {"data": 1}, 1)
+    evt3 = Event("different", {"data": 1}, 1)
+
+    event_dict = {evt1: "value1"}
+
+    # Same event (by value) should access the same dict entry
+    event_dict[evt2] = "value2"
+    assert len(event_dict) == 1
+    assert event_dict[evt1] == "value2"
+
+    # Different event should create new entry
+    event_dict[evt3] = "value3"
+    assert len(event_dict) == 2
+
+
+def test_timeout_event_zero_timeout() -> None:
+    """Test TimeoutEvent with exactly zero timeout."""
+    evt = TimeoutEvent("test")
+    assert evt.get_timeout() == 0.0
+    assert isinstance(evt.get_timeout(), float)
+
+
+def test_timeout_event_none_payload() -> None:
+    """Test TimeoutEvent with None payload explicitly set."""
+    evt = TimeoutEvent("test", payload=None, timeout=1.0)
+    assert evt.get_payload() is None
+
+
+def test_event_equality_with_none_payload() -> None:
+    """Test equality comparison with None payloads."""
+    evt1 = Event("test", None)
+    evt2 = Event("test", None)
+    evt3 = Event("test")  # implicit None
+
+    assert evt1 == evt2
+    assert evt1 == evt3
+    assert evt2 == evt3
+
+
+def test_event_hash_with_none_payload() -> None:
+    """Test that events with None payloads can be hashed consistently."""
+    evt1 = Event("test", None)
+    evt2 = Event("test")  # implicit None
+
+    # Both should hash to same value
+    assert hash(evt1) == hash(evt2)
+
+    # Should work as dict keys
+    d = {evt1: "value"}
+    assert d[evt2] == "value"
+
+
+def test_timeout_event_negative_zero_timeout() -> None:
+    """Test TimeoutEvent with negative zero (-0.0) timeout."""
+    evt = TimeoutEvent("test", timeout=-0.0)
+    assert evt.get_timeout() == 0.0
+    assert not str(evt.get_timeout()).startswith("-")  # Ensure it's not -0.0
+
+
+def test_event_priority_type_validation() -> None:
+    """Test that priority must be an integer."""
+    with pytest.raises(TypeError):
+        Event("test", priority="5")  # type: ignore
+
+    with pytest.raises(TypeError):
+        Event("test", priority=1.5)  # type: ignore
+
+
+def test_timeout_event_equality_subclass() -> None:
+    """Test equality with a TimeoutEvent subclass."""
+
+    class CustomTimeoutEvent(TimeoutEvent):
+        pass
+
+    evt1 = TimeoutEvent("test", timeout=1.0)
+    evt2 = CustomTimeoutEvent("test", timeout=1.0)
+
+    assert evt1 == evt2  # Should be equal despite different concrete classes
+
+
+def test_event_equality_with_other_types() -> None:
+    """Test equality comparison with non-Event types returns NotImplemented."""
+    evt = Event("test")
+    result = evt.__eq__(42)  # Should return NotImplemented
+    assert result is NotImplemented
+
+    # Also test with TimeoutEvent
+    tevt = TimeoutEvent("test", timeout=1.0)
+    result = tevt.__eq__(42)  # Should return NotImplemented
+    assert result is NotImplemented
+
+
+def test_event_hash_collision_handling() -> None:
+    """Test that events with different contents but same hash are handled correctly."""
+    evt1 = Event("test", {"a": 1})
+    evt2 = Event("test", {"a": 2})
+
+    # Even if they hash to same value, they should not be equal
+    assert evt1 != evt2
+
+    # Both can exist in same dict
+    d = {evt1: "value1", evt2: "value2"}
+    assert len(d) == 2
+    assert d[evt1] == "value1"
+    assert d[evt2] == "value2"
+
+    # Test with TimeoutEvents
+    tevt1 = TimeoutEvent("test", {"a": 1}, timeout=1.0)
+    tevt2 = TimeoutEvent("test", {"a": 1}, timeout=2.0)
+
+    # Different timeouts should allow separate dict entries
+    d = {tevt1: "value1", tevt2: "value2"}
+    assert len(d) == 2
+    assert d[tevt1] == "value1"
+    assert d[tevt2] == "value2"

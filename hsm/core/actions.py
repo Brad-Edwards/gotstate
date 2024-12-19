@@ -22,6 +22,10 @@ class BasicAction(AbstractAction):
         action.execute(event, state_data)  # Raises NotImplementedError
     """
 
+    def _handle_execution_error(self, message: str, state_data: Any, event: Event) -> None:
+        """Common method for handling execution errors."""
+        raise ActionExecutionError(message, action_name=self.__class__.__name__, state_data=state_data, event=event)
+
     def execute(self, event: Event, state_data: Any) -> None:
         raise NotImplementedError("BasicAction must be subclassed and execute() overridden.")
 
@@ -67,8 +71,10 @@ class LoggingAction(BasicAction):
         self.logger = logging.getLogger(logger_name)
 
     def execute(self, event: Event, state_data: Any) -> None:
+        if event is None:
+            raise AttributeError("Event cannot be None")
         event_id = event.get_id()
-        self.logger.info("Executing action for event: %s, state_data: %s", event_id, state_data)
+        self.logger.info(f"Executing action for event: {event_id}, state_data: {state_data}")
 
 
 class SetDataAction(BasicAction):
@@ -92,6 +98,8 @@ class SetDataAction(BasicAction):
     """
 
     def __init__(self, key: str, value: Any):
+        if not isinstance(key, str):
+            raise TypeError("key must be a string")
         self.key = key
         self.value = value
 
@@ -111,9 +119,7 @@ class SetDataAction(BasicAction):
 
     def execute(self, event: Event, state_data: Any) -> None:
         if not isinstance(state_data, dict):
-            raise ActionExecutionError(
-                "State data must be a dictionary", action_name="SetDataAction", state_data=state_data, event=event
-            )
+            self._handle_execution_error("State data must be a dictionary", state_data, event)
         with self._temporary_change(state_data):
             # Potentially do more work here. If errors occur, changes revert.
             # No additional errors here, so changes persist.
@@ -143,28 +149,28 @@ class ValidateDataAction(BasicAction):
     """
 
     def __init__(self, required_keys: list[str], condition: Any):
+        if required_keys is None:
+            raise ValueError("required_keys cannot be None")
+        if not isinstance(required_keys, list):
+            raise TypeError("required_keys must be a list")
+        if condition is None:
+            raise ValueError("condition cannot be None")
+        if not callable(condition):
+            raise TypeError("condition must be callable")
         self.required_keys = required_keys
         self.condition = condition
 
     def execute(self, event: Event, state_data: Any) -> None:
-        # Check that state_data is a dictionary
         if not isinstance(state_data, dict):
-            raise ActionExecutionError(
-                "Invalid state_data type for validation",
-                action_name="ValidateDataAction",
-                state_data=state_data,
-                event=event,
-            )
+            self._handle_execution_error("Invalid state_data type", state_data, event)
 
-        # Check that required keys exist
         for key in self.required_keys:
             if key not in state_data:
-                raise ActionExecutionError(
-                    f"Missing required key: {key}", action_name="ValidateDataAction", state_data=state_data, event=event
-                )
+                self._handle_execution_error(f"Missing required key: {key}", state_data, event)
 
-        # Check condition
-        if not self.condition(state_data):
-            raise ActionExecutionError(
-                "Validation condition failed", action_name="ValidateDataAction", state_data=state_data, event=event
-            )
+        try:
+            state_data_copy = state_data.copy()
+            if not self.condition(state_data_copy):
+                self._handle_execution_error("Validation condition failed", state_data, event)
+        except Exception as e:
+            self._handle_execution_error(f"Error during condition evaluation: {str(e)}", state_data, event)

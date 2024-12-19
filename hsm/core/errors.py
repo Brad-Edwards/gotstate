@@ -19,124 +19,36 @@ class HSMError(Exception):
         self.details = details or {}
 
 
-class InvalidTransitionError(HSMError):
-    """Raised when a state transition is invalid.
+class ExecutorError(HSMError):
+    """Base exception for executor-related errors."""
 
-    Attributes:
-        source_state: ID of source state
-        target_state: ID of target state
-        event: Event that triggered the transition
-    """
+    pass
+
+
+class StateError(HSMError):
+    """Base class for state-related errors."""
+
+    def __init__(self, message: str, state_info: Dict[str, Any], details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message, details)
+        self.__dict__.update(state_info)
+
+
+class InvalidTransitionError(StateError):
+    """Raised when a state transition is invalid."""
 
     def __init__(
         self, message: str, source_state: str, target_state: str, event: Any, details: Optional[Dict[str, Any]] = None
     ) -> None:
-        super().__init__(message, details)
-        self.source_state = source_state
-        self.target_state = target_state
-        self.event = event
+        state_info = {"source_state": source_state, "target_state": target_state, "event": event}
+        super().__init__(message, state_info, details)
 
 
-class InvalidStateError(HSMError):
-    """Raised when operations are performed on an invalid state.
-
-    Attributes:
-        state_id: ID of the invalid state
-        operation: Operation that failed
-    """
+class InvalidStateError(StateError):
+    """Raised when operations are performed on an invalid state."""
 
     def __init__(self, message: str, state_id: str, operation: str, details: Optional[Dict[str, Any]] = None) -> None:
-        super().__init__(message, details)
-        self.state_id = state_id
-        self.operation = operation
-
-
-class ConfigurationError(HSMError):
-    """Raised when state machine configuration is invalid.
-
-    Attributes:
-        component: Component with invalid configuration
-        validation_errors: List of validation failures
-    """
-
-    def __init__(
-        self,
-        message: str,
-        component: str,
-        validation_errors: Optional[Dict[str, Any]] = None,
-        details: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        super().__init__(message, details)
-        self.component = component
-        self.validation_errors = validation_errors or {}
-
-
-class GuardEvaluationError(HSMError):
-    """Raised when a guard condition evaluation fails.
-
-    Attributes:
-        guard_name: Name of the failed guard
-        state_data: State data during evaluation
-        event: Event being processed
-    """
-
-    def __init__(
-        self, message: str, guard_name: str, state_data: Any, event: Any, details: Optional[Dict[str, Any]] = None
-    ) -> None:
-        super().__init__(message, details)
-        self.guard_name = guard_name
-        self.state_data = state_data
-        self.event = event
-
-
-class ActionExecutionError(HSMError):
-    """Raised when a transition action fails to execute.
-
-    Attributes:
-        action_name: Name of the failed action
-        state_data: State data during execution
-        event: Event being processed
-    """
-
-    def __init__(
-        self, message: str, action_name: str, state_data: Any, event: Any, details: Optional[Dict[str, Any]] = None
-    ) -> None:
-        super().__init__(message, details)
-        self.action_name = action_name
-        self.state_data = state_data
-        self.event = event
-
-
-class ConcurrencyError(HSMError):
-    """Raised when concurrent operations conflict.
-
-    Attributes:
-        operation: Operation that failed
-        resource: Resource that caused the conflict
-    """
-
-    def __init__(self, message: str, operation: str, resource: str, details: Optional[Dict[str, Any]] = None) -> None:
-        super().__init__(message, details)
-        self.operation = operation
-        self.resource = resource
-
-
-class EventQueueFullError(HSMError):
-    """Raised when event queue capacity is exceeded.
-
-    Attributes:
-        queue_size: Current size of the queue
-        max_size: Maximum allowed size
-        dropped_event: Event that couldn't be queued
-    """
-
-    def __init__(
-        self, message: str, queue_size: int, max_size: int, dropped_event: Any, details: Optional[Dict[str, Any]] = None
-    ) -> None:
-        super().__init__(message, details)
-        self.queue_size = queue_size
-        self.max_size = max_size
-        self.dropped_event = dropped_event
+        state_info = {"state_id": state_id, "operation": operation}
+        super().__init__(message, state_info, details)
 
 
 class ValidationError(HSMError):
@@ -159,6 +71,74 @@ class ValidationError(HSMError):
         self.validation_results = validation_results or []
 
 
+class ConfigurationError(ValidationError):
+    """Raised when state machine configuration is invalid.
+
+    Attributes:
+        component: Component with invalid configuration
+        validation_errors: Dict of validation failures
+    """
+
+    def __init__(
+        self,
+        message: str,
+        component: str,
+        validation_errors: Optional[Dict[str, Any]] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(message=message, component=component, details=details)
+        self.validation_errors = validation_errors or {}
+
+
+class ExecutionError(HSMError):
+    """Base class for execution-related errors."""
+
+    def __init__(self, message: str, execution_info: Dict[str, Any], details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message, details)
+        self.__dict__.update(execution_info)
+
+
+class GuardEvaluationError(ExecutionError):
+    """Raised when a guard condition evaluation fails."""
+
+    def __init__(
+        self, message: str, guard_name: str, state_data: Any, event: Any, details: Optional[Dict[str, Any]] = None
+    ) -> None:
+        execution_info = {"guard_name": guard_name, "state_data": state_data, "event": event}
+        super().__init__(message, execution_info, details)
+
+
+class ActionExecutionError(ExecutionError):
+    """Raised when a transition action fails to execute."""
+
+    def __init__(
+        self, message: str, action_name: str, state_data: Any, event: Any, details: Optional[Dict[str, Any]] = None
+    ) -> None:
+        execution_info = {"action_name": action_name, "state_data": state_data, "event": event}
+        super().__init__(message, execution_info, details)
+
+
+class ConcurrencyError(HSMError):
+    """Raised when concurrent operations conflict."""
+
+    def __init__(self, message: str, operation: str, resource: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message, details)
+        self.operation = operation
+        self.resource = resource
+
+
+class EventQueueFullError(HSMError):
+    """Raised when event queue capacity is exceeded."""
+
+    def __init__(
+        self, message: str, queue_size: int, max_size: int, dropped_event: Any, details: Optional[Dict[str, Any]] = None
+    ) -> None:
+        super().__init__(message, details)
+        self.queue_size = queue_size
+        self.max_size = max_size
+        self.dropped_event = dropped_event
+
+
 @dataclass(frozen=True)
 class ErrorContext:
     """Container for error context information."""
@@ -170,15 +150,7 @@ class ErrorContext:
 
 
 def create_error_context(error: HSMError, traceback: str) -> ErrorContext:
-    """Creates an error context object for logging and debugging.
-
-    Args:
-        error: The HSM error that occurred
-        traceback: String representation of the traceback
-
-    Returns:
-        ErrorContext object containing error details
-    """
+    """Creates an error context object for logging and debugging."""
     import time
 
     return ErrorContext(error_type=type(error), timestamp=time.time(), traceback=traceback, details=error.details)

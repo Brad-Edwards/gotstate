@@ -2,14 +2,30 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 import logging
-from typing import Any, Callable, List
+from typing import Any, Callable, List, Type
 
 from hsm.core.errors import GuardEvaluationError
 from hsm.interfaces.abc import AbstractGuard
 from hsm.interfaces.protocols import Event
 
 
-class BasicGuard(AbstractGuard):
+class GuardBase(AbstractGuard):
+    """Base class with common guard functionality."""
+
+    @property
+    def guard_name(self) -> str:
+        """Return the name of the guard class."""
+        return self.__class__.__name__
+
+    def _raise_guard_error(self, message: str, state_data: Any, event: Event, cause: Exception = None) -> None:
+        """Helper method to raise guard errors with consistent formatting."""
+        error = GuardEvaluationError(message, self.guard_name, state_data, event)
+        if cause:
+            raise error from cause
+        raise error
+
+
+class BasicGuard(GuardBase):
     """
     A base guard class that raises NotImplementedError.
 
@@ -22,7 +38,7 @@ class BasicGuard(AbstractGuard):
     """
 
     def check(self, event: Event, state_data: Any) -> bool:
-        raise NotImplementedError("BasicGuard must be subclassed and check() overridden.")
+        raise NotImplementedError(f"{self.guard_name} must be subclassed and check() overridden.")
 
 
 class NoOpGuard(BasicGuard):
@@ -91,15 +107,11 @@ class KeyExistsGuard(BasicGuard):
 
     def check(self, event: Event, state_data: Any) -> bool:
         if not isinstance(state_data, dict):
-            raise GuardEvaluationError(
-                "state_data must be a dictionary", guard_name="KeyExistsGuard", state_data=state_data, event=event
-            )
+            self._raise_guard_error("state_data must be a dictionary", state_data, event)
 
         for key in self.required_keys:
             if key not in state_data:
-                raise GuardEvaluationError(
-                    f"Missing required key: {key}", guard_name="KeyExistsGuard", state_data=state_data, event=event
-                )
+                self._raise_guard_error(f"Missing required key: {key}", state_data, event)
 
         return True
 
@@ -131,14 +143,10 @@ class ConditionGuard(BasicGuard):
     def check(self, event: Event, state_data: Any) -> bool:
         try:
             if not self.condition(state_data):
-                raise GuardEvaluationError(
-                    "Condition failed", guard_name="ConditionGuard", state_data=state_data, event=event
-                )
+                self._raise_guard_error("Condition failed", state_data, event)
         except Exception as e:
             # If condition evaluation raises an exception, wrap it in GuardEvaluationError
-            raise GuardEvaluationError(
-                f"Condition evaluation error: {e}", guard_name="ConditionGuard", state_data=state_data, event=event
-            ) from e
+            self._raise_guard_error(f"Condition evaluation error: {e}", state_data, event, e)
         return True
 
 
@@ -172,14 +180,7 @@ class AsyncConditionGuard(BasicGuard):
         try:
             result = await self.async_condition(state_data)
             if not result:
-                raise GuardEvaluationError(
-                    "Async condition failed", guard_name="AsyncConditionGuard", state_data=state_data, event=event
-                )
+                self._raise_guard_error("Async condition failed", state_data, event)
         except Exception as e:
-            raise GuardEvaluationError(
-                f"Async condition evaluation error: {e}",
-                guard_name="AsyncConditionGuard",
-                state_data=state_data,
-                event=event,
-            ) from e
+            self._raise_guard_error(f"Async condition evaluation error: {e}", state_data, event, e)
         return True
