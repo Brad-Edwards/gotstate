@@ -1,7 +1,3 @@
-# hsm/core/state_machine.py
-# Copyright (c) 2024 Brad Edwards
-# Licensed under the MIT License - see LICENSE file for details
-
 import logging
 import time
 from contextlib import contextmanager
@@ -63,14 +59,22 @@ class StateMachine(AbstractStateMachine):
             initial_state: Starting state
 
         Raises:
-            ValueError: If states or transitions are empty or if initial state is not in the states list.
+            ValueError: If states or transitions are empty, if initial state is not in states list,
+                       or if duplicate state IDs are found.
             TypeError: If arguments have wrong types.
         """
         if not states:
             raise ValueError("States list cannot be empty")
-        # Transitions are allowed to be empty
+        if not transitions:
+            raise ValueError("Transitions list cannot be empty")
         if initial_state not in states:
             raise ValueError("Initial state must be in states list")
+
+        # Check for duplicate state IDs
+        state_ids = [state.get_id() for state in states]
+        duplicate_ids = {state_id for state_id in state_ids if state_ids.count(state_id) > 1}
+        if duplicate_ids:
+            raise ValueError(f"Duplicate state IDs found: {duplicate_ids}")
 
         # Initialize core components
         self._states: Dict[StateID, AbstractState] = {state.get_id(): state for state in states}
@@ -80,13 +84,14 @@ class StateMachine(AbstractStateMachine):
 
         # Initialize managers
         self._hook_manager: HookManager = HookManager()
-        self._data_manager: DataManager = DataManager()  # Now using DataManager
+        self._data_manager: DataManager = DataManager()
 
         # Initialize state
         self._running: bool = False
         self._logger: logging.Logger = logging.getLogger("hsm.core.state_machine")
 
         self._initialize_state_data()
+        self._validate_configuration()
 
     def _initialize_state_data(self) -> None:
         """Initialize the state data using the DataManager."""
@@ -121,34 +126,123 @@ class StateMachine(AbstractStateMachine):
 
     def _execute_transition(self, transition: AbstractTransition, event: AbstractEvent) -> None:
         """Execute a transition."""
+        source = self._current_state
+        target = transition.get_target_state()
 
-        source_state = transition.get_source_state()
-        target_state = transition.get_target_state()
-
-        with self._data_manager.access_data() as state_data:  # Use DataManager for thread-safety
-            source_data = state_data[source_state.get_id()]
-            target_data = state_data[target_state.get_id()]
+        with self._data_manager.access_data() as state_data:
+            source_data = state_data[source.get_id()]
             try:
-                # Exit states
-                self._exit_states(source_state, target_state, event, source_data)
+                # For self-transitions, we need special handling
+                if source == target:
+                    try:
+                        self._hook_manager.call_on_exit(source.get_id())
+                    except Exception as hook_error:
+                        self._logger.warning(f"Hook error during exit (continuing): {hook_error}")
+                    source.on_exit(event, state_data[source.get_id()])
+
+                    # Execute actions
+                    actions = transition.get_actions() or []
+                    for action in actions:
+                        action.execute(event=event, data=source_data)
+
+                    try:
+                        self._hook_manager.call_on_enter(target.get_id())
+                    except Exception as hook_error:
+                        self._logger.warning(f"Hook error during enter (continuing): {hook_error}")
+                    target.on_entry(event, state_data[target.get_id()])
+
+                    # For composite states, re-enter substate
+                    if isinstance(target, CompositeState):
+                        self._current_state = self._drill_down(target, state_data, event)
+                    else:
+                        self._current_state = target
+                    return
+
+                # Find common ancestor if dealing with composite states
+                common_ancestor = self._find_common_ancestor(source, target)
+
+                # Exit from current state up to (but not including) common ancestor
+                current = source
+                while current and current != common_ancestor:
+                    try:
+                        self._hook_manager.call_on_exit(current.get_id())
+                    except Exception as hook_error:
+                        self._logger.warning(f"Hook error during exit (continuing): {hook_error}")
+                    current.on_exit(event, state_data[current.get_id()])
+                    current = getattr(current, "_parent_state", None)
 
                 # Execute transition actions
-                for action in transition.get_actions():
-                    action.execute(event, source_data)
+                actions = transition.get_actions() or []
+                for action in actions:
+                    action.execute(event=event, data=source_data)
 
-                # Enter states
-                self._enter_states(source_state, target_state, event, target_data)
+                # Enter target state and its ancestors from common ancestor
+                entry_path = []
+                current = target
+                while current and current != common_ancestor:
+                    entry_path.insert(0, current)
+                    current = getattr(current, "_parent_state", None)
+
+                # Enter each state in the path
+                for state in entry_path:
+                    try:
+                        self._hook_manager.call_on_enter(state.get_id())
+                    except Exception as hook_error:
+                        self._logger.warning(f"Hook error during enter (continuing): {hook_error}")
+                    state.on_entry(event, state_data[state.get_id()])
+
+                # If target is composite, drill down to leaf state
+                if isinstance(target, CompositeState):
+                    self._current_state = self._drill_down(target, state_data, event)
+                else:
+                    self._current_state = target
 
             except Exception as e:
-                self._handle_operation_error(
-                    "Transition",
-                    e,
-                    {
-                        "source_state": source_state.get_id(),
-                        "target_state": target_state.get_id(),
-                        "event": event.get_id(),
-                    },
-                )
+                if not isinstance(e, RuntimeError) or "Hook error" not in str(e):
+                    self._handle_operation_error(
+                        "Transition",
+                        e,
+                        {
+                            "source_state": source.get_id(),
+                            "target_state": target.get_id(),
+                            "event": event.get_id(),
+                        },
+                    )
+
+    def _find_common_ancestor(self, state1: AbstractState, state2: AbstractState) -> Optional[AbstractState]:
+        """
+        Find the closest common ancestor of two states, with cycle protection.
+        """
+        if state1 == state2:
+            return state1
+
+        # Build a set of all ancestors (and self) for state1
+        ancestors1 = set()
+        current = state1
+        visited = {id(state1)}  # Track visited states by id to handle Mock objects
+
+        while current is not None:
+            ancestors1.add(current)
+            parent = getattr(current, "_parent_state", None)
+            if parent is None or id(parent) in visited:
+                break
+            visited.add(id(parent))
+            current = parent
+
+        # Now walk up from state2 until we find a node in ancestors1 or reach root
+        current = state2
+        visited = {id(state2)}  # Reset visited set for second traversal
+
+        while current is not None:
+            if current in ancestors1:
+                return current
+            parent = getattr(current, "_parent_state", None)
+            if parent is None or id(parent) in visited:
+                break
+            visited.add(id(parent))
+            current = parent
+
+        return None
 
     def _exit_states(
         self, source_state: AbstractState, target_state: AbstractState, event: AbstractEvent, data: Any
@@ -185,23 +279,15 @@ class StateMachine(AbstractStateMachine):
     def _enter_states(
         self, source_state: AbstractState, target_state: AbstractState, event: AbstractEvent, data: Any
     ) -> None:
-        """
-        Helper function for entering states during a transition.
-        """
+        """Enter states from common ancestor to target."""
+        entry_path = []
+        current = target_state
+        while current and current != source_state:
+            entry_path.insert(0, current)
+            current = getattr(current, "_parent_state", None)
 
-        # Build a path of states to enter from the source state to the target state
-        path_to_target = []
-        current_state = target_state
-        while current_state != source_state:
-            path_to_target.insert(0, current_state)
-            if isinstance(current_state, CompositeState) and current_state._parent_state:
-                current_state = current_state._parent_state
-            else:
-                current_state = None
-
-        # Enter all states in the path
-        for state in path_to_target:
-            self._hook_manager.call_on_entry(state.get_id())
+        for state in entry_path:
+            self._hook_manager.call_on_enter(state.get_id())
             state.on_entry(event, data)
             if isinstance(state, CompositeState):
                 state._enter_substate(event, data)
@@ -218,19 +304,26 @@ class StateMachine(AbstractStateMachine):
         valid_transitions = []
 
         for transition in self._transitions:
-            if transition.get_source_state() == self._current_state or (
+            source_state = transition.get_source_state()
+            if source_state == self._current_state or (
                 isinstance(self._current_state, CompositeState)
-                and transition.get_source_state() == self._current_state._current_substate
+                and source_state == self._current_state._current_substate
             ):
                 guard = transition.get_guard()
                 with self._data_manager.access_data() as state_data:  # Use DataManager for thread-safety
                     if guard:
                         try:
-                            source_data = state_data[transition.get_source_state().get_id()]
+                            source_data = state_data[source_state.get_id()]
                             if guard.check(event, source_data):
                                 valid_transitions.append(transition)
                         except Exception as e:
-                            logger.error("Guard check failed: %s", str(e))
+                            logger.error(
+                                "Guard check failed for transition from '%s' to '%s' in state '%s': %s",
+                                source_state.get_id(),
+                                transition.get_target_state().get_id(),
+                                self._current_state.get_id(),
+                                str(e),
+                            )
                             continue
                     else:
                         valid_transitions.append(transition)
@@ -251,14 +344,7 @@ class StateMachine(AbstractStateMachine):
         return self._current_state
 
     def start(self) -> None:
-        """
-        Start the state machine.
-
-        Enters the initial state and begins processing events.
-
-        Raises:
-            InvalidStateError: If machine is already running
-        """
+        """Start the state machine."""
         if self._running:
             raise InvalidStateError(
                 "State machine already running", self.get_state().get_id() if self.get_state() else None, "start"
@@ -266,14 +352,32 @@ class StateMachine(AbstractStateMachine):
 
         self._running = True
         self._current_state = self._initial_state
-        # Initialize state data for all states
         self._initialize_state_data()
+
         with self._data_manager.access_data() as state_data:
             try:
-                self._hook_manager.call_on_entry(self._current_state.get_id())
-                self._current_state.on_entry(None, state_data[self._current_state.get_id()])
-                if isinstance(self._current_state, CompositeState):
-                    self._current_state._enter_substate(None, state_data[self._current_state.get_id()])
+                # Enter initial state
+                try:
+                    self._hook_manager.call_on_enter(self._initial_state.get_id())
+                except Exception as hook_error:
+                    self._logger.warning(f"Hook error during start (continuing): {hook_error}")
+
+                # Enter the initial state
+                self._initial_state.on_entry(None, state_data[self._initial_state.get_id()])
+
+                # If initial state is composite, handle history and drill down
+                if isinstance(self._initial_state, CompositeState):
+                    # Enter initial substate if needed
+                    if not self._initial_state._current_substate:
+                        self._initial_state._enter_substate(None, state_data[self._initial_state.get_id()])
+
+                    # Now drill down to leaf state
+                    self._current_state = self._drill_down(
+                        self._initial_state, state_data, None
+                    )  # Pass None as the event
+                else:
+                    self._current_state = self._initial_state
+
             except Exception as e:
                 self._running = False
                 raise InvalidStateError(
@@ -281,25 +385,13 @@ class StateMachine(AbstractStateMachine):
                 )
 
     def stop(self) -> None:
-        """
-        Stop the state machine.
-
-        Exits current state and stops processing events.
-
-        Raises:
-            InvalidStateError: If machine is not running
-        """
+        """Stop the state machine."""
         if not self._running:
             raise InvalidStateError("State machine not running", None, "stop")
 
         if self._current_state:
             with self._data_manager.access_data() as state_data:
-                try:
-                    self._exit_states(
-                        self._current_state, self._current_state, None, state_data[self._current_state.get_id()]
-                    )
-                except Exception as e:
-                    self._logger.exception("Error during stop: %s", str(e))
+                self._exit_up(self._current_state, state_data)
 
         self._running = False
         self._current_state = None
@@ -350,3 +442,59 @@ class StateMachine(AbstractStateMachine):
         if details:
             logger.error("Error details: %s", details)
         raise error  # Re-raise the original exception
+
+    def _drill_down(
+        self, top_state: AbstractState, data: Dict[str, Any], event: Optional[AbstractEvent]
+    ) -> AbstractState:
+        """
+        Recursively enter initial composite substates until reaching a leaf state.
+        Updates the current state to the deepest active leaf state.
+
+        Args:
+            top_state: The state to start drilling from
+            data: The state data dictionary
+            event: The event to pass to the on_entry functions
+
+        Returns:
+            The deepest leaf state that was entered
+        """
+        current = top_state
+        while isinstance(current, CompositeState):
+            # Get the current substate
+            next_state = current._current_substate
+
+            # If no substate, we're done
+            if not next_state:
+                break
+
+            # Enter the substate if not already entered
+            if self._current_state != next_state:
+                try:
+                    self._hook_manager.call_on_enter(next_state.get_id())
+                except Exception as hook_error:
+                    self._logger.warning(f"Hook error during substate enter (continuing): {hook_error}")
+
+                next_state.on_entry(event, data[next_state.get_id()])
+
+                # Set history for this level if supported
+                if current.has_history():
+                    current.set_history_state(next_state)
+
+            current = next_state
+            self._current_state = current  # Update current state as we drill down
+
+        return current
+
+    def _exit_up(self, leaf_state: AbstractState, data: Dict[str, Any]) -> None:
+        """
+        Recursively exit from a leaf state up through its parent(s).
+        """
+        current = leaf_state
+        while current is not None:
+            try:
+                self._hook_manager.call_on_exit(current.get_id())
+            except Exception as hook_error:
+                self._logger.warning(f"Hook error during exit (continuing): {hook_error}")
+            current.on_exit(None, data[current.get_id()])
+            # Move one level up
+            current = getattr(current, "_parent_state", None)

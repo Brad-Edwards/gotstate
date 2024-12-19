@@ -333,7 +333,7 @@ class Validator(AbstractValidator):
             self._check_data_isolation,
             ValidationSeverity.ERROR,
             "State data must be properly isolated",
-            "data",  # Note: Make sure to specify rule_type as "data"
+            "data",
         )
 
     def _check_no_orphan_states(self, context: ValidationContext) -> bool:
@@ -457,3 +457,33 @@ class Validator(AbstractValidator):
                     )
                     return False
         return True
+
+    def _check_data_isolation(self) -> list:
+        """
+        Check that each state does not hold onto references to external data
+        objects that could be modified by other states at runtime.
+        Return a list of validation issues (empty if none).
+        """
+        issues = []
+
+        for state in self.states:
+            # Pseudocode for checking references in `state`
+            # This might be as simple or as complex as you need:
+            if self._state_shares_data_unintentionally(state):
+                issues.append(
+                    {
+                        "severity": ValidationSeverity.ERROR,
+                        "message": f"State '{state.get_id()}' shares data outside of isolation rules",
+                        "context": {"state_id": state.get_id()},
+                    }
+                )
+
+        return issues
+
+    def _state_shares_data_unintentionally(self, state):
+        """
+        Stubbed logic that inspects a state's data references:
+        e.g., searching for forbidden references or side-effectful closures.
+        """
+        # Implementation depends on your application’s specifics.
+        return False
