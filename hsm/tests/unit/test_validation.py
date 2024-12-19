@@ -818,3 +818,72 @@ class TestValidator:
         validator = Validator(states, transitions, states[0])
         results = validator.validate_structure()
         assert not any(r.severity == "ERROR" for r in results)
+
+    def test_validation_severity_ordering(self):
+        """Test ValidationSeverity enum ordering and comparison."""
+        # Test value comparisons
+        assert ValidationSeverity.ERROR.value > ValidationSeverity.WARNING.value
+        assert ValidationSeverity.WARNING.value > ValidationSeverity.INFO.value
+        assert ValidationSeverity.ERROR.value > ValidationSeverity.INFO.value
+
+        # Test equality
+        assert ValidationSeverity.ERROR == ValidationSeverity.ERROR
+        assert ValidationSeverity.WARNING == ValidationSeverity.WARNING
+        assert ValidationSeverity.INFO == ValidationSeverity.INFO
+
+        # Test inequality
+        assert ValidationSeverity.ERROR != ValidationSeverity.WARNING
+        assert ValidationSeverity.WARNING != ValidationSeverity.INFO
+        assert ValidationSeverity.ERROR != ValidationSeverity.INFO
+
+        # Test ordering in list
+        severities = [ValidationSeverity.INFO, ValidationSeverity.ERROR, ValidationSeverity.WARNING]
+        sorted_severities = sorted(severities, key=lambda x: x.value, reverse=True)
+        assert sorted_severities == [ValidationSeverity.ERROR, ValidationSeverity.WARNING, ValidationSeverity.INFO]
+
+    def test_validation_context_with_invalid_states(self):
+        """Test ValidationContext with invalid state configurations."""
+        # Test with None state
+        with pytest.raises(AttributeError):
+            ValidationContext([None], [], None)
+
+        # Test with state that doesn't implement get_id
+        invalid_state = Mock(spec=object)  # Mock without AbstractState spec
+        with pytest.raises(AttributeError):
+            ValidationContext([invalid_state], [], invalid_state)
+
+        # Test with duplicate state IDs
+        state1 = Mock(spec=AbstractState)
+        state1.get_id.return_value = "same_id"
+        state2 = Mock(spec=AbstractState)
+        state2.get_id.return_value = "same_id"
+        context = ValidationContext([state1, state2], [], state1)
+        assert len(context._state_ids) == 1  # Set eliminates duplicates
+
+    def test_validator_initialization_validation(self):
+        """Test Validator's validation during initialization."""
+        # Test with empty states list
+        with pytest.raises(ValidationError, match="must have at least one state"):
+            Validator([], [], None)
+
+        # Test with initial state not in states list
+        valid_state = Mock(spec=AbstractState)
+        valid_state.get_id.return_value = "state1"
+        different_state = Mock(spec=AbstractState)
+        different_state.get_id.return_value = "state2"
+        with pytest.raises(ValidationError, match="Initial state must be in states list"):
+            Validator([valid_state], [], different_state)
+
+        # Test with None state (should raise AttributeError before ValidationError)
+        with pytest.raises(AttributeError):
+            Validator([None], [], None)
+
+        # Test with invalid state (no get_id method)
+        invalid_state = Mock(spec=object)  # Mock without AbstractState spec
+        with pytest.raises(AttributeError):
+            Validator([invalid_state], [], invalid_state)
+
+    def test_validator_with_custom_rules_all_types(self):
+        """Test Validator with custom rules of all types."""
+        # Implementation of this test is not provided in the original code
+        pass

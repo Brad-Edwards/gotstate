@@ -5,7 +5,7 @@ import threading
 import time
 import unittest
 from itertools import cycle
-from typing import Optional, Type
+from typing import Any, Optional, Type
 from unittest.mock import Mock, call, patch
 
 from hsm.core.errors import ExecutorError
@@ -243,6 +243,144 @@ class TestExecutor(unittest.TestCase):
         self._start_executor_and_assert_running()
         self._stop_executor_and_assert_stopped()
         mock_timer.shutdown.assert_called_once()
+
+    def test_executor_handle_error_unhandled(self):
+        """Test handling of unhandled errors (no registered handler)."""
+        self._start_executor_and_assert_running()
+
+        # Create an error with no registered handler
+        custom_error = Exception("Custom error")
+
+        with patch("hsm.runtime.executor.logger") as mock_logger:
+            self.executor._context.handle_error(custom_error)
+
+            # Verify logger was called with unhandled error message
+            mock_logger.error.assert_called_with("Unhandled error in executor: %s", str(custom_error))
+
+            # Verify state changed to ERROR
+            self.assertEqual(self.executor._context.state, ExecutorState.ERROR)
+
+            # Verify error count increased
+            stats = self.executor.get_stats()
+            self.assertEqual(stats.errors_encountered, 1)
+
+    def test_executor_handle_error_handler_fails(self):
+        """Test handling of errors when the error handler itself fails."""
+        self._start_executor_and_assert_running()
+
+        # Register a handler that raises an exception
+        def failing_handler(e):
+            raise RuntimeError("Handler failed")
+
+        self.executor.register_error_handler(ValueError, failing_handler)
+
+        with patch("hsm.runtime.executor.logger") as mock_logger:
+            self.executor._context.handle_error(ValueError("Test error"))
+
+            # Verify logger was called for handler failure
+            mock_logger.error.assert_called_with("Error handler failed: %s", "Handler failed")
+
+            # Verify state changed to ERROR
+            self.assertEqual(self.executor._context.state, ExecutorState.ERROR)
+
+    def test_executor_timer_callback_error(self):
+        """Test error handling in timer callback."""
+        self._start_executor_and_assert_running()
+
+        # Create a mock event that will cause an error
+        mock_event = make_mock_event()
+
+        # Create a mock timer with the callback we want to test
+        def timer_callback(timer_id: str, event: Any) -> None:
+            if self.executor._context.state == ExecutorState.RUNNING:
+                self.executor.process_event(event)
+
+        self.executor._timer = Mock()
+        self.executor._timer._callback = timer_callback
+
+        # Set up the state machine to raise an error
+        self.state_machine.process_event.side_effect = RuntimeError("Timer callback error")
+
+        with patch("hsm.runtime.executor.logger") as mock_logger:
+            # Call timer callback directly
+            self.executor._timer._callback("timer1", mock_event)
+
+            # Wait for error handling
+            time.sleep(0.2)
+
+            # Verify error was logged with the correct message
+            mock_logger.error.assert_called_with("Unhandled error in executor: %s", "Timer callback error")
+
+            # Verify error was handled
+            stats = self.executor.get_stats()
+            self.assertEqual(stats.errors_encountered, 1)
+
+    def test_executor_stop_timeout(self):
+        """Test handling of timeout during executor stop."""
+        self._start_executor_and_assert_running()
+
+        # Mock thread.join to simulate timeout
+        with patch.object(threading.Thread, "join", side_effect=ThreadTimeoutError()):
+            with self.assertRaises(ExecutorError):
+                self.executor.stop()  # Should raise ExecutorError due to timeout
+
+            # Try again with force=True
+            self.executor.stop(force=True)  # Should succeed
+            self.assertEqual(self.executor._context.state, ExecutorState.STOPPED)
+
+    def test_executor_process_events_paused(self):
+        """Test event processing behavior when executor is paused."""
+        self._start_executor_and_assert_running()
+
+        # Mock the event queue to track if events are processed
+        mock_queue = Mock(spec=EventQueue)
+        mock_queue.is_empty.return_value = False
+        mock_queue.try_dequeue.return_value = None  # Return None to simulate no events while paused
+        self.executor._event_queue = mock_queue
+
+        # Pause the executor
+        with self.executor.pause():
+            # Wait a bit to ensure worker thread sees pause
+            time.sleep(0.2)
+
+            # Verify try_dequeue was not called (events not processed while paused)
+            mock_queue.try_dequeue.assert_not_called()
+
+        # After pause, verify try_dequeue is called again
+        time.sleep(0.2)
+        mock_queue.try_dequeue.assert_called()
+
+    def test_executor_process_events_error_handling(self):
+        """Test error handling during event processing."""
+        self._start_executor_and_assert_running()
+
+        # Create an event that will cause an error
+        event = make_mock_event()
+
+        # Mock the event queue to ensure our event is processed
+        mock_queue = Mock(spec=EventQueue)
+        mock_queue.is_empty.return_value = False
+        mock_queue.try_dequeue.return_value = event
+        self.executor._event_queue = mock_queue
+
+        # Set up the state machine to raise an error
+        error = RuntimeError("Processing error")
+        self.state_machine.process_event.side_effect = error
+
+        with patch("hsm.runtime.executor.logger") as mock_logger:
+            # Let the executor process the event
+            time.sleep(0.2)
+
+            # Verify error was logged with the correct message
+            # The error is handled by handle_error which logs it as unhandled
+            mock_logger.error.assert_called_with("Unhandled error in executor: %s", str(error))
+
+            # Verify error was handled
+            stats = self.executor.get_stats()
+            self.assertEqual(stats.errors_encountered, 1)
+
+            # Verify executor state changed to ERROR
+            self.assertEqual(self.executor._context.state, ExecutorState.ERROR)
 
 
 if __name__ == "__main__":

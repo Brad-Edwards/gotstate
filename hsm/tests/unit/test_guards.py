@@ -7,6 +7,8 @@ Test suite for guards defined in guards.py.
 This module contains unit tests for BasicGuard and mock implementations of AbstractGuard.
 Integration tests have been moved to test_guards_integration.py.
 """
+import asyncio
+import logging
 import random
 import sys
 from typing import Any, Dict
@@ -21,7 +23,15 @@ from hsm.core.errors import (
     InvalidStateError,
     create_error_context,
 )
-from hsm.core.guards import BasicGuard
+from hsm.core.guards import (
+    AsyncConditionGuard,
+    BasicGuard,
+    ConditionGuard,
+    GuardBase,
+    KeyExistsGuard,
+    LoggingGuard,
+    NoOpGuard,
+)
 from hsm.interfaces.abc import AbstractGuard
 from hsm.interfaces.protocols import Event
 
@@ -764,3 +774,137 @@ def test_state_data_handling(sample_event: Event) -> None:
             "rand_dict": {f"key_{i}": random.random() for i in range(3)},
         }
         assert guard.check(sample_event, random_payload) is True
+
+
+# -----------------------------------------------------------------------------
+# GUARD IMPLEMENTATION TESTS
+# -----------------------------------------------------------------------------
+
+
+def test_guard_base_name():
+    """Test guard_name property returns correct class name."""
+
+    class CustomGuard(GuardBase):
+        def check(self, event: Event, state_data: Any) -> bool:
+            return True
+
+    guard = CustomGuard()
+    assert guard.guard_name == "CustomGuard"
+
+
+def test_guard_base_error_raising():
+    """Test _raise_guard_error helper method."""
+
+    class ErrorRaisingGuard(GuardBase):
+        def check(self, event: Event, state_data: Any) -> bool:
+            self._raise_guard_error("Test error", state_data, event)
+
+    guard = ErrorRaisingGuard()
+    event = MockEvent("test")
+
+    with pytest.raises(GuardEvaluationError) as exc_info:
+        guard.check(event, {})
+    assert "Test error" in str(exc_info.value)
+    assert exc_info.value.guard_name == "ErrorRaisingGuard"
+
+
+def test_noop_guard():
+    """Test NoOpGuard always returns True."""
+    guard = NoOpGuard()
+    event = MockEvent("test")
+
+    # Test with various state data
+    assert guard.check(event, None) is True
+    assert guard.check(event, {}) is True
+    assert guard.check(event, {"data": 123}) is True
+    assert guard.check(event, [1, 2, 3]) is True
+
+
+def test_logging_guard(caplog):
+    """Test LoggingGuard logs correctly and returns True."""
+    guard = LoggingGuard("test.logger")
+    event = MockEvent("test_event", payload={"data": 42})
+    state_data = {"status": "active"}
+
+    with caplog.at_level(logging.INFO):
+        result = guard.check(event, state_data)
+
+    assert result is True
+    assert len(caplog.records) == 1
+    assert "test_event" in caplog.records[0].message
+    assert "status" in caplog.records[0].message
+
+
+def test_key_exists_guard():
+    """Test KeyExistsGuard validates required keys."""
+    guard = KeyExistsGuard(["status", "count"])
+    event = MockEvent("test")
+
+    # Test valid state data
+    assert guard.check(event, {"status": "ok", "count": 42}) is True
+
+    # Test missing key
+    with pytest.raises(GuardEvaluationError) as exc_info:
+        guard.check(event, {"status": "ok"})
+    assert "Missing required key: count" in str(exc_info.value)
+
+    # Test non-dict state data
+    with pytest.raises(GuardEvaluationError) as exc_info:
+        guard.check(event, ["not", "a", "dict"])
+    assert "state_data must be a dictionary" in str(exc_info.value)
+
+
+def test_condition_guard():
+    """Test ConditionGuard evaluates conditions correctly."""
+
+    def check_positive(state_data: Any) -> bool:
+        return state_data.get("value", 0) > 0
+
+    guard = ConditionGuard(check_positive)
+    event = MockEvent("test")
+
+    # Test passing condition
+    assert guard.check(event, {"value": 42}) is True
+
+    # Test failing condition
+    with pytest.raises(GuardEvaluationError) as exc_info:
+        guard.check(event, {"value": -1})
+    assert "Condition failed" in str(exc_info.value)
+
+    # Test condition raising exception
+    def failing_condition(state_data: Any) -> bool:
+        raise ValueError("Bad value")
+
+    guard = ConditionGuard(failing_condition)
+    with pytest.raises(GuardEvaluationError) as exc_info:
+        guard.check(event, {})
+    assert "Condition evaluation error" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_async_condition_guard():
+    """Test AsyncConditionGuard evaluates async conditions correctly."""
+
+    async def check_ready(state_data: Any) -> bool:
+        await asyncio.sleep(0.01)
+        return state_data.get("ready", False)
+
+    guard = AsyncConditionGuard(check_ready)
+    event = MockEvent("test")
+
+    # Test passing condition
+    assert await guard.check(event, {"ready": True}) is True
+
+    # Test failing condition
+    with pytest.raises(GuardEvaluationError) as exc_info:
+        await guard.check(event, {"ready": False})
+    assert "Async condition failed" in str(exc_info.value)
+
+    # Test async condition raising exception
+    async def failing_condition(state_data: Any) -> bool:
+        raise ValueError("Async error")
+
+    guard = AsyncConditionGuard(failing_condition)
+    with pytest.raises(GuardEvaluationError) as exc_info:
+        await guard.check(event, {})
+    assert "Async condition evaluation error" in str(exc_info.value)
