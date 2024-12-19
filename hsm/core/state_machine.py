@@ -125,102 +125,205 @@ class StateMachine(AbstractStateMachine):
             )
 
     def _execute_transition(self, transition: AbstractTransition, event: AbstractEvent) -> None:
-        """Execute a transition."""
+        """Execute a transition between states."""
         source = self._current_state
         target = transition.get_target_state()
 
         with self._data_manager.access_data() as state_data:
-            source_data = state_data[source.get_id()]
+            state_data[source.get_id()]
             try:
-                # For self-transitions, we need special handling
                 if source == target:
-                    try:
-                        self._hook_manager.call_on_exit(source.get_id())
-                    except Exception as hook_error:
-                        self._logger.warning(f"Hook error during exit (continuing): {hook_error}")
-                    source.on_exit(event, state_data[source.get_id()])
-
-                    # Execute actions
-                    actions = transition.get_actions() or []
-                    for action in actions:
-                        action.execute(event=event, data=source_data)
-
-                    try:
-                        self._hook_manager.call_on_enter(target.get_id())
-                    except Exception as hook_error:
-                        self._logger.warning(f"Hook error during enter (continuing): {hook_error}")
-                    target.on_entry(event, state_data[target.get_id()])
-
-                    # For composite states, re-enter substate
-                    if isinstance(target, CompositeState):
-                        self._current_state = self._drill_down(target, state_data, event)
-                    else:
-                        self._current_state = target
+                    self._handle_self_transition(source, target, transition, event, state_data)
                     return
 
-                # Find common ancestor if dealing with composite states
-                common_ancestor = self._find_common_ancestor(source, target)
+                self._handle_state_transition(source, target, transition, event, state_data)
 
-                # Exit from current state up to (but not including) common ancestor
-                current = source
-                while current and current != common_ancestor:
-                    try:
-                        self._hook_manager.call_on_exit(current.get_id())
-                    except Exception as hook_error:
-                        self._logger.warning(f"Hook error during exit (continuing): {hook_error}")
-                    current.on_exit(event, state_data[current.get_id()])
-                    current = getattr(current, "_parent_state", None)
+            except (RuntimeError, KeyError) as e:
+                # Let RuntimeError and KeyError propagate up
+                raise e
+            except ActionExecutionError as e:
+                self._handle_operation_error(
+                    "Transition action",
+                    e,
+                    {
+                        "source_state": source.get_id(),
+                        "target_state": target.get_id(),
+                        "event": event.get_id(),
+                    },
+                )
+            except GuardEvaluationError as e:
+                self._handle_operation_error(
+                    "Guard evaluation",
+                    e,
+                    {
+                        "source_state": source.get_id(),
+                        "target_state": target.get_id(),
+                        "event": event.get_id(),
+                    },
+                )
+            except InvalidStateError as e:
+                self._handle_operation_error(
+                    "Invalid state",
+                    e,
+                    {
+                        "source_state": source.get_id(),
+                        "target_state": target.get_id(),
+                        "event": event.get_id(),
+                    },
+                )
+            except HSMError as e:
+                self._handle_operation_error(
+                    "State machine error",
+                    e,
+                    {
+                        "source_state": source.get_id(),
+                        "target_state": target.get_id(),
+                        "event": event.get_id(),
+                    },
+                )
 
-                # Execute transition actions
-                actions = transition.get_actions() or []
-                for action in actions:
-                    action.execute(event=event, data=source_data)
+    def _handle_self_transition(
+        self,
+        source: AbstractState,
+        target: AbstractState,
+        transition: AbstractTransition,
+        event: AbstractEvent,
+        state_data: Dict[str, Any],
+    ) -> None:
+        """Handle transition where source and target are the same state."""
+        self._exit_state_with_hooks(source, event, state_data)
+        self._execute_transition_actions(transition, event, state_data[source.get_id()])
+        self._enter_state_with_hooks(target, event, state_data)
 
-                # Enter target state and its ancestors from common ancestor
-                entry_path = []
-                current = target
-                while current and current != common_ancestor:
-                    entry_path.insert(0, current)
-                    current = getattr(current, "_parent_state", None)
+        # For composite states, re-enter substate
+        if isinstance(target, CompositeState):
+            self._current_state = self._drill_down(target, state_data, event)
+        else:
+            self._current_state = target
 
-                # Enter each state in the path
-                for state in entry_path:
-                    try:
-                        self._hook_manager.call_on_enter(state.get_id())
-                    except Exception as hook_error:
-                        self._logger.warning(f"Hook error during enter (continuing): {hook_error}")
-                    state.on_entry(event, state_data[state.get_id()])
+    def _handle_state_transition(
+        self,
+        source: AbstractState,
+        target: AbstractState,
+        transition: AbstractTransition,
+        event: AbstractEvent,
+        state_data: Dict[str, Any],
+    ) -> None:
+        """Handle transition between different states."""
+        common_ancestor = self._find_common_ancestor(source, target)
 
-                    # Set history only for the immediate parent of the target state
-                    parent = getattr(state, "_parent_state", None)
-                    if parent and isinstance(parent, CompositeState) and parent.has_history() and state == target:
-                        parent.set_history_state(state)
-                        parent._current_substate = state
+        # Exit states up to common ancestor
+        self._exit_to_ancestor(source, common_ancestor, event, state_data)
 
-                # If target is composite, drill down to leaf state
-                if isinstance(target, CompositeState):
-                    if target.has_history() and target._current_substate:
-                        # Use history state if available
-                        history_state = target._current_substate
-                        self._current_state = history_state
-                        history_state.on_entry(event, state_data[history_state.get_id()])
-                    else:
-                        # Otherwise drill down normally
-                        self._current_state = self._drill_down(target, state_data, event)
-                else:
-                    self._current_state = target
+        # Execute transition actions
+        self._execute_transition_actions(transition, event, state_data[source.get_id()])
 
+        # Enter new states from common ancestor
+        entry_path = self._build_entry_path(target, common_ancestor)
+        self._enter_new_states(entry_path, target, event, state_data)
+
+        # Handle composite target state
+        self._handle_composite_target(target, event, state_data)
+
+    def _exit_state_with_hooks(self, state: AbstractState, event: AbstractEvent, state_data: Dict[str, Any]) -> None:
+        """Exit a state with hook handling."""
+        try:
+            self._hook_manager.call_on_exit(state.get_id())
+        except HSMError as hook_error:
+            self._logger.warning(f"Hook error during exit (continuing): {hook_error}")
+        except Exception as e:
+            raise InvalidStateError(f"Failed to exit state: {str(e)}", state.get_id(), "exit", {"error": str(e)})
+
+        try:
+            # Ensure state data exists for the state
+            if state.get_id() not in state_data:
+                state_data[state.get_id()] = {}
+            state.on_exit(event, state_data[state.get_id()])
+        except Exception as e:
+            if isinstance(e, KeyError):
+                # Handle missing state data
+                raise InvalidStateError(
+                    f"Missing state data for state: {state.get_id()}",
+                    state.get_id(),
+                    "on_exit",
+                    {"error": "Missing state data"},
+                )
+            # Log error before re-raising
+            self._logger.error("Error during operation 'Transition': %s", str(e), exc_info=True)
+            raise e
+
+    def _enter_state_with_hooks(self, state: AbstractState, event: AbstractEvent, state_data: Dict[str, Any]) -> None:
+        """Enter a state with hook handling."""
+        try:
+            self._hook_manager.call_on_enter(state.get_id())
+        except HSMError as hook_error:
+            self._logger.warning(f"Hook error during enter (continuing): {hook_error}")
+        except Exception as e:
+            raise InvalidStateError(f"Failed to enter state: {str(e)}", state.get_id(), "enter", {"error": str(e)})
+
+        try:
+            state.on_entry(event, state_data[state.get_id()])
+        except Exception as e:
+            raise InvalidStateError(
+                f"State entry handler failed: {str(e)}", state.get_id(), "on_entry", {"error": str(e)}
+            )
+
+    def _execute_transition_actions(self, transition: AbstractTransition, event: AbstractEvent, data: Any) -> None:
+        """Execute all actions associated with a transition."""
+        actions = transition.get_actions() or []
+        for action in actions:
+            try:
+                action.execute(event=event, data=data)
             except Exception as e:
-                if not isinstance(e, RuntimeError) or "Hook error" not in str(e):
-                    self._handle_operation_error(
-                        "Transition",
-                        e,
-                        {
-                            "source_state": source.get_id(),
-                            "target_state": target.get_id(),
-                            "event": event.get_id(),
-                        },
-                    )
+                # Log error before re-raising
+                self._logger.error("Error during operation 'Transition': %s", str(e), exc_info=True)
+                raise e
+
+    def _exit_to_ancestor(
+        self, source: AbstractState, ancestor: Optional[AbstractState], event: AbstractEvent, state_data: Dict[str, Any]
+    ) -> None:
+        """Exit states from source up to (but not including) the ancestor."""
+        current = source
+        while current and current != ancestor:
+            self._exit_state_with_hooks(current, event, state_data)
+            current = getattr(current, "_parent_state", None)
+
+    def _build_entry_path(self, target: AbstractState, ancestor: Optional[AbstractState]) -> List[AbstractState]:
+        """Build path of states to enter from ancestor to target."""
+        entry_path = []
+        current = target
+        while current and current != ancestor:
+            entry_path.insert(0, current)
+            current = getattr(current, "_parent_state", None)
+        return entry_path
+
+    def _enter_new_states(
+        self, entry_path: List[AbstractState], target: AbstractState, event: AbstractEvent, state_data: Dict[str, Any]
+    ) -> None:
+        """Enter new states along the entry path."""
+        for state in entry_path:
+            self._enter_state_with_hooks(state, event, state_data)
+
+            # Set history for immediate parent of target
+            parent = getattr(state, "_parent_state", None)
+            if parent and isinstance(parent, CompositeState) and parent.has_history() and state == target:
+                parent.set_history_state(state)
+                parent._current_substate = state
+
+    def _handle_composite_target(self, target: AbstractState, event: AbstractEvent, state_data: Dict[str, Any]) -> None:
+        """Handle entering a composite target state."""
+        if not isinstance(target, CompositeState):
+            self._current_state = target
+            return
+
+        if target.has_history() and target._current_substate:
+            # Use history state if available
+            history_state = target._current_substate
+            self._current_state = history_state
+            history_state.on_entry(event, state_data[history_state.get_id()])
+        else:
+            # Otherwise drill down normally
+            self._current_state = self._drill_down(target, state_data, event)
 
     def _find_common_ancestor(self, state1: AbstractState, state2: AbstractState) -> Optional[AbstractState]:
         """
@@ -260,38 +363,41 @@ class StateMachine(AbstractStateMachine):
     def _exit_states(
         self, source_state: AbstractState, target_state: AbstractState, event: AbstractEvent, data: Any
     ) -> None:
-        """
-        Helper function for exiting states during a transition.
-        """
-        current_state = self._current_state
-        while current_state and current_state != source_state:
-            self._hook_manager.call_on_exit(current_state.get_id())
-            current_state.on_exit(event, data)
-            if isinstance(current_state, CompositeState):
-                current_state = current_state._parent_state if current_state._parent_state else None
-            else:
-                current_state = None
+        """Helper function for exiting states during a transition."""
+        self._exit_to_source(source_state)
 
         if isinstance(source_state, CompositeState):
-            is_target_substate = False
-            if source_state.get_substates():
-                for substate in source_state.get_substates():
-                    if substate == target_state:
-                        is_target_substate = True
-                        break
+            self._handle_composite_source_exit(source_state, target_state, event, data)
 
-            # Exit current substate if it exists
-            if source_state._current_substate:
-                self._hook_manager.call_on_exit(source_state._current_substate.get_id())
-                source_state._current_substate.on_exit(event, data)
-                if not is_target_substate:
-                    source_state._current_substate = None
+    def _exit_to_source(self, source_state: AbstractState) -> None:
+        """Exit states from current state up to source state."""
+        current_state = self._current_state
+        while current_state and current_state != source_state:
+            # Initialize empty state data if needed
+            state_data = {current_state.get_id(): {}}
+            self._exit_state_with_hooks(current_state, None, state_data)
+            current_state = self._get_next_parent(current_state)
 
-            # Only exit the composite parent if the target is *not* a substate
+    def _get_next_parent(self, state: AbstractState) -> Optional[AbstractState]:
+        """Get the next parent state, handling composite states."""
+        if isinstance(state, CompositeState):
+            return state._parent_state if state._parent_state else None
+        return None
+
+    def _handle_composite_source_exit(
+        self, source_state: CompositeState, target_state: AbstractState, event: AbstractEvent, data: Any
+    ) -> None:
+        """Handle exiting a composite source state."""
+        is_target_substate = target_state in source_state.get_substates()
+
+        if source_state._current_substate:
+            self._exit_state_with_hooks(source_state._current_substate, event, data)
             if not is_target_substate:
-                self._hook_manager.call_on_exit(source_state.get_id())
-                source_state.on_exit(event, data)
-                self._current_state = None
+                source_state._current_substate = None
+
+        if not is_target_substate:
+            self._exit_state_with_hooks(source_state, event, data)
+            self._current_state = None
 
     def _enter_states(
         self, source_state: AbstractState, target_state: AbstractState, event: AbstractEvent, data: Any
