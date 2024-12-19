@@ -200,7 +200,8 @@ class Executor:
                 self._context.state = ExecutorState.STOPPING
             else:
                 # ERROR->STOPPING also allowed
-                self._context.state = ExecutorState.STOPPING
+                with self._context._lock:
+                    self._context._state = ExecutorState.STOPPING
         except ExecutorError:
             if force:
                 with self._context._lock:

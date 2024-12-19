@@ -105,13 +105,13 @@ class TimeoutEvent(Event):
         """Validate timeout is a non-negative number."""
         if not isinstance(timeout, (int, float)):
             raise TypeError("timeout must be a number")
-        if timeout < 0:
+        if float(timeout) < 0:
             raise ValueError("timeout cannot be negative")
 
     def __init__(self, event_id: str, payload: Any = None, priority: int = 0, timeout: float = 0.0) -> None:
         self._validate_timeout(timeout)
         super().__init__(event_id, payload, priority)
-        self._timeout = 0.0 if timeout == 0.0 else float(timeout)
+        self._timeout = abs(float(timeout))
 
     def _get_attributes(self) -> dict:
         """Get attributes including timeout for string representation."""
