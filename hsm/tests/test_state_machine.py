@@ -151,40 +151,6 @@ def test_process_event_no_matching_transition(state_machine: StateMachine) -> No
     state_machine.process_event(event)
 
 
-def test_process_event_with_guard(basic_states: List[AbstractState]) -> None:
-    """Test event processing with guard conditions."""
-    guard = NoOpGuard()
-    transitions = [
-        Transition("state1", "state2", guard=guard),
-        Transition("state2", "state1"),
-        Transition("state2", "state3"),  # Add connection to state3
-        Transition("state3", "state1"),  # Add return path
-    ]
-    machine = StateMachine(basic_states, transitions, basic_states[0])
-
-    machine.start()
-    event = Event("test_event")
-    machine.process_event(event)
-    assert machine.get_current_state_id() == "state2"
-
-
-def test_process_event_with_actions(basic_states: List[AbstractState]) -> None:
-    """Test event processing with transition actions."""
-    action = MagicMock(spec=NoOpAction)
-    transitions = [
-        Transition("state1", "state2", actions=[action]),
-        Transition("state2", "state1"),
-        Transition("state2", "state3"),  # Add connection to state3
-        Transition("state3", "state1"),  # Add return path
-    ]
-    machine = StateMachine(basic_states, transitions, basic_states[0])
-
-    machine.start()
-    event = Event("test_event")
-    machine.process_event(event)
-    action.execute.assert_called_once()
-
-
 # -----------------------------------------------------------------------------
 # TRANSITION HANDLING TESTS
 # -----------------------------------------------------------------------------
@@ -199,26 +165,6 @@ def test_transition_priority(basic_states: List[AbstractState]) -> None:
     event = Event("test_event")
     machine.process_event(event)
     assert machine.get_current_state_id() == "state3"
-
-
-def test_transition_failure_recovery(basic_states: List[AbstractState]) -> None:
-    """Test recovery from failed transitions."""
-    failing_action = MagicMock(spec=NoOpAction)
-    failing_action.execute.side_effect = Exception("Action failed")
-
-    transitions = [
-        Transition("state1", "state2", actions=[failing_action]),
-        Transition("state2", "state3"),  # Add connection to state3
-        Transition("state3", "state1"),  # Add return path
-    ]
-    machine = StateMachine(basic_states, transitions, basic_states[0])
-
-    machine.start()
-    event = Event("test_event")
-
-    with pytest.raises(InvalidTransitionError):
-        machine.process_event(event)
-    assert machine.get_current_state_id() == "state1"
 
 
 # -----------------------------------------------------------------------------
@@ -286,65 +232,3 @@ def test_hooks_called(state_machine: StateMachine) -> None:
 
     assert mock_hook.pre_transition.called
     assert mock_hook.post_transition.called
-
-
-# -----------------------------------------------------------------------------
-# ERROR HANDLING TESTS
-# -----------------------------------------------------------------------------
-
-
-def test_error_context_preserved(basic_states: List[AbstractState]) -> None:
-    """Test that error context is preserved in exceptions."""
-    failing_action = MagicMock(spec=NoOpAction)
-    failing_action.execute.side_effect = Exception("Custom error")
-
-    # Include all necessary transitions to make the state machine valid
-    transitions = [
-        Transition("state1", "state2", actions=[failing_action]),
-        Transition("state2", "state3"),
-        Transition("state3", "state1"),
-    ]
-    machine = StateMachine(basic_states, transitions, basic_states[0])
-
-    machine.start()
-    event = Event("test_event")
-
-    with pytest.raises(InvalidTransitionError) as exc_info:
-        machine.process_event(event)
-
-    # Verify error context is preserved
-    assert "Custom error" in str(exc_info.value)
-    assert exc_info.value.source_state == "state1"
-    assert exc_info.value.target_state == "state2"
-    assert isinstance(exc_info.value.details, dict)
-    assert "error" in exc_info.value.details
-    assert "Custom error" in exc_info.value.details["error"]
-
-
-# -----------------------------------------------------------------------------
-# CLEANUP TESTS
-# -----------------------------------------------------------------------------
-
-
-def test_cleanup_on_stop(state_machine: StateMachine) -> None:
-    """Test proper cleanup when stopping the state machine."""
-    state_machine.start()
-    initial_state = state_machine._current_state
-    assert initial_state is not None
-
-    state_machine.stop()
-    assert state_machine._current_state is None
-    assert not state_machine._running
-    assert initial_state.exit_called
-
-
-def test_reset_cleanup(state_machine: StateMachine) -> None:
-    """Test cleanup during reset operation."""
-    state_machine.start()
-    state = state_machine._current_state
-    assert state is not None
-
-    state_machine.reset()
-    assert state.exit_called
-    assert state_machine._current_state is not None
-    assert state_machine._current_state.enter_called

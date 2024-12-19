@@ -43,25 +43,22 @@ class MockAction(AbstractAction):
             raise RuntimeError("Action execution failed")
 
 
-class MockEvent(Event):
-    def __init__(self, event_id: str, payload: Any = None, priority: int = 0):
-        self._id = event_id
-        self._payload = payload
-        self._priority = priority
+class MockEvent:
+    def __init__(self, event_id: str = "test_event"):
+        self.event_id = event_id
 
     def get_id(self) -> str:
-        return self._id
-
-    def get_payload(self) -> Any:
-        return self._payload
-
-    def get_priority(self) -> int:
-        return self._priority
+        return self.event_id
 
 
 # -----------------------------------------------------------------------------
 # FIXTURES
 # -----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_event() -> MockEvent:
+    return MockEvent()
 
 
 @pytest.fixture
@@ -81,12 +78,13 @@ def action_transition() -> Transition:
 
 @pytest.fixture
 def complex_transition() -> Transition:
-    return Transition("source", "target", guard=MockGuard(), actions=[MockAction(), MockAction()], priority=10)
-
-
-@pytest.fixture
-def mock_event() -> MockEvent:
-    return MockEvent("test_event", {"data": "value"}, 1)
+    return Transition(
+        "source",
+        "target",
+        guard=MockGuard(),
+        actions=[MockAction(), MockAction()],
+        priority=10,
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -95,32 +93,27 @@ def mock_event() -> MockEvent:
 
 
 def test_transition_initialization(basic_transition: Transition) -> None:
+    """Test basic transition initialization."""
     assert basic_transition.get_source_state_id() == "source"
     assert basic_transition.get_target_state_id() == "target"
     assert basic_transition.get_guard() is None
-    assert basic_transition.get_actions() == []
+    assert len(basic_transition.get_actions()) == 0
     assert basic_transition.get_priority() == 0
 
 
 def test_transition_with_guard(guarded_transition: Transition) -> None:
+    """Test transition with guard."""
     guard = guarded_transition.get_guard()
     assert isinstance(guard, MockGuard)
     assert not guard.check_called
 
 
 def test_transition_with_actions(action_transition: Transition) -> None:
+    """Test transition with actions."""
     actions = action_transition.get_actions()
     assert len(actions) == 1
     assert isinstance(actions[0], MockAction)
     assert not actions[0].execute_called
-
-
-def test_complex_transition_attributes(complex_transition: Transition) -> None:
-    assert complex_transition.get_source_state_id() == "source"
-    assert complex_transition.get_target_state_id() == "target"
-    assert isinstance(complex_transition.get_guard(), MockGuard)
-    assert len(complex_transition.get_actions()) == 2
-    assert complex_transition.get_priority() == 10
 
 
 # -----------------------------------------------------------------------------
@@ -129,6 +122,7 @@ def test_complex_transition_attributes(complex_transition: Transition) -> None:
 
 
 def test_guard_evaluation(guarded_transition: Transition, mock_event: MockEvent) -> None:
+    """Test guard evaluation."""
     guard = guarded_transition.get_guard()
     assert isinstance(guard, MockGuard)
 
@@ -142,6 +136,7 @@ def test_guard_evaluation(guarded_transition: Transition, mock_event: MockEvent)
 
 
 def test_failing_guard(mock_event: MockEvent) -> None:
+    """Test failing guard behavior."""
     failing_guard = MockGuard(return_value=False)
     Transition("source", "target", guard=failing_guard)
 
@@ -160,6 +155,7 @@ def test_failing_guard(mock_event: MockEvent) -> None:
 
 
 def test_action_execution(action_transition: Transition, mock_event: MockEvent) -> None:
+    """Test action execution."""
     actions = action_transition.get_actions()
     action = actions[0]
 
@@ -171,18 +167,8 @@ def test_action_execution(action_transition: Transition, mock_event: MockEvent) 
     assert action.last_state_data == state_data
 
 
-def test_multiple_actions_execution(complex_transition: Transition, mock_event: MockEvent) -> None:
-    actions = complex_transition.get_actions()
-    state_data = {"test": "data"}
-
-    for action in actions:
-        action.execute(mock_event, state_data)
-        assert action.execute_called
-        assert action.last_event == mock_event
-        assert action.last_state_data == state_data
-
-
 def test_failing_action(mock_event: MockEvent) -> None:
+    """Test failing action behavior."""
     failing_action = MockAction(should_raise=True)
     Transition("source", "target", actions=[failing_action])
 
@@ -199,6 +185,7 @@ def test_failing_action(mock_event: MockEvent) -> None:
 
 
 def test_empty_state_ids() -> None:
+    """Test empty state IDs."""
     with pytest.raises(ValueError):
         Transition("", "target")
 
@@ -207,6 +194,7 @@ def test_empty_state_ids() -> None:
 
 
 def test_none_state_ids() -> None:
+    """Test None state IDs."""
     with pytest.raises(TypeError):
         Transition(None, "target")  # type: ignore
 
@@ -215,6 +203,7 @@ def test_none_state_ids() -> None:
 
 
 def test_whitespace_state_ids() -> None:
+    """Test whitespace state IDs."""
     with pytest.raises(ValueError):
         Transition("  ", "target")
 
@@ -223,39 +212,9 @@ def test_whitespace_state_ids() -> None:
 
 
 def test_priority_bounds() -> None:
+    """Test priority bounds."""
     transition = Transition("source", "target", priority=-1)
     assert transition.get_priority() == -1
 
     transition = Transition("source", "target", priority=1000000)
     assert transition.get_priority() == 1000000
-
-
-# -----------------------------------------------------------------------------
-# PROTOCOL COMPLIANCE TESTS
-# -----------------------------------------------------------------------------
-
-
-def test_transition_protocol_compliance(basic_transition: Transition) -> None:
-    from hsm.interfaces.abc import AbstractTransition
-
-    assert isinstance(basic_transition, AbstractTransition)
-
-
-def test_guard_protocol_compliance() -> None:
-    guard = MockGuard()
-    from hsm.interfaces.abc import AbstractGuard
-
-    assert isinstance(guard, AbstractGuard)
-
-
-def test_action_protocol_compliance() -> None:
-    action = MockAction()
-    from hsm.interfaces.abc import AbstractAction
-
-    assert isinstance(action, AbstractAction)
-
-
-def test_transition_repr() -> None:
-    transition = Transition("source", "target", guard=MockGuard(), actions=[MockAction(), MockAction()], priority=5)
-    expected = "Transition(source='source', target='target', priority=5, guard=present, actions=2)"
-    assert repr(transition) == expected

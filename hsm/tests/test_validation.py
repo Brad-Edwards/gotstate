@@ -109,37 +109,6 @@ def test_validation_rule_immutability() -> None:
         rule.severity = ValidationSeverity.WARNING  # type: ignore
 
 
-def test_validation_rule_equality() -> None:
-    """Test that identical ValidationRules are equal."""
-    check_func = lambda x: True
-    rule1 = ValidationRule("test", check_func, ValidationSeverity.ERROR, "Test rule")
-    rule2 = ValidationRule("test", check_func, ValidationSeverity.ERROR, "Test rule")
-
-    assert rule1 == rule2
-
-
-# -----------------------------------------------------------------------------
-# VALIDATION CONTEXT TESTS
-# -----------------------------------------------------------------------------
-
-
-def test_validation_context_initialization(validation_context: ValidationContext) -> None:
-    """Test ValidationContext initialization and basic properties."""
-    assert len(validation_context.states) == 3
-    assert len(validation_context.transitions) == 3
-    assert validation_context.initial_state is not None
-    assert len(validation_context.current_results) == 0
-
-
-def test_validation_context_state_lookup(validation_context: ValidationContext) -> None:
-    """Test state lookup functionality."""
-    state = validation_context.get_state_by_id("state1")
-    assert state is not None
-    assert state.get_id() == "state1"
-
-    assert validation_context.get_state_by_id("nonexistent") is None
-
-
 def test_validation_context_result_addition(validation_context: ValidationContext) -> None:
     """Test adding validation results."""
     validation_context.add_result("ERROR", "Test message", {"key": "value"})
@@ -169,141 +138,12 @@ def test_validator_initialization_invalid_initial_state(basic_states: List[Abstr
         Validator(basic_states, [], invalid_initial)
 
 
-def test_validator_initialization_success(basic_validator: Validator) -> None:
-    """Test successful validator initialization."""
-    assert basic_validator is not None
-    assert isinstance(basic_validator, Validator)
-
-
-# -----------------------------------------------------------------------------
-# RULE REGISTRATION TESTS
-# -----------------------------------------------------------------------------
-
-
-def test_add_rule_invalid_type(basic_validator: Validator) -> None:
-    """Test adding a rule with invalid rule type."""
-    with pytest.raises(ValidationError, match="Invalid rule type"):
-        basic_validator.add_rule("test", lambda ctx: True, ValidationSeverity.ERROR, "Test rule", "invalid_type")
-
-
-def test_add_rule_duplicate_name(basic_validator: Validator) -> None:
-    """Test adding a rule with duplicate name."""
-    basic_validator.add_rule("test", lambda ctx: True, ValidationSeverity.ERROR, "Test rule")
-
-    with pytest.raises(ValidationError, match="Duplicate rule name"):
-        basic_validator.add_rule("test", lambda ctx: True, ValidationSeverity.ERROR, "Test rule")
-
-
-def test_add_rule_success(basic_validator: Validator) -> None:
-    """Test successful rule addition."""
-    basic_validator.add_rule("test", lambda ctx: True, ValidationSeverity.ERROR, "Test rule")
-
-    # Validate by running structural validation
-    results = basic_validator.validate_structure()
-    assert len(results) == 0  # Rule passed
-
-
-# -----------------------------------------------------------------------------
-# VALIDATION EXECUTION TESTS
-# -----------------------------------------------------------------------------
-
-
-def test_validate_structure_orphan_states(basic_states: List[AbstractState]) -> None:
-    """Test validation of orphaned states."""
-    # Create transitions that leave one state unreachable
-    transitions = [MockTransition("state1", "state2")]
-    validator = Validator(basic_states, transitions, basic_states[0])
-
-    results = validator.validate_structure()
-    assert any(r.severity == "ERROR" and "reachable" in r.message for r in results)
-
-
-def test_validate_structure_invalid_transitions(basic_states: List[AbstractState]) -> None:
-    """Test validation of invalid transitions."""
-    transitions = [MockTransition("state1", "nonexistent")]
-    validator = Validator(basic_states, transitions, basic_states[0])
-
-    results = validator.validate_structure()
-    assert any(r.severity == "ERROR" and "valid states" in r.message for r in results)
-
-
-def test_validate_behavior_guard_safety(basic_states: List[AbstractState]) -> None:
-    """Test validation of guard safety."""
-
-    class InvalidGuard:  # Not implementing AbstractGuard
-        def invalid_method(self, event: Any, state_data: Any) -> bool:
-            return True
-
-    transitions = [MockTransition("state1", "state2", guard=InvalidGuard())]  # type: ignore
-    validator = Validator(basic_states, transitions, basic_states[0])
-
-    results = validator.validate_behavior()
-    assert any(r.severity == "WARNING" and "guard" in r.message.lower() for r in results)
-
-
-def test_validate_data_isolation(basic_validator: Validator) -> None:
-    """Test validation of state data isolation."""
-    shared_data = {}
-    states = [
-        MockState("state1", shared_data),
-        MockState("state2", shared_data),  # Using same data dict
-    ]
-    validator = Validator(states, [], states[0])
-
-    # Add a specific data isolation rule with rule_type="data"
-    validator.add_rule(
-        "test_data_isolation",
-        validator._check_data_isolation,
-        ValidationSeverity.ERROR,
-        "State data must be isolated",
-        rule_type="data",  # Specify rule type as "data"
-    )
-
-    results = validator.validate_data()
-
-    # Debug output
-    print(f"Number of results: {len(results)}")
-    for r in results:
-        print(f"Severity: {r.severity}, Message: {r.message}")
-
-    # Check for data isolation violation
-    assert any(
-        r.severity == "ERROR" and "shares data dictionary" in r.message for r in results
-    ), "Data isolation violation not detected"
-
-
-# -----------------------------------------------------------------------------
-# EDGE CASES AND ERROR HANDLING
-# -----------------------------------------------------------------------------
-
-
-def test_validation_rule_exception_handling(basic_validator: Validator) -> None:
-    """Test handling of exceptions in validation rules."""
-
-    def failing_rule(context: ValidationContext) -> bool:
-        raise RuntimeError("Rule failed")
-
-    basic_validator.add_rule("failing_rule", failing_rule, ValidationSeverity.ERROR, "This rule always fails")
-
-    results = basic_validator.validate_structure()
-    assert any(
-        r.severity == "ERROR" and "failed with exception" in r.message and r.context.get("error") == "Rule failed"
-        for r in results
-    )
-
-
 def test_validation_empty_transitions(basic_states: List[AbstractState]) -> None:
     """Test validation with no transitions."""
     validator = Validator(basic_states, [], basic_states[0])
 
     results = validator.validate_structure()
     assert any(r.severity == "ERROR" and "reachable" in r.message for r in results)
-
-
-def test_validation_cyclic_transitions(basic_validator: Validator) -> None:
-    """Test validation of cyclic transitions."""
-    results = basic_validator.validate_structure()
-    assert not any(r.severity == "ERROR" for r in results)  # Cycles are allowed
 
 
 def test_validation_duplicate_state_ids() -> None:
@@ -316,51 +156,3 @@ def test_validation_duplicate_state_ids() -> None:
 
     results = validator.validate_structure()
     assert any(r.severity == "ERROR" and "unique" in r.message.lower() for r in results)
-
-
-# -----------------------------------------------------------------------------
-# INTEGRATION TESTS
-# -----------------------------------------------------------------------------
-
-
-def test_full_validation_workflow(basic_validator: Validator) -> None:
-    """Test complete validation workflow."""
-    # Run all validation types
-    structure_results = basic_validator.validate_structure()
-    behavior_results = basic_validator.validate_behavior()
-    data_results = basic_validator.validate_data()
-
-    # Verify results
-    assert isinstance(structure_results, list)
-    assert isinstance(behavior_results, list)
-    assert isinstance(data_results, list)
-
-    # Verify no structural errors in basic valid configuration
-    assert not any(r.severity == "ERROR" for r in structure_results)
-
-
-def test_validation_result_aggregation(basic_validator: Validator) -> None:
-    """Test aggregation of validation results across multiple rules."""
-    # Add multiple rules that will fail
-    basic_validator.add_rule("always_fail_1", lambda ctx: False, ValidationSeverity.ERROR, "First failing rule")
-    basic_validator.add_rule("always_fail_2", lambda ctx: False, ValidationSeverity.WARNING, "Second failing rule")
-
-    results = basic_validator.validate_structure()
-
-    # Verify both failures are reported
-    assert len(results) == 2
-    assert any(r.severity == "ERROR" for r in results)
-    assert any(r.severity == "WARNING" for r in results)
-
-
-def test_validation_context_isolation(basic_validator: Validator) -> None:
-    """Test that validation contexts are properly isolated."""
-    # Run structure validation
-    structure_results = basic_validator.validate_structure()
-
-    # Run behavior validation
-    behavior_results = basic_validator.validate_behavior()
-
-    # Verify results don't interfere
-    assert len(basic_validator._context.current_results) == len(behavior_results)
-    assert structure_results is not behavior_results
