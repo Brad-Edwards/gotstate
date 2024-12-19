@@ -205,7 +205,8 @@ class BaseEventQueue:
         """Verify the heap invariant is maintained."""
         for i in range(1, len(self._queue)):
             parent = (i - 1) // 2
-            assert self._queue[parent] <= self._queue[i], f"Heap property violated at index {i}"
+            if not self._queue[parent] <= self._queue[i]:
+                raise EventQueueError(f"Heap property violated at index {i}")
 
 
 class EventQueue(BaseEventQueue, AbstractEventQueue):

@@ -645,3 +645,176 @@ class TestValidator:
         assert len(context.current_results) == 3
         assert [r.severity for r in context.current_results] == ["ERROR", "WARNING", "INFO"]
         assert [r.message for r in context.current_results] == ["First error", "First warning", "First info"]
+
+    def test_validate_cyclic_transitions(self, mock_state):
+        """Test validation of cyclic transitions."""
+        state1 = Mock(spec=AbstractState)
+        state1.get_id.return_value = "state1"
+        state2 = Mock(spec=AbstractState)
+        state2.get_id.return_value = "state2"
+        state3 = Mock(spec=AbstractState)
+        state3.get_id.return_value = "state3"
+
+        transition1 = Mock(spec=AbstractTransition)
+        transition1.get_source_state.return_value = state1
+        transition1.get_target_state.return_value = state2
+        transition2 = Mock(spec=AbstractTransition)
+        transition2.get_source_state.return_value = state2
+        transition2.get_target_state.return_value = state3
+        transition3 = Mock(spec=AbstractTransition)
+        transition3.get_source_state.return_value = state3
+        transition3.get_target_state.return_value = state1
+
+        validator = Validator([state1, state2, state3], [transition1, transition2, transition3], state1)
+        results = validator.validate_structure()
+        assert not any(r.severity == "ERROR" for r in results)  # Cycles should be allowed
+
+    def test_validate_transition_with_failing_action(self, mock_state):
+        """Test validation with a failing action."""
+        failing_action = Mock(spec=AbstractAction)
+        failing_action.execute = Mock(side_effect=Exception("Action failed"))
+
+        transition = Mock(spec=AbstractTransition)
+        transition.get_source_state.return_value = mock_state
+        transition.get_target_state.return_value = mock_state
+        transition.get_actions.return_value = [failing_action]
+
+        validator = Validator([mock_state], [transition], mock_state)
+        results = validator.validate_behavior()
+        assert not any(r.severity == "ERROR" for r in results)  # Action failure should not be a validation error
+
+    def test_validate_composite_state(self):
+        """Test validation of composite state structure."""
+        parent_state = Mock(spec=AbstractState)
+        parent_state.get_id.return_value = "parent"
+        parent_state.get_substates = Mock(return_value=[])  # No substates initially
+        parent_state.get_parent = Mock(return_value=None)  # Top-level state
+
+        child_state = Mock(spec=AbstractState)
+        child_state.get_id.return_value = "child"
+        child_state.get_substates = Mock(return_value=[])  # No substates
+        child_state.get_parent = Mock(return_value=parent_state)
+
+        # Update parent's substates after child is created
+        parent_state.get_substates.return_value = [child_state]
+
+        # Create a transition to satisfy the "no orphan states" rule
+        transition = Mock(spec=AbstractTransition)
+        transition.get_source_state.return_value = parent_state
+        transition.get_target_state.return_value = child_state
+        transition.get_actions.return_value = []
+        transition.get_guard.return_value = None
+
+        validator = Validator([parent_state, child_state], [transition], parent_state)
+        results = validator.validate_structure()
+        assert not any(r.severity == "ERROR" for r in results)
+
+    def test_validate_timer_state(self):
+        """Test validation of timer state configuration."""
+        timer_state = Mock(spec=AbstractState)
+        timer_state.get_id.return_value = "timer"
+        timer_state.get_substates = Mock(return_value=[])  # No substates
+        timer_state.get_parent = Mock(return_value=None)  # Top-level state
+        timer_state.get_timeout = Mock(return_value=1.0)  # 1 second timeout
+        timer_state.get_timeout_transition = Mock(return_value=None)  # Optional timeout transition
+
+        # Create a transition to satisfy the "no orphan states" rule
+        transition = Mock(spec=AbstractTransition)
+        transition.get_source_state.return_value = timer_state
+        transition.get_target_state.return_value = timer_state
+        transition.get_actions.return_value = []
+        transition.get_guard.return_value = None
+
+        validator = Validator([timer_state], [transition], timer_state)
+        results = validator.validate_structure()
+        assert not any(r.severity == "ERROR" for r in results)
+
+    def test_validate_state_interface_methods(self, mock_state):
+        """Test validation of required state interface methods."""
+        # Mock state with all required methods
+        state = Mock(spec=AbstractState)
+        state.get_id.return_value = "state1"
+        state.get_substates = Mock(return_value=[])
+        state.get_parent = Mock(return_value=None)
+        state.on_entry = Mock()
+        state.on_exit = Mock()
+
+        # Create a transition to satisfy the "no orphan states" rule
+        transition = Mock(spec=AbstractTransition)
+        transition.get_source_state.return_value = state
+        transition.get_target_state.return_value = state
+        transition.get_actions.return_value = []
+        transition.get_guard.return_value = None
+
+        validator = Validator([state], [transition], state)
+        results = validator.validate_structure()
+        assert not any(r.severity == "ERROR" for r in results)
+
+    def test_validate_transition_source_target_ids(self):
+        """Test validation of transition source/target state IDs."""
+        state1 = Mock(spec=AbstractState)
+        state1.get_id.return_value = "state1"
+        state1.get_substates = Mock(return_value=[])
+        state1.get_parent = Mock(return_value=None)
+
+        state2 = Mock(spec=AbstractState)
+        state2.get_id.return_value = "state2"
+        state2.get_substates = Mock(return_value=[])
+        state2.get_parent = Mock(return_value=None)
+
+        transition = Mock(spec=AbstractTransition)
+        transition.get_source_state.return_value = state1
+        transition.get_target_state.return_value = state2
+        transition.get_actions.return_value = []
+        transition.get_guard.return_value = None
+        transition.get_source_id = Mock(return_value="state1")
+        transition.get_target_id = Mock(return_value="state2")
+
+        validator = Validator([state1, state2], [transition], state1)
+        results = validator.validate_structure()
+        assert not any(r.severity == "ERROR" for r in results)
+
+    def test_validate_transition_with_no_actions(self):
+        """Test validation of transition with no actions."""
+        state = Mock(spec=AbstractState)
+        state.get_id.return_value = "state1"
+        state.get_substates = Mock(return_value=[])
+        state.get_parent = Mock(return_value=None)
+
+        transition = Mock(spec=AbstractTransition)
+        transition.get_source_state.return_value = state
+        transition.get_target_state.return_value = state
+        transition.get_actions.return_value = []  # No actions
+        transition.get_guard.return_value = None
+
+        validator = Validator([state], [transition], state)
+        results = validator.validate_behavior()
+        assert not any(r.severity == "ERROR" for r in results)
+
+    def test_validate_state_machine_basic_configuration(self):
+        """Test validation of basic state machine configuration."""
+        states = []
+        transitions = []
+
+        # Create three states with proper interface methods
+        for i in range(3):
+            state = Mock(spec=AbstractState)
+            state.get_id.return_value = f"state{i+1}"
+            state.get_substates = Mock(return_value=[])
+            state.get_parent = Mock(return_value=None)
+            state.on_entry = Mock()
+            state.on_exit = Mock()
+            states.append(state)
+
+        # Create transitions between states
+        for i in range(3):
+            transition = Mock(spec=AbstractTransition)
+            transition.get_source_state.return_value = states[i]
+            transition.get_target_state.return_value = states[(i + 1) % 3]  # Circular transitions
+            transition.get_actions.return_value = []
+            transition.get_guard.return_value = None
+            transitions.append(transition)
+
+        validator = Validator(states, transitions, states[0])
+        results = validator.validate_structure()
+        assert not any(r.severity == "ERROR" for r in results)

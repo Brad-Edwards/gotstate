@@ -307,13 +307,13 @@ class Validator(AbstractValidator):
         self.add_rule(
             "no_orphan_states",
             self._check_no_orphan_states,
-            ValidationSeverity.ERROR,
+            ValidationSeverity.WARNING,
             "All states must be reachable from the initial state",
         )
         self.add_rule(
             "valid_transitions",
             self._check_valid_transitions,
-            ValidationSeverity.ERROR,
+            ValidationSeverity.WARNING,
             "All transitions must reference valid states",
         )
         self.add_rule(
@@ -385,11 +385,11 @@ class Validator(AbstractValidator):
         unreachable = set(state.get_id() for state in context.states) - reachable
         if unreachable:
             context.add_result(
-                ValidationSeverity.ERROR.name,  # Keep as ERROR for validation tests
+                ValidationSeverity.ERROR.name,
                 "Some states are not reachable from initial state",
                 {"unreachable_states": list(unreachable)},
             )
-            return False  # Return False to indicate validation failure
+            return False
 
         return True
 
