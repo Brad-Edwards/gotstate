@@ -191,9 +191,23 @@ class StateMachine(AbstractStateMachine):
                         self._logger.warning(f"Hook error during enter (continuing): {hook_error}")
                     state.on_entry(event, state_data[state.get_id()])
 
+                    # Set history only for the immediate parent of the target state
+                    parent = getattr(state, "_parent_state", None)
+                    if (parent and isinstance(parent, CompositeState) and 
+                        parent.has_history() and state == target):
+                        parent.set_history_state(state)
+                        parent._current_substate = state
+
                 # If target is composite, drill down to leaf state
                 if isinstance(target, CompositeState):
-                    self._current_state = self._drill_down(target, state_data, event)
+                    if target.has_history() and target._current_substate:
+                        # Use history state if available
+                        history_state = target._current_substate
+                        self._current_state = history_state
+                        history_state.on_entry(event, state_data[history_state.get_id()])
+                    else:
+                        # Otherwise drill down normally
+                        self._current_state = self._drill_down(target, state_data, event)
                 else:
                     self._current_state = target
 
@@ -266,14 +280,18 @@ class StateMachine(AbstractStateMachine):
                     if substate == target_state:
                         is_target_substate = True
                         break
+
+            # Exit current substate if it exists
             if source_state._current_substate:
                 self._hook_manager.call_on_exit(source_state._current_substate.get_id())
                 source_state._current_substate.on_exit(event, data)
                 if not is_target_substate:
                     source_state._current_substate = None
-            self._hook_manager.call_on_exit(source_state.get_id())
-            source_state.on_exit(event, data)
+
+            # Only exit the composite parent if the target is *not* a substate
             if not is_target_substate:
+                self._hook_manager.call_on_exit(source_state.get_id())
+                source_state.on_exit(event, data)
                 self._current_state = None
 
     def _enter_states(
@@ -426,22 +444,24 @@ class StateMachine(AbstractStateMachine):
         return self._current_state.get_id()
 
     def _handle_operation_error(
-        self, operation: str, error: Exception, details: Optional[Dict[str, Any]] = None
+        self, operation: str, err: Exception, details: Optional[dict] = None
     ) -> None:
         """
-        Handle errors that occur during state machine operations.
-
-        Currently logs the error and raises it.
-
-        Args:
-            operation: The operation during which the error occurred.
-            error: The exception object.
-            details: Optional dictionary containing additional error details.
+        Handle an operation error by logging it and optionally raising it.
         """
-        logger.error(f"Error during operation '{operation}': {error}", exc_info=True)
-        if details:
-            logger.error("Error details: %s", details)
-        raise error  # Re-raise the original exception
+        # Adjusted to match the placeholder-based test expectation
+        self._logger.error(
+            "Error during operation '%s': %s",
+            operation,
+            err,
+            exc_info=True
+        )
+
+        if details is not None:
+            self._logger.error("Error details: %s", details)
+
+        # Existing error-raising logic remains unchanged below
+        raise err
 
     def _drill_down(
         self, top_state: AbstractState, data: Dict[str, Any], event: Optional[AbstractEvent]
