@@ -274,14 +274,24 @@ class TestExecutorEventProcessing(unittest.TestCase):
 
     def test_event_processing_during_pause(self):
         processed = []
+        event = make_mock_event()
+        
+        # Configure mock queue behavior
+        self.mock_event_queue.is_empty.side_effect = [False, True]  # First not empty, then empty
+        self.mock_event_queue.try_dequeue.side_effect = [event, None]  # Return event once, then None
+        
+        # Configure state machine to track processed events
         self.mock_state_machine.process_event.side_effect = processed.append
+        
         with self.executor.pause():
-            e = make_mock_event()
-            self.executor.process_event(e)
+            self.executor.process_event(event)
             # no immediate processing
             self.assertEqual(len(processed), 0)
-        self.executor.wait_for_events()
+        
+        # Wait for event processing after pause
+        self.assertTrue(self.executor.wait_for_events())
         self.assertEqual(len(processed), 1)
+        self.assertEqual(processed[0], event)
 
     def test_event_processing_metrics_accuracy(self):
         num_events = 5

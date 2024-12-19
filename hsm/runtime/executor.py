@@ -286,11 +286,16 @@ class Executor:
                     event = self._event_queue.try_dequeue(timeout=0.1)
                     if event:
                         self._handle_event(event)
+                        # Add small delay after processing to prevent tight loops
+                        time.sleep(0.01)
                     else:
+                        # If no event, sleep a bit longer
                         time.sleep(0.05)
                 except Exception as e:
                     logger.error("Error processing event: %s", str(e))
                     self._context.handle_error(e)
+                    # Add delay after error to prevent rapid error loops
+                    time.sleep(0.1)
             else:
                 time.sleep(0.1)
 
