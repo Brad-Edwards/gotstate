@@ -41,11 +41,11 @@ class ExecutorStats:
 
 class ExecutorContext:
     _VALID_TRANSITIONS = {
-        ExecutorState.IDLE: {ExecutorState.ERROR},  # Removed RUNNING to force start to bypass
+        ExecutorState.IDLE: {ExecutorState.RUNNING, ExecutorState.ERROR},  # Allow IDLE->RUNNING
         ExecutorState.RUNNING: {ExecutorState.PAUSED, ExecutorState.STOPPING, ExecutorState.ERROR},
         ExecutorState.PAUSED: {ExecutorState.RUNNING, ExecutorState.STOPPING, ExecutorState.ERROR},
         ExecutorState.STOPPING: {ExecutorState.STOPPED, ExecutorState.ERROR},
-        ExecutorState.STOPPED: {ExecutorState.ERROR},
+        ExecutorState.STOPPED: {ExecutorState.IDLE, ExecutorState.ERROR},  # Allow restart (STOPPED->IDLE)
         ExecutorState.ERROR: {ExecutorState.STOPPING, ExecutorState.STOPPED},
     }
 
@@ -63,21 +63,15 @@ class ExecutorContext:
     @state.setter
     def state(self, new_state: ExecutorState) -> None:
         with self._lock:
-            # First validate the type of new_state
             if not isinstance(new_state, ExecutorState):
                 raise AttributeError(f"State must be an ExecutorState enum value, got {type(new_state)}")
 
-            # If the state is not changing, treat as invalid for these tests
             if new_state == self._state:
-                raise ExecutorError(f"Invalid state transition from {self._state} to {new_state}")
+                return  # Allow same state transitions (no-op)
 
             valid_transitions = self._VALID_TRANSITIONS.get(self._state, set())
-            # Special case for IDLE->RUNNING on start (we'll allow direct set in start())
-            if self._state == ExecutorState.IDLE and new_state == ExecutorState.RUNNING:
-                pass
-            else:
-                if new_state not in valid_transitions:
-                    raise ExecutorError(f"Invalid state transition from {self._state} to {new_state}")
+            if new_state not in valid_transitions:
+                raise ExecutorError(f"Invalid state transition from {self._state} to {new_state}")
 
             self._state = new_state
 
@@ -269,6 +263,10 @@ class Executor:
             raise TypeError("Invalid event")
 
         try:
+            # Ensure event has required methods
+            if not hasattr(event, "get_id"):
+                raise TypeError("Event must have get_id method")
+
             self._event_queue.enqueue(event)
         except Exception as e:
             raise ExecutorError(f"Failed to enqueue event: {str(e)}") from e
@@ -285,22 +283,24 @@ class Executor:
                 try:
                     event = self._event_queue.try_dequeue(timeout=0.1)
                     if event:
-                        self._handle_event(event)
-                        # Add small delay after processing to prevent tight loops
-                        time.sleep(0.01)
+                        self._currently_processing = True
+                        try:
+                            if hasattr(event, "get_id"):  # Validate event
+                                self._handle_event(event)
+                            else:
+                                logger.error("Invalid event received: missing get_id method")
+                        finally:
+                            self._currently_processing = False
                     else:
-                        # If no event, sleep a bit longer
                         time.sleep(0.05)
                 except Exception as e:
                     logger.error("Error processing event: %s", str(e))
                     self._context.handle_error(e)
-                    # Add delay after error to prevent rapid error loops
-                    time.sleep(0.1)
+                    time.sleep(0.1)  # Delay after error
             else:
                 time.sleep(0.1)
 
     def _handle_event(self, event: AbstractEvent) -> None:
-        self._currently_processing = True
         old_stats = self._context.get_stats()
         start_time = time.time()
         try:
@@ -315,7 +315,7 @@ class Executor:
             end_time = time.time()
             processing_time = end_time - start_time
 
-            # Record state change for every event processed if we have a new_state
+            # Record state change if we have a new_state
             if new_state is not None:
                 sc = StateChange(
                     source_id=old_state_id, target_id=new_state_id, timestamp=end_time, event_id=event.get_id()
@@ -324,28 +324,19 @@ class Executor:
                 if len(self._state_changes) > self._max_state_history:
                     self._state_changes = self._state_changes[-self._max_state_history :]
 
-            # Update stats with proper event count
-            self._context.update_stats(
-                events_processed=old_stats.events_processed + 1,
-                transitions_executed=old_stats.transitions_executed + 1,
-                errors_encountered=old_stats.errors_encountered,
-                avg_processing_time=(old_stats.avg_processing_time * old_stats.events_processed + processing_time)
-                / (old_stats.events_processed + 1),
-                last_event_time=end_time,
-            )
+            # Update stats atomically
+            with self._context._lock:
+                self._context.update_stats(
+                    events_processed=old_stats.events_processed + 1,
+                    transitions_executed=old_stats.transitions_executed + 1,
+                    errors_encountered=old_stats.errors_encountered,
+                    avg_processing_time=(old_stats.avg_processing_time * old_stats.events_processed + processing_time)
+                    / (old_stats.events_processed + 1),
+                    last_event_time=end_time,
+                )
         except Exception as e:
             end_time = time.time()
-            # Remove the error increment here, only update other stats
-            self._context.update_stats(
-                events_processed=old_stats.events_processed + 1,
-                transitions_executed=old_stats.transitions_executed,
-                errors_encountered=old_stats.errors_encountered,
-                avg_processing_time=old_stats.avg_processing_time,
-                last_event_time=end_time,
-            )
             self._context.handle_error(e)
-        finally:
-            self._currently_processing = False
 
     @contextmanager
     def pause(self) -> Generator[None, None, None]:
@@ -381,10 +372,6 @@ class Executor:
         while time.time() - start_time < timeout:
             # Check if queue empty and no event currently being processed
             if self._event_queue.is_empty() and not self._currently_processing:
-                if self._context.state in (ExecutorState.RUNNING, ExecutorState.PAUSED):
-                    # Give a small window for any pending events to be processed
-                    time.sleep(0.1)
-                    if self._event_queue.is_empty() and not self._currently_processing:
-                        return True
-            time.sleep(0.01)
+                return True
+            time.sleep(0.01)  # Shorter sleep, we're actively checking
         return False
