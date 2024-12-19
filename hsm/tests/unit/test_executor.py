@@ -5,7 +5,7 @@ import threading
 import time
 import unittest
 from itertools import cycle
-from typing import Optional
+from typing import Optional, Type
 from unittest.mock import Mock, call, patch
 
 from hsm.core.errors import ExecutorError
@@ -44,38 +44,48 @@ class TestExecutor(unittest.TestCase):
         if self.executor._context.state != ExecutorState.IDLE:
             self.executor.stop(force=True)
 
-    def test_executor_lifecycle(self):
-        """Test basic lifecycle: start -> running -> stop"""
-        # Start
+    # ------------------ Helper Methods ------------------
+    def _start_executor_and_assert_running(self):
+        """Helper to start executor and assert that it's running."""
         self.executor.start()
         self.assertTrue(self.executor.is_running())
         self.assertEqual(self.executor._context.state, ExecutorState.RUNNING)
 
-        # Stop
-        self.executor.stop()
-        self.assertEqual(self.executor._context.state, ExecutorState.STOPPED)
+    def _stop_executor_and_assert_stopped(self, force=False):
+        """Helper to stop executor and assert that it's stopped."""
+        self.executor.stop(force=force)
         self.assertFalse(self.executor.is_running())
+        self.assertEqual(self.executor._context.state, ExecutorState.STOPPED)
 
-    def test_executor_pause_resume(self):
-        """Test pause/resume functionality"""
-        self.executor.start()
-
+    def _pause_executor_and_assert_paused(self):
+        """Helper to pause executor and assert that it's paused."""
         with self.executor.pause():
             self.assertEqual(self.executor._context.state, ExecutorState.PAUSED)
 
-        # Should be running after pause
+    def _register_error_handler(self, error_type: Type[Exception], handler: Mock):
+        """Helper to register an error handler."""
+        self.executor.register_error_handler(error_type, handler)
+
+    # ------------------ Example Tests ------------------
+    def test_executor_lifecycle(self):
+        """Test basic lifecycle: start -> running -> stop"""
+        self._start_executor_and_assert_running()
+        self._stop_executor_and_assert_stopped()
+
+    def test_executor_pause_resume(self):
+        """Test pause/resume functionality"""
+        self._start_executor_and_assert_running()
+        self._pause_executor_and_assert_paused()
+        # After exiting the with-block, it should be RUNNING again
         self.assertEqual(self.executor._context.state, ExecutorState.RUNNING)
 
     def test_executor_error_handling_chain(self):
         """Test error handler chain and priorities"""
-        self.executor.start()
-
-        # Register handlers
+        self._start_executor_and_assert_running()
         base_handler = Mock()
         specific_handler = Mock()
-
-        self.executor.register_error_handler(Exception, base_handler)
-        self.executor.register_error_handler(ValueError, specific_handler)
+        self._register_error_handler(Exception, base_handler)
+        self._register_error_handler(ValueError, specific_handler)
 
         # Trigger error
         self.state_machine.process_event.side_effect = ValueError("Test error")
@@ -84,19 +94,18 @@ class TestExecutor(unittest.TestCase):
         # Wait a bit for error handling
         time.sleep(0.1)
 
-        # Specific handler should be called, not base
+        # Check calls
         specific_handler.assert_called_once()
         base_handler.assert_not_called()
 
     def test_executor_force_stop(self):
         """Test force stop behavior"""
-        self.executor.start()
-        self.executor.stop(force=True)
-        self.assertEqual(self.executor._context.state, ExecutorState.STOPPED)
+        self._start_executor_and_assert_running()
+        self._stop_executor_and_assert_stopped(force=True)
 
     def test_executor_invalid_start_state(self):
         """Test starting executor from invalid state"""
-        self.executor.start()
+        self._start_executor_and_assert_running()
         with self.assertRaises(ExecutorError):
             self.executor.start()
 
@@ -114,7 +123,7 @@ class TestExecutor(unittest.TestCase):
 
     def test_executor_state_validation(self):
         """Test state transitions validation"""
-        self.executor.start()
+        self._start_executor_and_assert_running()
         with self.assertRaises(ExecutorError):
             self.executor._context.state = ExecutorState.IDLE  # Can't go back to IDLE from RUNNING
 
@@ -135,7 +144,7 @@ class TestExecutor(unittest.TestCase):
         """Test current state retrieval"""
         mock_state = Mock()
         self.state_machine.get_state.return_value = mock_state
-        self.executor.start()
+        self._start_executor_and_assert_running()
         self.assertEqual(self.executor.get_current_state(), mock_state)
 
     def test_executor_pause_validation(self):
@@ -164,16 +173,14 @@ class TestExecutor(unittest.TestCase):
         """Test all valid state transitions"""
         # IDLE -> RUNNING
         self.assertEqual(self.executor._context.state, ExecutorState.IDLE)
-        self.executor.start()
-        self.assertEqual(self.executor._context.state, ExecutorState.RUNNING)
+        self._start_executor_and_assert_running()
 
         # RUNNING -> PAUSED
         with self.executor.pause():
             self.assertEqual(self.executor._context.state, ExecutorState.PAUSED)
 
         # RUNNING -> STOPPING -> STOPPED
-        self.executor.stop()
-        self.assertEqual(self.executor._context.state, ExecutorState.STOPPED)
+        self._stop_executor_and_assert_stopped()
 
     def test_executor_stats_immutability(self):
         """Test that stats objects are immutable"""
@@ -183,7 +190,7 @@ class TestExecutor(unittest.TestCase):
 
     def test_executor_process_event_validation(self):
         """Test event validation in process_event"""
-        self.executor.start()
+        self._start_executor_and_assert_running()
         with self.assertRaises(TypeError):
             self.executor.process_event(None)
         with self.assertRaises(TypeError):
@@ -213,16 +220,15 @@ class TestExecutor(unittest.TestCase):
         self.executor._event_queue = Mock()
         self.executor._event_queue.enqueue.side_effect = EventQueue.QueueFullError()
 
-        self.executor.start()
+        self._start_executor_and_assert_running()
         with self.assertRaises(ExecutorError):
             self.executor.process_event(make_mock_event())
 
     def test_executor_state_machine_stop_error(self):
         """Test handling of state machine stop errors"""
-        self.executor.start()
+        self._start_executor_and_assert_running()
         self.state_machine.stop.side_effect = RuntimeError("Stop error")
-        self.executor.stop(force=True)  # Should not raise, force=True should handle errors
-        self.assertEqual(self.executor._context.state, ExecutorState.STOPPED)
+        self._stop_executor_and_assert_stopped(force=True)  # Should not raise, force=True should handle errors
 
     def test_executor_timer_shutdown(self):
         """Test timer shutdown during stop"""
@@ -234,8 +240,8 @@ class TestExecutor(unittest.TestCase):
 
         mock_timer = Mock(spec=TimerSpec)
         self.executor._timer = mock_timer
-        self.executor.start()
-        self.executor.stop()
+        self._start_executor_and_assert_running()
+        self._stop_executor_and_assert_stopped()
         mock_timer.shutdown.assert_called_once()
 
 

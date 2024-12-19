@@ -120,6 +120,14 @@ class ExecutorContext:
                 if self._state != ExecutorState.ERROR:
                     self._state = ExecutorState.ERROR
 
+    def force_state(self, new_state: ExecutorState) -> None:
+        """
+        Force the state to a new value without validating transitions.
+        Useful in start/stop if we want to bypass normal validation.
+        """
+        with self._lock:
+            self._state = new_state
+
 
 @dataclass(frozen=True)
 class StateChange:
@@ -171,9 +179,8 @@ class Executor:
     def start(self) -> None:
         if self._context.state != ExecutorState.IDLE:
             raise ExecutorError(NOT_IDLE_ERROR_MSG)
-        # Allow IDLE->RUNNING forcibly during start
-        with self._context._lock:
-            self._context._state = ExecutorState.RUNNING
+
+        self._context.force_state(ExecutorState.RUNNING)
         try:
             self._state_machine.start()
             self._worker_thread = threading.Thread(target=self._process_events, daemon=True)
