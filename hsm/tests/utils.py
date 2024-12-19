@@ -1,3 +1,7 @@
+# hsm/tests/utils.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
 import sys
 from threading import Event, Thread
 from typing import Any, Callable, Dict

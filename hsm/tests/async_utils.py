@@ -1,3 +1,7 @@
+# hsm/tests/async_utils.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
 import asyncio
 from typing import Any, Awaitable, Callable, Optional, TypeVar
 
