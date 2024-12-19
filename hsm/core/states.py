@@ -33,10 +33,12 @@ class State(AbstractState):
 
         Raises:
             ValueError: If state_id is empty or only whitespace
-            TypeError: If state_id is None
+            TypeError: If state_id is None or not a string
         """
         if state_id is None:
             raise TypeError("state_id cannot be None")
+        if not isinstance(state_id, str):
+            raise TypeError("state_id must be a string")
         if not state_id or state_id.strip() == "":
             raise ValueError("state_id cannot be empty")
 
@@ -76,7 +78,7 @@ class State(AbstractState):
         return self._state_id
 
 
-class CompositeState(AbstractCompositeState, State):
+class CompositeState(State, AbstractCompositeState):
     """
     A state that can contain other states, enabling hierarchical state machines.
 
@@ -112,36 +114,48 @@ class CompositeState(AbstractCompositeState, State):
             substates: List of states contained within this composite state
             initial_state: Default state to enter when this composite state is entered
             has_history: Whether to track the last active substate
+            parent_state: Optional parent state for hierarchical state machines
 
         Raises:
-            ValueError: If state_id is empty or initial_state is not in substates
+            ValueError: If state_id is empty, initial_state is not in substates,
+                      or if there are duplicate substates
             TypeError: If substates is not a list
         """
         # Call State's __init__ first
         super().__init__(state_id)
 
-        # Initialize history-related attributes first
-        self._has_history = has_history
-        self._history_state: Optional[AbstractState] = None
-
         if not isinstance(substates, list):
             raise ValueError("substates must be a list")
 
-        # Store substates
-        self._substates = substates
-        self._initial_state = initial_state
+        # Check for duplicate substates
+        seen_states = set()
+        for state in substates:
+            state_id = state.get_id()
+            if state_id in seen_states:
+                raise ValueError(f"Duplicate substate found with ID: {state_id}")
+            seen_states.add(state_id)
+
+        # Store an immutable copy of substates
+        self._substates = tuple(substates)  # Make immutable at creation time
         self._current_substate: Optional[AbstractState] = None
         self._parent_state = parent_state
 
-        # Validate initial state based on whether we have substates
+        # Initialize history-related attributes
+        self._has_history = has_history
+        self._history_state: Optional[AbstractState] = None
+
+        # Validate and set initial state
         if substates:
             if initial_state is None:
                 self._initial_state = substates[0]
-            if initial_state not in substates:
+            elif initial_state not in substates:
                 raise ValueError("initial_state must be one of the substates")
+            else:
+                self._initial_state = initial_state
         else:
             if initial_state is not None:
                 raise ValueError("initial_state must be None when substates is empty")
+            self._initial_state = None
 
     @property
     def parent_state(self) -> Optional[AbstractState]:
@@ -171,8 +185,13 @@ class CompositeState(AbstractCompositeState, State):
             self._current_substate.on_entry(event, data)
 
     def get_substates(self) -> List[AbstractState]:
-        """Get the list of substates."""
-        return self._substates
+        """
+        Get the list of substates.
+
+        Returns:
+            A list of the substates
+        """
+        return list(self._substates)  # Return a new list copy
 
     def get_initial_state(self) -> AbstractState:
         """Get the initial substate."""
@@ -186,6 +205,8 @@ class CompositeState(AbstractCompositeState, State):
 
     def set_history_state(self, state: AbstractState) -> None:
         """Update the history state."""
+        if not self.has_history():
+            raise ValueError("Cannot set history state when history is disabled")
         if state not in self._substates:
             raise ValueError("State is not a substate of this composite state")
         self._history_state = state
