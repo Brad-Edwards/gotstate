@@ -83,81 +83,104 @@ class AsyncEventQueue:
         return self._priority_mode
 
 
-class AsyncStateMachine:
+class AsyncStateMachine(StateMachine):
     """
-    An asynchronous version of the state machine. Allows event processing in an
-    async context, integrating with asyncio-based loops and async event queues.
-
-    This class parallels StateMachine, but provides async start/stop/process_event.
+    Asynchronous version of the state machine that supports async event processing.
     """
 
-    def __init__(
-        self,
-        initial_state: State,
-        validator: Validator = None,
-        hooks: List[HookProtocol] = None,
-    ):
-        self._context = _StateMachineContext(initial_state)
-        self.validator = validator or Validator()
-        self._hooks = HookManager(hooks or [])
-        self._lock = _AsyncLock()
-        self._started = False
-        self._stopped = False
-
-    @property
-    def current_state(self) -> State:
-        return self._context.get_current_state()
+    def __init__(self, initial_state: State, validator: Optional[Validator] = None, hooks: Optional[List] = None):
+        super().__init__(initial_state, validator, hooks)
+        self._event_queue = AsyncEventQueue()
 
     async def start(self) -> None:
+        """Start the state machine with async validation."""
         if self._started:
             return
-        await self._lock.acquire()
-        try:
-            if self.validator:
-                self.validator.validate_state_machine(self)
-            self._context.start()
-            self._hooks.execute_on_enter(self.current_state)
-            self._started = True
-        finally:
-            self._lock.release()
 
-    async def process_event(self, event: Event) -> None:
-        if not self._started or self._stopped:
-            return
-        await self._lock.acquire()
-        try:
-            transitions = self._context.get_transitions()
-            valid_transitions = [t for t in transitions if t.source == self.current_state and t.evaluate_guards(event)]
+        # Resolve the correct starting state
+        self._current_state = self._resolve_state_for_start()
 
-            if valid_transitions:
-                chosen_transition = sorted(valid_transitions, key=lambda t: t.get_priority(), reverse=True)[0]
-                self._hooks.execute_on_exit(self.current_state)
-                self.current_state.on_exit()
-                chosen_transition.execute_actions(event)
-                self._context.set_current_state(chosen_transition.target)
-                self.current_state.on_enter()
-                self._hooks.execute_on_enter(self.current_state)
-        except Exception as e:
-            self._hooks.execute_on_error(e)
-        finally:
-            self._lock.release()
+        # Validate machine structure with potential async validator
+        errors = self._graph.validate()
+        if errors:
+            raise ValidationError("\n".join(errors))
+
+        if hasattr(self._validator, "validate_state_machine"):
+            validate_method = self._validator.validate_state_machine
+            if asyncio.iscoroutinefunction(validate_method):
+                await validate_method(self)
+            else:
+                validate_method(self)
+
+        self._notify_enter(self._current_state)
+        self._started = True
 
     async def stop(self) -> None:
-        if self._stopped:
+        """Stop the state machine asynchronously."""
+        if not self._started:
             return
-        await self._lock.acquire()
-        try:
-            self._hooks.execute_on_exit(self.current_state)
-            self._context.stop()
-            self._stopped = True
-        finally:
-            self._lock.release()
+        if self._current_state:
+            await self._notify_exit_async(self._current_state)
+        self._current_state = None
+        self._started = False
 
-    def add_transition(self, transition: Transition) -> None:
-        """
-        Add a transition to the state machine.
-        """
-        self._context.add_transition(transition)
+    async def process_event(self, event: Event) -> bool:
+        """Process an event asynchronously."""
+        if not self._started or not self._current_state:
+            return False
+
+        valid_transitions = self._graph.get_valid_transitions(self._current_state, event)
+        if not valid_transitions:
+            return False
+
+        # Take highest priority transition
+        transition = max(valid_transitions, key=lambda t: t.get_priority())
+        await self._execute_transition_async(transition, event)
+        return True
+
+    async def _execute_transition_async(self, transition: Transition, event: Event) -> None:
+        """Execute a transition asynchronously."""
+        try:
+            await self._notify_exit_async(self._current_state)
+            transition.execute_actions(event)
+            self._current_state = transition.target
+            await self._notify_enter_async(self._current_state)
+        except Exception as e:
+            # Handle error only once, at the top level
+            for hook in self._hooks:
+                if hasattr(hook, "on_error"):
+                    hook_method = hook.on_error
+                    if asyncio.iscoroutinefunction(hook_method):
+                        await hook_method(e)
+                    else:
+                        hook_method(e)
+
+            # Error recovery is separate from error hooks
+            if hasattr(self, "_error_recovery"):
+                self._error_recovery.recover(e, self)
+
+    async def _notify_enter_async(self, state: State) -> None:
+        """Notify hooks of state entry asynchronously."""
+        state.on_enter()
+        for hook in self._hooks:
+            if hasattr(hook, "on_enter"):
+                hook_method = hook.on_enter
+                if asyncio.iscoroutinefunction(hook_method):
+                    await hook_method(state)
+                else:
+                    hook_method(state)
+
+    async def _notify_exit_async(self, state: State) -> None:
+        """Notify hooks of state exit asynchronously."""
+        # No try/except here - let errors propagate up
+        state.on_exit()
+        for hook in self._hooks:
+            if hasattr(hook, "on_exit"):
+                hook_method = hook.on_exit
+                if asyncio.iscoroutinefunction(hook_method):
+                    await hook_method(state)
+                else:
+                    hook_method(state)
 
 
 class _AsyncEventProcessingLoop:

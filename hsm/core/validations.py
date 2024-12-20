@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Optional
 
 from hsm.core.errors import ValidationError
 from hsm.core.events import Event
+from hsm.core.states import CompositeState
 from hsm.core.transitions import Transition
 
 if TYPE_CHECKING:
@@ -106,12 +107,12 @@ class _DefaultValidationRules:
         Check for basic machine correctness:
         - Ensure machine has an initial state.
         - Check that all states referenced in transitions are reachable.
+        - Handle composite state hierarchies properly.
         """
         if machine.current_state is None:
             raise ValidationError("StateMachine must have an initial state.")
 
         try:
-            # Get all transitions and states
             transitions = machine._context.get_transitions()
             all_states = machine._context.get_states()
 
@@ -119,7 +120,7 @@ class _DefaultValidationRules:
             if getattr(machine, "_mock_return_value", None) is not None:
                 return
 
-            # Check that all states in transitions are known to the machine
+            # Check transitions reference valid states
             for t in transitions:
                 if t.source not in all_states:
                     raise ValidationError(
@@ -130,32 +131,64 @@ class _DefaultValidationRules:
                         f"State {t.target.name} is referenced in transition but not in state machine."
                     )
 
-            # Build reachability graph starting from initial state
-            reachable_states = {machine.current_state}
+            # Build reachability including composite state hierarchy
+            reachable_states = set()
+            current = machine.current_state
 
-            # Keep expanding reachable states until no new states are found
+            def add_state_and_children(state):
+                """Helper to add a state and all its children to reachable states"""
+                reachable_states.add(state)
+                # For composite states, add all children and the state itself
+                if isinstance(state, CompositeState):
+                    for child in state._children:
+                        reachable_states.add(child)
+                        # Recursively add children's children
+                        add_state_and_children(child)
+                    # If it's a composite state, add its initial state
+                    if state._initial_state:
+                        reachable_states.add(state._initial_state)
+                        add_state_and_children(state._initial_state)
+
+            # Add current state and its hierarchy
+            add_state_and_children(current)
+
+            # Add all parent states to reachable set
+            while current:
+                reachable_states.add(current)
+                if isinstance(current, CompositeState):
+                    for child in current._children:
+                        add_state_and_children(child)
+                current = current.parent
+
+            # Keep expanding reachable states through transitions
             while True:
                 new_reachable = set()
                 for t in transitions:
                     if t.source in reachable_states:
                         new_reachable.add(t.target)
+                        # Add target's ancestors and children
+                        current = t.target
+                        while current:
+                            add_state_and_children(current)
+                            current = current.parent
 
-                # If no new states were added, we're done
                 if not (new_reachable - reachable_states):
                     break
 
                 reachable_states.update(new_reachable)
 
-            # Check if any state in the machine is unreachable
+            # Check unreachable states
             unreachable = all_states - reachable_states
             if unreachable:
                 raise ValidationError(
-                    f"States {[s.name for s in unreachable]} are not"
-                    + f"reachable from initial state {machine.current_state.name}."
+                    f"States {[s.name for s in unreachable]} are not "
+                    f"reachable from initial state {machine.current_state.name}."
                 )
-        except AttributeError:
-            # This is likely a mock in tests, skip validation
-            return
+
+        except Exception as e:
+            if not isinstance(e, ValidationError):
+                raise ValidationError(f"Validation failed: {str(e)}")
+            raise
 
     @staticmethod
     def validate_transition(transition: "Transition") -> None:
@@ -180,3 +213,26 @@ class _DefaultValidationRules:
         """
         if not event.name:
             raise ValidationError("Event must have a name.")
+
+
+class AsyncValidator(Validator):
+    """Base class for async validators"""
+
+    async def validate_state_machine(self, machine) -> None:
+        """Async validation of state machine configuration"""
+        errors = []
+
+        # Basic validation
+        if not machine._initial_state:
+            errors.append("State machine must have an initial state")
+
+        if not machine._current_state:
+            errors.append("State machine must have a current state")
+
+        # Validate state graph
+        graph_errors = machine._graph.validate()
+        if graph_errors:
+            errors.extend(graph_errors)
+
+        if errors:
+            raise ValidationError("\n".join(errors))

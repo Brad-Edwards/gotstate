@@ -39,7 +39,8 @@ class _EventQueueLock:
 class _PriorityQueueWrapper:
     """
     Internal wrapper providing priority-based insertion and retrieval of events,
-    if priority mode is enabled. Here we use a simple counter to preserve order.
+    if priority mode is enabled. Events with higher priority values are processed first.
+    Within the same priority level, events are processed in FIFO order.
     """
 
     def __init__(self) -> None:
@@ -51,19 +52,26 @@ class _PriorityQueueWrapper:
 
     def push(self, event: Event) -> None:
         """
-        Insert an event into the priority structure. Since no explicit priority
-        is provided, we use the insertion order as a priority key.
+        Insert an event into the priority structure. Higher priority events will be
+        processed first. For events with equal priority, FIFO order is maintained.
+
+        :param event: The event to enqueue.
         """
-        heapq.heappush(self._heap, (self._counter, event))
+        # Negative priority for max-heap behavior (higher priority first)
+        # Counter ensures FIFO order within same priority
+        heapq.heappush(self._heap, (-event.priority, self._counter, event))
         self._counter += 1
 
     def pop(self) -> Optional[Event]:
         """
         Retrieve and remove the next event in priority order.
+        Higher priority events are returned first, with FIFO ordering within priority levels.
+
+        :return: The next event or None if queue is empty.
         """
         if not self._heap:
             return None
-        _, event = heapq.heappop(self._heap)
+        _, _, event = heapq.heappop(self._heap)
         return event
 
     def clear(self) -> None:

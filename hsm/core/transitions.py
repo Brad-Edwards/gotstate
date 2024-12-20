@@ -4,11 +4,13 @@
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 from hsm.core.errors import TransitionError
 from hsm.core.events import Event
-from hsm.core.states import State
+
+if TYPE_CHECKING:
+    from hsm.core.states import State
 
 
 class Transition:
@@ -82,6 +84,16 @@ class Transition:
         The target state of the transition.
         """
         return self._target
+
+    @property
+    def guards(self) -> List[Callable[[Event], bool]]:
+        """The guard conditions for this transition."""
+        return self._guards
+
+    @property
+    def actions(self) -> List[Callable[[Event], None]]:
+        """The actions to execute when this transition occurs."""
+        return self._actions
 
 
 class _TransitionPrioritySorter:
