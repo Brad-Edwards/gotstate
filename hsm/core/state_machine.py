@@ -157,8 +157,11 @@ class StateMachine:
         if self._started:
             return
 
-        # Set initial state before validation
-        self._current_state = self._initial_state
+        # Check for history state if we're in a composite state
+        if self._current_state.parent and isinstance(self._current_state.parent, CompositeState):
+            history_state = self._context.get_history_state(self._current_state.parent)
+            if history_state:
+                self._current_state = history_state
 
         # Validate machine structure
         errors = self._graph.validate()
