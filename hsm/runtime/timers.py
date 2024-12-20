@@ -4,10 +4,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import time
+from typing import List
 
-if TYPE_CHECKING:
-    from hsm.core.events import TimeoutEvent
+from hsm.core.events import TimeoutEvent
 
 
 class Timer:
@@ -22,6 +22,7 @@ class Timer:
 
         :param deadline: The point in time or offset when the timer expires.
         """
+        self._deadline = deadline
 
     def is_expired(self) -> bool:
         """
@@ -29,12 +30,58 @@ class Timer:
 
         :return: True if expired, False otherwise.
         """
+        return time.time() >= self._deadline
 
     @property
     def deadline(self) -> float:
         """
         Access the timer's configured expiration time.
         """
+        return self._deadline
+
+
+class _TimeoutRegistry:
+    """
+    Internal component maintaining a list of timers and associated events,
+    allowing for expiration checks.
+    """
+
+    def __init__(self) -> None:
+        """
+        Prepare internal structures to track timeouts.
+        """
+        self._entries = []  # list of (Timer, TimeoutEvent) tuples
+
+    def add(self, event: TimeoutEvent) -> None:
+        """
+        Record a TimeoutEvent for later checks.
+        """
+        t = Timer(event.deadline)
+        self._entries.append((t, event))
+
+    def expired_events(self) -> List[TimeoutEvent]:
+        """
+        Return a list of TimeoutEvents whose time has passed.
+        Remove them from the registry.
+        """
+        now = time.time()
+        expired = [(timer, evt) for (timer, evt) in self._entries if now >= timer.deadline]
+        # Remove expired entries
+        self._entries = [(t, e) for (t, e) in self._entries if (t, e) not in expired]
+        return [evt for (t, evt) in expired]
+
+
+class _TimeSource:
+    """
+    Abstract definition for obtaining the current time. Allows custom time sources
+    (e.g., monotonic time) to be plugged in if needed.
+    """
+
+    def now(self) -> float:
+        """
+        Return the current time as a float (e.g., UNIX timestamp).
+        """
+        return time.time()
 
 
 class TimeoutScheduler:
@@ -47,44 +94,21 @@ class TimeoutScheduler:
         """
         Initialize the timeout scheduler.
         """
+        self._registry = _TimeoutRegistry()
 
-    def schedule_timeout(self, event: "TimeoutEvent") -> None:
+    def schedule_timeout(self, event: TimeoutEvent) -> None:
         """
         Add a TimeoutEvent to the schedule. The event will be triggered when its
         deadline is reached.
 
         :param event: The TimeoutEvent to schedule.
         """
+        self._registry.add(event)
 
-    def check_timeouts(self) -> list["TimeoutEvent"]:
+    def check_timeouts(self) -> List[TimeoutEvent]:
         """
         Check all scheduled timers, returning any that have expired and should be processed.
 
         :return: List of TimeoutEvents ready to be triggered.
         """
-
-
-class _TimeoutRegistry:
-    """
-    Internal component maintaining a list of timers and associated events,
-    allowing for expiration checks.
-    """
-
-    def __init__(self) -> None:
-        raise NotImplementedError()
-
-    def add(self, event: "TimeoutEvent") -> None:
-        raise NotImplementedError()
-
-    def expired_events(self) -> list["TimeoutEvent"]:
-        raise NotImplementedError()
-
-
-class _TimeSource:
-    """
-    Abstract definition for obtaining the current time. Allows custom time sources
-    (e.g., monotonic time) to be plugged in if needed.
-    """
-
-    def now(self) -> float:
-        raise NotImplementedError()
+        return self._registry.expired_events()

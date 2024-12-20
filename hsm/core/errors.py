@@ -6,7 +6,7 @@ class HSMError(Exception):
     Base exception class for errors within the hierarchical state machine library.
     """
 
-    raise NotImplementedError()
+    pass
 
 
 class StateNotFoundError(HSMError):
@@ -14,7 +14,7 @@ class StateNotFoundError(HSMError):
     Raised when a requested state does not exist in the machine or hierarchy.
     """
 
-    raise NotImplementedError()
+    pass
 
 
 class TransitionError(HSMError):
@@ -22,7 +22,7 @@ class TransitionError(HSMError):
     Raised when an attempted state transition is invalid or cannot be completed.
     """
 
-    raise NotImplementedError()
+    pass
 
 
 class ValidationError(HSMError):
@@ -30,4 +30,4 @@ class ValidationError(HSMError):
     Raised when validation detects configuration or runtime constraints violations.
     """
 
-    raise NotImplementedError()
+    pass

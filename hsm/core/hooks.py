@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import List, Protocol, Any, Callable, Optional
 
 from hsm.core.states import State
 
@@ -22,11 +22,13 @@ class HookManager:
     monitoring, or custom side effects without altering core logic.
     """
 
-    def __init__(self, hooks: list["HookProtocol"] = None) -> None:
+    def __init__(self, hooks: List["HookProtocol"] = None) -> None:
         """
         Initialize with an optional list of hook objects.
+        :param hooks: A list of hook objects implementing HookProtocol.
         """
-        raise NotImplementedError()
+        self._hooks = hooks if hooks else []
+        self._invoker = _HookInvoker(self._hooks)
 
     def register_hook(self, hook: "HookProtocol") -> None:
         """
@@ -34,25 +36,32 @@ class HookManager:
 
         :param hook: An object implementing HookProtocol methods.
         """
-        raise NotImplementedError()
+        self._hooks.append(hook)
+        self._invoker = _HookInvoker(self._hooks)
 
     def execute_on_enter(self, state: "State") -> None:
         """
         Run all hooks' on_enter logic when entering a state.
+
+        :param state: The state being entered.
         """
-        raise NotImplementedError()
+        self._invoker.invoke_on_enter(state)
 
     def execute_on_exit(self, state: "State") -> None:
         """
         Run all hooks' on_exit logic when exiting a state.
+
+        :param state: The state being exited.
         """
-        raise NotImplementedError()
+        self._invoker.invoke_on_exit(state)
 
     def execute_on_error(self, error: Exception) -> None:
         """
         Run all hooks' on_error logic when an exception occurs.
+
+        :param error: The exception encountered.
         """
-        raise NotImplementedError()
+        self._invoker.invoke_on_error(error)
 
 
 class _HookInvoker:
@@ -61,26 +70,48 @@ class _HookInvoker:
     lifecycle methods in a controlled manner.
     """
 
-    def __init__(self, hooks: list["HookProtocol"]) -> None:
+    def __init__(self, hooks: List["HookProtocol"]) -> None:
         """
         Store hooks for invocation.
+        :param hooks: A list of objects implementing HookProtocol methods.
         """
-        raise NotImplementedError()
+        self._hooks = hooks
 
     def invoke_on_enter(self, state: "State") -> None:
         """
         Call each hook's on_enter method.
+
+        :param state: The state being entered.
         """
-        raise NotImplementedError()
+        for hook in self._hooks:
+            if hasattr(hook, "on_enter"):
+                hook.on_enter(state)
 
     def invoke_on_exit(self, state: "State") -> None:
         """
         Call each hook's on_exit method.
+
+        :param state: The state being exited.
         """
-        raise NotImplementedError()
+        for hook in self._hooks:
+            if hasattr(hook, "on_exit"):
+                hook.on_exit(state)
 
     def invoke_on_error(self, error: Exception) -> None:
         """
         Call each hook's on_error method.
+
+        :param error: The exception that occurred.
         """
-        raise NotImplementedError()
+        for hook in self._hooks:
+            if hasattr(hook, "on_error"):
+                hook.on_error(error)
+
+
+class Hook:
+    def __init__(self, callback: Callable[..., Any], priority: Optional[int] = None):
+        self.callback = callback
+        self.priority = priority if priority is not None else 0
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self.callback(*args, **kwargs)

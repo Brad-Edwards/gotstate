@@ -1,6 +1,11 @@
 # hsm/core/data_management.py
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
+
+import threading
+from contextlib import contextmanager
+
+
 class _DataLockManager:
     """
     Internal lock manager controlling access to state data. Ensures thread-safe
@@ -11,19 +16,19 @@ class _DataLockManager:
         """
         Initialize internal lock structures.
         """
-        raise NotImplementedError()
+        self._lock = threading.Lock()
 
     def lock(self) -> None:
         """
         Acquire the data lock.
         """
-        raise NotImplementedError()
+        self._lock.acquire()
 
     def unlock(self) -> None:
         """
         Release the data lock.
         """
-        raise NotImplementedError()
+        self._lock.release()
 
 
 class _ScopedDataContext:
@@ -36,16 +41,29 @@ class _ScopedDataContext:
         """
         Store reference to the lock manager.
         """
-        raise NotImplementedError()
+        self._lock_manager = lock_manager
 
     def __enter__(self) -> None:
         """
         Acquire the lock when entering the context.
         """
-        raise NotImplementedError()
+        self._lock_manager.lock()
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """
         Release the lock when exiting the context.
         """
-        raise NotImplementedError()
+        self._lock_manager.unlock()
+
+
+def with_state_data_lock(state: "State"):
+    """
+    Public API function that returns a context manager for locking state data.
+    Uses _DataLockManager internally. If each state maintains its own lock, we
+    can store it as state._lock_manager and use it here.
+    For simplicity, assume each state can have a lock manager attribute.
+    If not present, create one on-demand.
+    """
+    if not hasattr(state, "_lock_manager"):
+        state._lock_manager = _DataLockManager()
+    return _ScopedDataContext(state._lock_manager)

@@ -4,10 +4,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import threading
+import threading
+from contextlib import contextmanager
 
 
 class _LockFactory:
@@ -16,11 +14,11 @@ class _LockFactory:
     concurrency primitives, if needed.
     """
 
-    def create_lock(self) -> "threading.Lock":
+    def create_lock(self) -> threading.Lock:
         """
         Return a new lock instance.
         """
-        raise NotImplementedError()
+        return threading.Lock()
 
 
 class _LockContextManager:
@@ -29,20 +27,40 @@ class _LockContextManager:
     convenience functions that need safe block-level locking.
     """
 
-    def __init__(self, lock: "threading.Lock") -> None:
+    def __init__(self, lock: threading.Lock) -> None:
         """
         Store the lock reference.
         """
-        raise NotImplementedError()
+        self._lock = lock
 
     def __enter__(self) -> None:
         """
         Acquire the lock on entering the with-block.
         """
-        raise NotImplementedError()
+        self._lock.acquire()
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """
         Release the lock on exiting the with-block.
         """
-        raise NotImplementedError()
+        self._lock.release()
+
+
+def get_lock() -> threading.Lock:
+    """
+    Provide a new lock instance to be used for synchronization.
+    """
+    return _LockFactory().create_lock()
+
+
+@contextmanager
+def with_lock(lock: threading.Lock):
+    """
+    A convenience context manager that acquires the given lock upon entry and
+    releases it upon exit, ensuring safe access to shared resources.
+    """
+    lock.acquire()
+    try:
+        yield
+    finally:
+        lock.release()

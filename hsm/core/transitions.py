@@ -4,13 +4,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Callable, List, Optional
 
-if TYPE_CHECKING:
-    from hsm.core.actions import ActionProtocol
-    from hsm.core.events import Event
-    from hsm.core.guards import GuardProtocol
-    from hsm.core.states import State
+from hsm.core.errors import TransitionError
+from hsm.core.events import Event
+from hsm.core.states import State
 
 
 class Transition:
@@ -24,8 +22,8 @@ class Transition:
         self,
         source: "State",
         target: "State",
-        guards: list["GuardProtocol"] = None,
-        actions: list["ActionProtocol"] = None,
+        guards: Optional[List[Callable[[Event], bool]]] = None,
+        actions: Optional[List[Callable[[Event], None]]] = None,
         priority: int = 0,
     ) -> None:
         """
@@ -38,44 +36,52 @@ class Transition:
         :param actions: Actions to execute when the transition occurs.
         :param priority: Numeric priority; higher priority transitions are chosen first.
         """
-        raise NotImplementedError()
+        self._source = source
+        self._target = target
+        self._guards = guards if guards else []
+        self._actions = actions if actions else []
+        self._priority = priority
 
-    def evaluate_guards(self, event: "Event") -> bool:
+    def evaluate_guards(self, event: Event) -> bool:
         """
         Evaluate the attached guards to determine if the transition can occur.
 
         :param event: The triggering event.
         :return: True if all guards pass, otherwise False.
         """
-        raise NotImplementedError()
+        return _GuardEvaluator().evaluate(self._guards, event)
 
-    def execute_actions(self, event: "Event") -> None:
+    def execute_actions(self, event: Event) -> None:
         """
         Execute the transition's actions, if any, when moving to the target state.
 
         :param event: The triggering event.
+        :raises TransitionError: If any action fails.
         """
-        raise NotImplementedError()
+        try:
+            _ActionExecutor().execute(self._actions, event)
+        except Exception as e:
+            raise TransitionError(f"Action execution failed: {e}")
 
     def get_priority(self) -> int:
         """
         Return the priority level assigned to this transition.
         """
-        raise NotImplementedError()
+        return self._priority
 
     @property
     def source(self) -> "State":
         """
         The source state of the transition.
         """
-        raise NotImplementedError()
+        return self._source
 
     @property
     def target(self) -> "State":
         """
         The target state of the transition.
         """
-        raise NotImplementedError()
+        return self._target
 
 
 class _TransitionPrioritySorter:
@@ -84,11 +90,14 @@ class _TransitionPrioritySorter:
     that the highest priority valid transition is selected first.
     """
 
-    def sort(self, transitions: list[Transition]) -> list[Transition]:
+    def sort(self, transitions: List[Transition]) -> List[Transition]:
         """
-        Sort and return transitions ordered by priority (descending or ascending as required).
+        Sort and return transitions ordered by priority, highest first.
+
+        :param transitions: A list of Transition instances.
+        :return: A sorted list of Transition instances by descending priority.
         """
-        raise NotImplementedError()
+        return sorted(transitions, key=lambda t: t.get_priority(), reverse=True)
 
 
 class _GuardEvaluator:
@@ -96,11 +105,18 @@ class _GuardEvaluator:
     Internal helper to evaluate a list of guard conditions against an event.
     """
 
-    def evaluate(self, guards: list["GuardProtocol"], event: "Event") -> bool:
+    def evaluate(self, guards: List[Callable[[Event], bool]], event: Event) -> bool:
         """
         Check all guards. Return True if all pass, False if any fail.
+
+        :param guards: List of guard callables.
+        :param event: The event to evaluate against.
+        :return: True if all guards return True, otherwise False.
         """
-        raise NotImplementedError()
+        for g in guards:
+            if not g(event):
+                return False
+        return True
 
 
 class _ActionExecutor:
@@ -109,8 +125,13 @@ class _ActionExecutor:
     errors and ensuring consistent execution order.
     """
 
-    def execute(self, actions: list["ActionProtocol"], event: "Event") -> None:
+    def execute(self, actions: List[Callable[[Event], None]], event: Event) -> None:
         """
         Run the given actions for the event.
+
+        :param actions: List of action callables.
+        :param event: The triggering event.
+        :raises Exception: If any action fails.
         """
-        raise NotImplementedError()
+        for a in actions:
+            a(event)

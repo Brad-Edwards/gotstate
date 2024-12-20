@@ -4,11 +4,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import threading
+import time
+from typing import Optional
 
-if TYPE_CHECKING:
-    from hsm.core.state_machine import StateMachine
-    from hsm.runtime.event_queue import EventQueue
+from hsm.core.events import Event
+from hsm.core.state_machine import StateMachine
+from hsm.runtime.event_queue import EventQueue
 
 
 class Executor:
@@ -17,65 +19,47 @@ class Executor:
     from a queue and passing them to the machine until stopped.
     """
 
-    def __init__(self, machine: "StateMachine", event_queue: "EventQueue") -> None:
+    def __init__(self, machine: StateMachine, event_queue: EventQueue) -> None:
         """
         Initialize with a state machine and event queue.
 
         :param machine: StateMachine instance to run.
         :param event_queue: EventQueue providing events to process.
         """
-        raise NotImplementedError()
+        self.machine = machine
+        self.event_queue = event_queue
+        self._running = False
+        self._lock = threading.Lock()
 
     def run(self) -> None:
         """
         Start the blocking loop that continuously processes events until stopped.
+        This method blocks until `stop()` is called.
         """
-        raise NotImplementedError()
+        with self._lock:
+            self._running = True
+
+        # Ensure machine is started if not already
+        if not self.machine.current_state:
+            self.machine.start()
+
+        while True:
+            with self._lock:
+                if not self._running:
+                    break
+
+            event = self.event_queue.dequeue()
+            if event is not None:
+                # Process the event
+                self.machine.process_event(event)
+            else:
+                # No event available, no immediate stop requested
+                # Sleep briefly to avoid tight loop spinning.
+                time.sleep(0.01)
 
     def stop(self) -> None:
         """
         Signal the event loop to stop after finishing current tasks.
         """
-        raise NotImplementedError()
-
-
-class _EventProcessingLoop:
-    """
-    Internal loop class handling the actual iteration over events, invoking the
-    state machine, and catching errors.
-    """
-
-    def __init__(self, machine: "StateMachine", event_queue: "EventQueue") -> None:
-        """
-        Store references and prepare for event iteration.
-        """
-        raise NotImplementedError()
-
-    def start_loop(self) -> None:
-        """
-        Begin processing events.
-        """
-        raise NotImplementedError()
-
-    def stop_loop(self) -> None:
-        """
-        Stop processing events.
-        """
-        raise NotImplementedError()
-
-
-class _ErrorLogger:
-    """
-    Internal tool for logging or handling errors encountered during runtime event
-    processing.
-    """
-
-    def __init__(self) -> None:
-        """
-        Prepare error logging mechanism.
-        """
-
-    def log(self, error: Exception) -> None:
-        """
-        Log or otherwise handle an encountered error.
-        """
+        with self._lock:
+            self._running = False
