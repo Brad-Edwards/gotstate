@@ -13,18 +13,6 @@ authors = [
 requires-python = ">=3.8"
 license = {text = "MIT"}
 
-[project.optional-dependencies]
-test = [
-    "pytest>=8.3.4",
-    "pytest-asyncio>=0.25.0",
-    "pytest-cov>=6.0.0",
-    "coverage>=6.0.0",
-]
-dev = [
-    "black>=24.1.0",
-    "bandit>=1.7.7",
-]
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["hsm*"]
@@ -40,7 +28,7 @@ extend-exclude = '''
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q -v --cov=hsm --cov-report=term-missing --cov-report=xml:coverage-reports/coverage.xml"
+addopts = "-ra -q -v --cov=hsm --cov-report=term-missing:skip-covered --cov-report=html --cov-report=xml"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
@@ -49,6 +37,20 @@ python_functions = ["test_*"]
 [tool.coverage.run]
 source = ["hsm"]
 branch = true
+omit = [
+    "tests/*",
+    "*/__init__.py",
+    "setup.py",
+    "*/.venv/*",
+    "*/venv/*",
+    "*/env/*",
+    "*/__pycache__/*",
+    "*/build/*",
+    "*/dist/*",
+    "*/.eggs/*",
+    "*/.tox/*",
+    "*/.pytest_cache/*"
+]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -58,20 +60,20 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "pass",
     "raise ImportError",
+    "def main\\(\\):",
+    "@abstract"
 ]
 fail_under = 80
+show_missing = true
+skip_covered = false
+
+[tool.coverage.html]
+directory = "coverage-reports/html"
+
+[tool.coverage.xml]
+output = "coverage-reports/coverage.xml"
 
 [tool.bandit]
 exclude_dirs = ["tests", "tests/unit", "tests/integration"]
 skips = ["B101"]  # Skip assert warnings globally
 targets = ["hsm"]
-
-[tool.isort]
-profile = "black"
-line_length = 120
-multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-ensure_newline_before_comments = true
-skip = ["tests/fixtures"]

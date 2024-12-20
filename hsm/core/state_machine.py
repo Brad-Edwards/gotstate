@@ -2,6 +2,9 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 
+import threading
+import time
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from hsm.core.events import Event
@@ -21,6 +24,8 @@ class _StateMachineContext:
         self._current_state = initial_state
         self._transitions: List[Transition] = []
         self._states = {initial_state}  # Track all states
+        self._state_history: Dict[str, _StateHistoryRecord] = {}  # Track by state ID
+        self._history_lock = threading.Lock()
 
     def get_current_state(self) -> State:
         return self._current_state
@@ -63,6 +68,13 @@ class _StateMachineContext:
             transition.execute_actions(event)
             self._current_state = transition.target
             self._current_state.on_enter()
+
+    def record_state_exit(self, composite_state: CompositeState, active_state: State) -> None:
+        """Thread-safe recording of state history"""
+        with self._history_lock:
+            self._state_history[composite_state.id] = _StateHistoryRecord(
+                timestamp=time.time(), state_id=active_state.id, composite_id=composite_state.id
+            )
 
 
 class _ErrorRecoveryStrategy:
@@ -236,3 +248,19 @@ class CompositeStateMachine(StateMachine):
         for sm in self._submachines.values():
             sm.stop()
         super().stop()
+
+
+@dataclass(frozen=True)
+class _StateHistoryRecord:
+    """Immutable record of historical state information"""
+
+    timestamp: float
+    state_id: str
+    composite_id: str
+
+    def is_valid(self, state_machine: StateMachine) -> bool:
+        """Verify this history record points to valid states"""
+        return (
+            self.state_id in state_machine.get_all_state_ids()
+            and self.composite_id in state_machine.get_all_state_ids()
+        )

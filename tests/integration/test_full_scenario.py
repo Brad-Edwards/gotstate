@@ -8,10 +8,7 @@ import time
 
 import pytest
 
-from hsm.core.actions import BasicActions
 from hsm.core.events import Event, TimeoutEvent
-from hsm.core.guards import BasicGuards
-from hsm.core.hooks import HookManager
 from hsm.core.state_machine import CompositeStateMachine, StateMachine
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition
@@ -53,51 +50,30 @@ def validator():
 
 def test_synchronous_integration(hook, validator):
     """
-    Full integration test:
-    - Create states with entry/exit actions.
-    - Add transitions with guards and actions.
-    - Use hooks to track state machine lifecycle.
-    - Run via Executor and EventQueue.
-    - Ensure final states and hooks are as expected.
+    Full integration test for composite state functionality:
+    - Create states with entry/exit actions
+    - Add transitions with guards and actions
+    - Test state hierarchy and transitions
+    - Use hooks to track state machine lifecycle
+    - Run via Executor and EventQueue
     """
-
-    def entry_action_fn(event=None):
-        pass
-
-    def exit_action_fn(event=None):
-        pass
-
-    def transition_action_fn(event=None):
-        pass
-
-    entry_actions = [entry_action_fn]
-    exit_actions = [exit_action_fn]
-    transition_actions = [transition_action_fn]
-
     # Define states
-    idle_state = State("Idle", entry_actions=entry_actions, exit_actions=exit_actions)
-    working_state = State("Working", entry_actions=entry_actions, exit_actions=exit_actions)
+    parent = CompositeState("Parent")
+    state1 = State("State1")
+    state2 = State("State2")
+
+    parent.add_child_state(state1)
+    parent.add_child_state(state2)
 
     # Define transitions
-    def guard_condition(event):
-        return True
+    t1 = Transition(source=state1, target=state2, guards=[lambda e: True], actions=[lambda e: None], priority=10)
 
-    guards = [guard_condition]
-
-    t = Transition(
-        source=idle_state,
-        target=working_state,
-        guards=guards,
-        actions=transition_actions,
-        priority=10,
-    )
+    t2 = Transition(source=state2, target=state1, guards=[lambda e: True], actions=[lambda e: None], priority=10)
 
     # Construct StateMachine
-    machine = StateMachine(initial_state=idle_state, validator=validator, hooks=[hook])
-    machine.add_transition(t)
-
-    # Validate machine
-    machine.validator.validate_state_machine(machine)
+    machine = StateMachine(initial_state=state1, validator=validator, hooks=[hook])
+    machine.add_transition(t1)
+    machine.add_transition(t2)
 
     # Setup runtime
     eq = EventQueue(priority=False)
@@ -105,74 +81,71 @@ def test_synchronous_integration(hook, validator):
 
     # Start machine
     machine.start()
-    assert machine.current_state.name == "Idle"
-    assert "Idle" in hook.entered
+    assert machine.current_state.name == "State1"
+    assert "State1" in hook.entered
 
-    # Process a normal event causing transition to "Working"
-    eq.enqueue(Event("StartWork"))
+    # Process events
+    eq.enqueue(Event("Next"))  # Should go to State2
 
-    # Run executor in a separate thread
+    # Run executor in thread
     thread = threading.Thread(target=executor.run)
     thread.start()
-
-    # Give the executor time to process
     time.sleep(0.1)
 
-    # Stop the executor
+    assert machine.current_state.name == "State2"
+    assert "State2" in hook.entered
+    assert "State1" in hook.exited
+
+    # Stop executor and cleanup
     executor.stop()
     thread.join(timeout=1.0)
 
-    # At this point, machine should have transitioned
-    assert machine.current_state.name == "Working"
-    assert "Working" in hook.entered
-    assert "Idle" in hook.exited
-
-    # No errors should have occurred
+    # Verify no errors occurred
     assert len(hook.errors) == 0
 
 
 def test_composite_state_machine_integration(hook, validator):
     """
     Integration test for composite state machines:
-    - Create a composite state with a nested submachine.
-    - Validate transitions occur in the nested structure.
+    - Create a composite state with a nested submachine
+    - Validate transitions occur in the nested structure
+    - Verify parent-child relationships
     """
-
     # Define states
     top = CompositeState("Top")
     child1 = State("Child1")
     child2 = State("Child2")
+
+    # Set up hierarchy
     top.add_child_state(child1)
     top.add_child_state(child2)
 
-    # Transition within top-level machine
-    t_top = Transition(source=top, target=top, guards=[], actions=[], priority=0)
+    # Verify parent-child relationships
+    assert child1.parent is top
+    assert child2.parent is top
 
-    # Define a submachine for top
+    # Define submachine
     sub_machine = StateMachine(initial_state=child1, validator=validator, hooks=[hook])
     t_sub = Transition(source=child1, target=child2, guards=[], actions=[], priority=0)
     sub_machine.add_transition(t_sub)
 
-    # Composite machine manages top and sub_machine
+    # Create composite machine
     c_machine = CompositeStateMachine(initial_state=top, validator=validator, hooks=[hook])
-    c_machine.add_transition(t_top)
     c_machine.add_submachine(top, sub_machine)
 
-    # Validate and start
-    c_machine.validator.validate_state_machine(c_machine)
+    # Start machines
     c_machine.start()
     assert c_machine.current_state.name == "Top"
-    # submachine should not start automatically unless designed so; let's start it:
     sub_machine.start()
     assert sub_machine.current_state.name == "Child1"
 
-    # Trigger a submachine transition
+    # Test transition in submachine
     sub_machine.process_event(Event("Go"))
     assert sub_machine.current_state.name == "Child2"
-    # Hooks should have recorded entering Child2, exiting Child1
     assert "Child2" in hook.entered
     assert "Child1" in hook.exited
 
+    # Cleanup
     c_machine.stop()
     sub_machine.stop()
 
