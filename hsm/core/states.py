@@ -4,13 +4,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
+from dataclasses import dataclass, field
 
+from hsm.core.base import StateBase
 
-class State:
+class State(StateBase):
     """
-    Represents a named state within the machine. It may define entry and exit
-    actions, as well as hold its own data dictionary for state-specific variables.
+    Represents a state in the state machine. Manages state-specific behavior
+    including entry/exit actions and local data.
     """
 
     def __init__(
@@ -20,193 +22,95 @@ class State:
         exit_actions: List[Callable[[], None]] = None,
     ) -> None:
         """
-        Initialize the state with a name and optional lists of actions to run on
-        entry and exit.
+        Initialize a state with its name and optional actions.
 
-        :param name: Unique name identifying this state.
+        :param name: Name identifying this state within its parent scope.
         :param entry_actions: Actions executed upon entering this state.
         :param exit_actions: Actions executed upon exiting this state.
         """
-        self._name = name
-        self._data: Dict[str, Any] = {}
-        self._entry_actions = entry_actions if entry_actions else []
-        self._exit_actions = exit_actions if exit_actions else []
-        self._parent: Optional[CompositeState] = None
-
-    @property
-    def name(self) -> str:
-        """Return the state's name."""
-        return self._name
-
-    @property
-    def data(self) -> Dict[str, Any]:
-        """
-        Access the state's local data store, which may be used to keep stateful
-        information relevant only while this state is active.
-        """
-        return self._data
-
-    @property
-    def parent(self) -> Optional[CompositeState]:
-        """Get the parent state if this is a child state."""
-        return self._parent
-
-    @parent.setter
-    def parent(self, parent_state: Optional[CompositeState]) -> None:
-        """Set the parent state."""
-        self._parent = parent_state
-
-    def on_enter(self) -> None:
-        """
-        Called when the state machine transitions into this state. Executes any
-        defined entry actions and initializes state data.
-        """
-        self.initialize_data()
-        for action in self._entry_actions:
-            action()
-
-    def on_exit(self) -> None:
-        """
-        Called when leaving this state. Executes exit actions and cleans up
-        any state data if needed.
-        """
-        for action in self._exit_actions:
-            action()
-        self.cleanup_data()
-
-    def initialize_data(self) -> None:
-        """Prepare the state's data dictionary when this state is entered."""
-        # By default, do nothing. Subclasses or plugins may customize.
-        pass
-
-    def cleanup_data(self) -> None:
-        """Clean up or reset the state's data dictionary when exiting this state.
-        Only cleans up transient data (keys starting with '_'), preserving persistent data."""
-        # Only clear transient data (keys starting with '_')
-        keys_to_remove = [k for k in self._data.keys() if k.startswith("_")]
-        for k in keys_to_remove:
-            self._data.pop(k, None)
+        super().__init__(name=name,
+                         entry_actions=entry_actions or [],
+                         exit_actions=exit_actions or [])
 
 
 class CompositeState(State):
     """
-    A state containing child states, representing a hierarchical structure.
-    Useful for grouping related states and transitions within a logical namespace.
+    A state that can contain other states, forming a hierarchy.
     """
 
     def __init__(
         self,
         name: str,
+        initial_state: Optional[State] = None,
         entry_actions: List[Callable[[], None]] = None,
         exit_actions: List[Callable[[], None]] = None,
     ) -> None:
+        """
+        Initialize a composite state.
+
+        :param name: Name identifying this state.
+        :param initial_state: The default state to enter when this composite state is entered.
+        :param entry_actions: Actions executed upon entering this state.
+        :param exit_actions: Actions executed upon exiting this state.
+        """
         super().__init__(name, entry_actions, exit_actions)
         self._children: Dict[str, State] = {}
-        self._history_state: Optional[HistoryState] = None
+        self.initial_state = initial_state
 
     def add_child_state(self, state: State) -> None:
-        """
-        Add a child state to the composite state. Child states can form a nested
-        hierarchy, enabling complex, modular state machines.
-
-        :param state: The state to add as a child.
-        """
+        """Add a child state to this composite state."""
+        if state.name in self._children:
+            raise ValueError(f"State '{state.name}' already exists")
         self._children[state.name] = state
-        state.parent = self  # Set the parent-child relationship
+        state.parent = self
 
-    def set_history_state(self, history: HistoryState) -> None:
-        """
-        Set the history state for this composite state.
+    def get_child_state(self, name: str) -> Optional[State]:
+        """Get a child state by name"""
+        return self._children.get(name)
 
-        :param history: The history state to use
-        """
-        self._history_state = history
-        history.parent = self  # Set the parent-child relationship
-        self._children[history.name] = history
-
-    def get_history_state(self) -> Optional[HistoryState]:
-        """Get the history state if one exists."""
-        return self._history_state
-
-    def get_child_state(self, name: str) -> State:
-        """
-        Retrieve a child state by name.
-
-        :param name: Name of the desired child state.
-        :return: The child State instance.
-        """
-        return self._children[name]
+    def get_children(self) -> List[State]:
+        """Get all child states."""
+        return list(self._children.values())
 
     @property
-    def children(self) -> Dict[str, State]:
-        """
-        Obtain a dictionary of child states keyed by their names.
-        """
-        return self._children
+    def initial_state(self) -> Optional[State]:
+        """Get the initial state."""
+        return self._initial_state
+
+    @initial_state.setter
+    def initial_state(self, state: State) -> None:
+        """Set the initial state."""
+        if state not in self._children and state is not None:
+            self.add_child_state(state)
+        self._initial_state = state
 
 
-class HistoryState(State):
-    """
-    A special state that remembers and restores the last active substate of a composite state.
-    Can operate in either shallow (one level) or deep (entire nested configuration) mode.
-    """
+class StateMachine:
+    def __init__(self, initial_state: State, validator: Optional[Validator] = None, hooks: Optional[List[Hook]] = None):
+        self._initial_state = initial_state
+        self._current_state = initial_state  # Set initial state immediately
+        self._validator = validator or Validator()
+        self._hooks = hooks or []
+        self._started = False
 
-    def __init__(
-        self,
-        name: str,
-        parent: CompositeState,
-        deep: bool = False,
-        default_state: State = None,
-    ) -> None:
-        """
-        Initialize a history state.
+    def get_current_state(self) -> Optional[State]:
+        return self._current_state
 
-        :param name: Unique name identifying this history state.
-        :param parent: The composite state this history state belongs to.
-        :param deep: If True, remembers the entire nested state configuration.
-                    If False, only remembers one level of substates.
-        :param default_state: The default state to transition to if no history exists.
-        """
-        super().__init__(name)
-        self._parent = parent
-        self._deep = deep
-        self._default_state = default_state
-        self._last_active: Dict[str, State] = {}  # Maps composite state names to their last active substates
+    def process_event(self, event: Event) -> None:
+        try:
+            transition = self._get_transition(event)
+            if transition:
+                self._execute_transition(transition, event)
+        except TransitionError as e:
+            if self._error_recovery:
+                self._error_recovery.recover(e, self)
+            else:
+                raise
 
-    @property
-    def is_deep(self) -> bool:
-        """Whether this is a deep history state."""
-        return self._deep
-
-    @property
-    def default_state(self) -> State:
-        """The default state to transition to if no history exists."""
-        return self._default_state
-
-    def record_state(self, state: State) -> None:
-        # If shallow history, just record the immediate substate.
-        # This test seems to expect shallow history. We'll store by parent's name.
-        if state.parent is not None:
-            self._last_active[state.parent.name] = state
-
-    def get_last_active(self, composite_state: CompositeState) -> State:
-        """
-        Get the last active state for a given composite state.
-
-        :param composite_state: The composite state to get history for.
-        :return: The last active state, or the default state if no history exists.
-        """
-        if composite_state != self._parent:
-            return self._default_state
-        return self._last_active.get(composite_state.name, self._default_state)
-
-    def clear_history(self) -> None:
-        """Clear all recorded history."""
-        self._last_active.clear()
-
-    def get_target(self) -> State:
-        # If we have recorded last active for the parent, return that.
-        # Otherwise, return default_state.
-        if self.parent and self.parent.name in self._last_active:
-            return self._last_active[self.parent.name]
-        return self._default_state
+    def _execute_transition(self, transition: Transition, event: Event) -> None:
+        try:
+            transition.execute_actions(event)
+            self._current_state = transition.target
+        except Exception as e:
+            # Wrap any action execution errors
+            raise TransitionError(f"Action execution failed: {str(e)}") from e

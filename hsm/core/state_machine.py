@@ -5,13 +5,23 @@
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from hsm.core.events import Event
 from hsm.core.hooks import HookManager, HookProtocol
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition, _TransitionPrioritySorter
-from hsm.core.validations import Validator
+from hsm.core.validations import Validator, ValidationError
+from hsm.core.runtime.graph import StateGraph
+from hsm.core.runtime.context import RuntimeContext
+
+
+@dataclass(frozen=True)
+class _StateHistoryRecord:
+    """Immutable record of historical state information"""
+    timestamp: float
+    state: State
+    composite_state: CompositeState
 
 
 class _StateMachineContext:
@@ -24,7 +34,7 @@ class _StateMachineContext:
         self._current_state = initial_state
         self._transitions: List[Transition] = []
         self._states = {initial_state}  # Track all states
-        self._state_history: Dict[str, _StateHistoryRecord] = {}  # Track by state ID
+        self._history: Dict[CompositeState, _StateHistoryRecord] = {}
         self._history_lock = threading.Lock()
 
     def get_current_state(self) -> State:
@@ -72,9 +82,16 @@ class _StateMachineContext:
     def record_state_exit(self, composite_state: CompositeState, active_state: State) -> None:
         """Thread-safe recording of state history"""
         with self._history_lock:
-            self._state_history[composite_state.id] = _StateHistoryRecord(
-                timestamp=time.time(), state_id=active_state.id, composite_id=composite_state.id
+            self._history[composite_state] = _StateHistoryRecord(
+                timestamp=time.time(),
+                state=active_state,
+                composite_state=composite_state
             )
+
+    def get_history_state(self, composite_state: CompositeState) -> Optional[State]:
+        """Get the last active state for a composite state."""
+        record = self._history.get(composite_state)
+        return record.state if record else None
 
 
 class _ErrorRecoveryStrategy:
@@ -90,103 +107,159 @@ class _ErrorRecoveryStrategy:
 
 class StateMachine:
     """
-    A synchronous hierarchical state machine that manages state transitions
-    based on incoming events. It starts in an initial state and processes events
-    using defined transitions, optionally validated and hooked into by plugins.
+    A finite state machine implementation that supports hierarchical states,
+    prioritized transitions, and history states.
     """
 
-    def __init__(
-        self,
-        initial_state: State,
-        validator: Validator = None,
-        hooks: List[HookProtocol] = None,
-        error_recovery: Optional[_ErrorRecoveryStrategy] = None,
-    ) -> None:
-        """
-        Initialize a new state machine instance.
-
-        :param initial_state: The starting state for the machine
-        :param validator: Optional validator for checking machine configuration
-        :param hooks: Optional list of lifecycle hooks
-        :param error_recovery: Optional error recovery strategy
-        """
-        self._context = _StateMachineContext(initial_state)
-        self.validator = validator or Validator()
-        self._hooks = HookManager(hooks or [])
+    def __init__(self, initial_state: State, validator: Optional[Validator] = None, hooks: Optional[List] = None):
+        self._graph = StateGraph()
+        self._initial_state = initial_state
+        self._current_state: Optional[State] = None
+        self._validator = validator or Validator()
+        self._hooks = hooks or []
         self._started = False
-        self._stopped = False
-        self._error_recovery = error_recovery or _ErrorRecoveryStrategy()
+        self._context = _StateMachineContext(initial_state)
 
-    def add_transition(self, transition: Transition) -> None:
-        """
-        Add a transition to the state machine.
-
-        :param transition: The transition to add
-        """
-        self._context.add_transition(transition)
-        if self.validator:
-            self.validator.validate_state_machine(self)
+        # Add initial state to graph
+        self._graph.add_state(initial_state)
 
     @property
-    def current_state(self) -> State:
-        return self._context.get_current_state()
+    def current_state(self) -> Optional[State]:
+        """Get the current state."""
+        return self._current_state
+
+    def get_current_state(self) -> Optional[State]:
+        """Get the current state (deprecated, use current_state property)."""
+        return self._current_state
+
+    def add_state(self, state: State, parent: Optional[State] = None) -> None:
+        """Add a state to the machine."""
+        self._graph.add_state(state, parent)
+
+    def add_transition(self, transition: Transition) -> None:
+        """Add a transition to the machine."""
+        self._graph.add_transition(transition)
+        self._context.add_transition(transition)
+
+    def get_history_state(self, composite_state: CompositeState) -> Optional[State]:
+        """Get the last active state for a composite state."""
+        return self._context.get_history_state(composite_state)
 
     def start(self) -> None:
-        """
-        Start the state machine, executing initial entry actions and performing
-        validation before beginning to process events.
-        """
+        """Start the state machine."""
         if self._started:
             return
-        if self.validator:
-            self.validator.validate_state_machine(self)
-        self.current_state.on_enter()
-        self._hooks.execute_on_enter(self.current_state)
+
+        # Set initial state before validation
+        self._current_state = self._initial_state
+
+        # If initial state is composite, use its initial state
+        current = self._current_state
+        while isinstance(current, CompositeState) and current.initial_state is not None:
+            current = current.initial_state
+        self._current_state = current
+
+        # Validate machine structure
+        errors = self._graph.validate()
+        if errors:
+            self._current_state = None  # Reset state if validation fails
+            raise ValidationError("\n".join(errors))
+
+        self._validator.validate_state_machine(self)
+        self._notify_enter(self._current_state)
         self._started = True
 
-    def process_event(self, event: Event) -> None:
-        """
-        Process an incoming event, performing state transitions if applicable.
-
-        :param event: An Event instance triggering potential transitions.
-        """
-        if not self._started or self._stopped:
-            # If not started or already stopped, ignore events.
-            return
-
-        transitions = self._context.get_transitions()
-        valid_transitions = [t for t in transitions if t.source == self.current_state and t.evaluate_guards(event)]
-
-        if not valid_transitions:
-            # No transitions triggered by this event
-            return
-
-        # Pick the highest priority transition
-        sorted_transitions = _TransitionPrioritySorter().sort(valid_transitions)
-        chosen_transition = sorted_transitions[0]
-
-        # Execute the transition: exit current, run actions, enter target
-        try:
-            self._hooks.execute_on_exit(self.current_state)
-            self.current_state.on_exit()
-            chosen_transition.execute_actions(event)
-            self._context.set_current_state(chosen_transition.target)
-            self.current_state.on_enter()
-            self._hooks.execute_on_enter(self.current_state)
-        except Exception as e:
-            # If actions fail, attempt error recovery
-            self._hooks.execute_on_error(e)
-            self._error_recovery.recover(e, self)
-
     def stop(self) -> None:
-        """
-        Gracefully stop the state machine, executing exit actions and hooks.
-        """
-        if self._stopped:
+        """Stop the state machine."""
+        if not self._started:
             return
-        self._hooks.execute_on_exit(self.current_state)
-        self.current_state.on_exit()
-        self._stopped = True
+
+        if self._current_state:
+            self._notify_exit(self._current_state)
+        self._current_state = None
+        self._started = False
+
+    def process_event(self, event: Event) -> bool:
+        """Process an event and perform any valid transitions."""
+        if not self._started or not self._current_state:
+            return False
+
+        valid_transitions = self._graph.get_valid_transitions(self._current_state, event)
+        if not valid_transitions:
+            return False
+
+        # Take highest priority transition
+        transition = max(valid_transitions, key=lambda t: t.get_priority())
+        self._execute_transition(transition, event)
+        return True
+
+    def _execute_transition(self, transition: Transition, event: Event) -> None:
+        """Execute a transition between states."""
+        if not self._current_state:
+            return
+
+        # Record history for all ancestor composite states
+        ancestors = self._graph.get_ancestors(self._current_state)
+        for ancestor in ancestors:
+            if isinstance(ancestor, CompositeState):
+                self._context.record_state_exit(ancestor, self._current_state)
+
+        # Exit current state
+        self._notify_exit(self._current_state)
+
+        # Execute transition actions
+        transition.execute_actions(event)
+
+        # Enter new state
+        self._current_state = transition.target
+        self._notify_enter(self._current_state)
+
+    def _notify_enter(self, state: State) -> None:
+        """Notify hooks of state entry."""
+        state.on_enter()
+        for hook in self._hooks:
+            if hasattr(hook, 'on_enter'):
+                hook.on_enter(state)
+
+    def _notify_exit(self, state: State) -> None:
+        """Notify hooks of state exit."""
+        state.on_exit()
+        for hook in self._hooks:
+            if hasattr(hook, 'on_exit'):
+                hook.on_exit(state)
+
+    def _notify_error(self, error: Exception) -> None:
+        """Notify hooks of an error."""
+        for hook in self._hooks:
+            if hasattr(hook, 'on_error'):
+                hook.on_error(error)
+
+    def detect_cycles(self) -> List[str]:
+        """Detect cycles in the state hierarchy."""
+        visited = set()
+        path = set()
+        cycles = []
+
+        def visit(state):
+            if state in path:
+                cycle_path = [s.name for s in path]
+                cycles.append(f"Cycle detected: {' -> '.join(cycle_path)}")
+                return
+            
+            if state in visited:
+                return
+            
+            visited.add(state)
+            path.add(state)
+            
+            if isinstance(state, CompositeState):
+                for child in state._children:
+                    visit(child)
+                
+            path.remove(state)
+        
+        visit(self._initial_state)
+        return cycles
 
 
 class CompositeStateMachine(StateMachine):
@@ -195,72 +268,43 @@ class CompositeStateMachine(StateMachine):
     under composite states. This allows complex modeling of state hierarchies.
     """
 
-    def __init__(
-        self,
-        initial_state: CompositeState,
-        validator: Optional[Validator] = None,
-        hooks: Optional[List["HookProtocol"]] = None,
-        error_recovery: Optional[_ErrorRecoveryStrategy] = None,
-    ) -> None:
-        super().__init__(
-            initial_state=initial_state,
-            validator=validator,
-            hooks=hooks,
-            error_recovery=error_recovery,
-        )
-        self._submachines: Dict[CompositeState, StateMachine] = {}
+    def __init__(self, initial_state: State, validator: Optional[Validator] = None, hooks: Optional[List] = None):
+        super().__init__(initial_state, validator, hooks)
+        self._submachines = {}
 
     def add_submachine(self, state: CompositeState, submachine: StateMachine) -> None:
-        """
-        Associate a subordinate StateMachine with a CompositeState, allowing
-        nested behaviors within that state.
-
-        :param state: The composite state serving as a container.
-        :param submachine: The sub-state machine controlling nested states.
-        """
+        """Add a submachine for a composite state."""
+        if not isinstance(state, CompositeState):
+            raise ValueError(f"State {state.name} must be a composite state")
+        
+        # Register all states from submachine in our graph
+        for sub_state in submachine._context.get_states():
+            self._graph.add_state(sub_state, parent=state)
+        
         self._submachines[state] = submachine
 
-    @property
-    def submachines(self) -> Dict[CompositeState, StateMachine]:
-        """
-        Retrieve a mapping of CompositeStates to their associated submachines.
-        """
-        return self._submachines
-
     def start(self) -> None:
+        """Start this machine and all submachines."""
         super().start()
-        # Optionally start submachines if desired. Implementation is minimal.
-        for sm in self._submachines.values():
-            if not sm.current_state:
-                continue
-            sm.start()
-
-    def process_event(self, event: Event) -> None:
-        super().process_event(event)
-        # If the current state is a composite state with a submachine, we might
-        # delegate events to the submachine as well.
-        # This behavior can be customized as needed.
-        if self.current_state in self._submachines:
-            self._submachines[self.current_state].process_event(event)
+        for machine in self._submachines.values():
+            machine.start()
 
     def stop(self) -> None:
-        # Stop submachines first if needed
-        for sm in self._submachines.values():
-            sm.stop()
+        """Stop this machine and all submachines."""
+        for machine in self._submachines.values():
+            machine.stop()
         super().stop()
 
+    def process_event(self, event: Event) -> bool:
+        """Process event in this machine and all active submachines."""
+        if not self._started:
+            return False
 
-@dataclass(frozen=True)
-class _StateHistoryRecord:
-    """Immutable record of historical state information"""
+        # Try to process in current submachine first
+        current = self._current_state
+        if isinstance(current, CompositeState) and current in self._submachines:
+            if self._submachines[current].process_event(event):
+                return True
 
-    timestamp: float
-    state_id: str
-    composite_id: str
-
-    def is_valid(self, state_machine: StateMachine) -> bool:
-        """Verify this history record points to valid states"""
-        return (
-            self.state_id in state_machine.get_all_state_ids()
-            and self.composite_id in state_machine.get_all_state_ids()
-        )
+        # If submachine didn't handle it, try in this machine
+        return super().process_event(event)

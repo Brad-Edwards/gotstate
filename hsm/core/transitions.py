@@ -83,6 +83,16 @@ class Transition:
         """
         return self._target
 
+    @property
+    def guards(self) -> List[Callable[[Event], bool]]:
+        """The guard conditions for this transition."""
+        return self._guards
+
+    @property
+    def actions(self) -> List[Callable[[Event], None]]:
+        """The actions to execute when this transition occurs."""
+        return self._actions
+
 
 class _TransitionPrioritySorter:
     """

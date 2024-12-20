@@ -7,25 +7,44 @@
 
 - StateMachine (concrete implementation of AbstractStateMachine)
 - CompositeStateMachine (adds hierarchical handling)
-- Type hints: StateMachine.start() -> None, StateMachine.process_event(event: Event) -> None Async Protocols:
-- If async variant provided, AsyncStateMachine in hsm.runtime.async_support.
-- Resource Handling: Internal locks for thread safety.
-- Extensions: Allows plugging in custom AbstractValidator.
-- Allows hooking error recovery strategies.
+- Type hints: StateMachine.start() -> None, StateMachine.process_event(event: Event) -> None 
+- Async Protocols: If async variant provided, AsyncStateMachine in hsm.runtime.async_support
+- Resource Handling: Internal locks for thread safety
+- Extensions: Allows plugging in custom AbstractValidator
+- Allows hooking error recovery strategies
 
 ### hsm.core.states
 
 - State, CompositeState classes
-- Manages entry/exit actions, state data initialization/cleanup
+- Focuses on state-specific behavior:
+  - Entry/exit actions
+  - State data management
+  - Parent-child relationships
 - Type hints for state data: State.data: Dict[str, Any]
-- Extension points: Custom data initializers from plugins.
+- Extension points: Custom data initializers from plugins
+
+### hsm.core.runtime.graph
+
+- StateGraph class managing structural relationships
+- Efficient transition lookup and validation
+- Hierarchy management
+- Graph-level validation
+- Extension points: Custom graph traversal strategies
+
+### hsm.core.runtime.context
+
+- RuntimeContext managing machine execution
+- Separation of structure (StateGraph) from runtime state
+- History state tracking
+- Thread-safe state transitions
+- Extension: Custom runtime policies
 
 ### hsm.core.transitions
 
 - Transition class implementing AbstractTransition
 - Prioritization logic
-- Guard checks, action execution, fallback states
-- Extension: Custom prioritization policies via plugins.
+- Guard checks, action execution
+- Extension: Custom prioritization policies via plugins
 
 ### hsm.core.events
 
@@ -96,10 +115,13 @@
 
 ### Import Graph
 
-- `hsm.core.*` does not depend on `hsm.runtime.*` (core is independent of runtime mode).
-- `hsm.runtime.*` depends on `hsm.core./*` for definitions of states, events.
-- `hsm.interfaces.*` is independent and can be imported by `both hsm.core` and `hsm.runtime`.
-- `hsm.plugins.*` may depend on `hsm.core` or `hsm.runtime` but not vice versa.
+- `hsm.core.states` and `hsm.core.transitions` are base modules with no internal dependencies
+- `hsm.core.runtime.graph` depends on `states` and `transitions` for structure
+- `hsm.core.runtime.context` depends on `graph` for structural operations
+- `hsm.core.state_machine` depends on `runtime.graph` and `runtime.context`
+- `hsm.runtime.*` depends on `hsm.core.*` for definitions
+- `hsm.interfaces.*` is independent and can be imported by both `hsm.core` and `hsm.runtime`
+- `hsm.plugins.*` may depend on `hsm.core` or `hsm.runtime` but not vice versa
 
 ### Async Boundaries
 
@@ -131,8 +153,10 @@
 
 | Module                     | Exports                           | Protocols Implemented                | Extensions               | Dependencies                        |
 |----------------------------|-----------------------------------|--------------------------------------|--------------------------|-------------------------------------|
-| `hsm.core.state_machine`   | StateMachine, CompositeStateMachine | StateMachineProtocol                 | Validators, Hooks        | states, transitions, events, validation |
-| `hsm.core.states`          | State, CompositeState             | StateProtocol, CompositeStateProtocol | Custom data init/cleanup | actions, guards (for entry/exit)    |
+| `hsm.core.state_machine`   | StateMachine, CompositeStateMachine | StateMachineProtocol                 | Validators, Hooks        | runtime.graph, runtime.context      |
+| `hsm.core.states`          | State, CompositeState             | StateProtocol, CompositeStateProtocol | Custom data init/cleanup | actions                            |
+| `hsm.core.runtime.graph`   | StateGraph                        | GraphProtocol                        | Custom traversal         | states, transitions                 |
+| `hsm.core.runtime.context` | RuntimeContext                     | RuntimeProtocol                      | Custom runtime policies  | graph, states, transitions          |
 | `hsm.core.transitions`     | Transition                        | TransitionProtocol                   | Custom priority          | states, guards, actions             |
 | `hsm.core.events`          | Event, TimeoutEvent               | EventProtocol                        | Custom event types       | -                                   |
 | `hsm.core.guards`          | BasicGuards                       | GuardProtocol                        | Custom guards            | -                                   |
