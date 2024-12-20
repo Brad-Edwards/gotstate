@@ -2,6 +2,7 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 
+import asyncio
 import threading
 import time
 from dataclasses import dataclass
@@ -288,7 +289,10 @@ class StateMachine:
         state.on_enter()
         for hook in self._hooks:
             if hasattr(hook, "on_enter"):
-                hook.on_enter(state)
+                hook_method = hook.on_enter
+                # Skip async hooks in synchronous context
+                if not asyncio.iscoroutinefunction(hook_method):
+                    hook_method(state)
 
     def _notify_exit(self, state: State) -> None:
         """Notify hooks of state exit."""
