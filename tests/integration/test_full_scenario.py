@@ -618,5 +618,6 @@ def test_validation_framework_integration(hook):
 
     # Create machine with custom validator and verify it works with valid transition
     machine = StateMachine(initial_state=state1, validator=validator, hooks=[hook])
+    machine.add_state(state2)  # Add state2 before adding transition
     machine.add_transition(t_valid)  # Should not raise
     machine.start()  # Should not raise
