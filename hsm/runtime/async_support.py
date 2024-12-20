@@ -112,7 +112,7 @@ class AsyncStateMachine(StateMachine):
             else:
                 validate_method(self)
 
-        self._notify_enter(self._current_state)
+        await self._notify_enter_async(self._current_state)
         self._started = True
 
     async def stop(self) -> None:
@@ -142,11 +142,30 @@ class AsyncStateMachine(StateMachine):
         """Execute a transition asynchronously."""
         try:
             await self._notify_exit_async(self._current_state)
-            transition.execute_actions(event)
+            
+            # Execute actions with async support
+            for action in transition.actions:
+                try:
+                    if asyncio.iscoroutinefunction(action):
+                        await action(event)
+                    else:
+                        action(event)
+                except Exception as e:
+                    # Notify hooks of the error
+                    for hook in self._hooks:
+                        if hasattr(hook, "on_error"):
+                            hook_method = hook.on_error
+                            if asyncio.iscoroutinefunction(hook_method):
+                                await hook_method(e)
+                            else:
+                                hook_method(e)
+                    # Don't change state if action fails
+                    return
+            
             self._current_state = transition.target
             await self._notify_enter_async(self._current_state)
         except Exception as e:
-            # Handle error only once, at the top level
+            # Handle any other errors during transition
             for hook in self._hooks:
                 if hasattr(hook, "on_error"):
                     hook_method = hook.on_error
@@ -154,10 +173,6 @@ class AsyncStateMachine(StateMachine):
                         await hook_method(e)
                     else:
                         hook_method(e)
-
-            # Error recovery is separate from error hooks
-            if hasattr(self, "_error_recovery"):
-                self._error_recovery.recover(e, self)
 
     async def _notify_enter_async(self, state: State) -> None:
         """Notify hooks of state entry asynchronously."""
