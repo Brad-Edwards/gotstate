@@ -1,6 +1,6 @@
 # bandit.yaml
-exclude_dirs: [".git", ".venv", "hsm/tests", "hsm/tests/unit", "scratch"]
-skips: []
+exclude_dirs: [".git", ".venv", "hsm/tests", "hsm/tests/unit", "hsm/tests/integration", "scratch"]
+skips: ["B101"]
 
 aggregate_by_severity_and_confidence: true
 

@@ -61,9 +61,11 @@ class AsyncEventQueue:
         This will block until an event is available.
         If a non-blocking or timeout approach is needed, adapt accordingly.
         """
-        if self._queue.empty():
+        try:
+            # Wait for an event with a small timeout
+            return await asyncio.wait_for(self._queue.get(), timeout=0.1)
+        except asyncio.TimeoutError:
             return None
-        return await self._queue.get()
 
     async def clear(self) -> None:
         """
@@ -106,7 +108,10 @@ class AsyncStateMachine:
             return
         await self._lock.acquire()
         try:
+            if self.validator:
+                self.validator.validate_state_machine(self)
             self._context.start()
+            self._hooks.execute_on_enter(self.current_state)
             self._started = True
         finally:
             self._lock.release()
@@ -116,7 +121,19 @@ class AsyncStateMachine:
             return
         await self._lock.acquire()
         try:
-            self._context.process_event(event)
+            transitions = self._context.get_transitions()
+            valid_transitions = [t for t in transitions if t.source == self.current_state and t.evaluate_guards(event)]
+
+            if valid_transitions:
+                chosen_transition = sorted(valid_transitions, key=lambda t: t.get_priority(), reverse=True)[0]
+                self._hooks.execute_on_exit(self.current_state)
+                self.current_state.on_exit()
+                chosen_transition.execute_actions(event)
+                self._context.set_current_state(chosen_transition.target)
+                self.current_state.on_enter()
+                self._hooks.execute_on_enter(self.current_state)
+        except Exception as e:
+            self._hooks.execute_on_error(e)
         finally:
             self._lock.release()
 
@@ -125,6 +142,7 @@ class AsyncStateMachine:
             return
         await self._lock.acquire()
         try:
+            self._hooks.execute_on_exit(self.current_state)
             self._context.stop()
             self._stopped = True
         finally:

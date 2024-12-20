@@ -62,28 +62,28 @@ def test_synchronous_integration(hook, validator):
     """
 
     # Define actions
-    def entry_action_fn(**kwargs):
+    def entry_action_fn(event=None):
         pass
 
-    def exit_action_fn(**kwargs):
+    def exit_action_fn(event=None):
         pass
 
-    def transition_action_fn(**kwargs):
+    def transition_action_fn(event=None):
         pass
 
-    entry_actions = [lambda: BasicActions.execute(entry_action_fn)]
-    exit_actions = [lambda: BasicActions.execute(exit_action_fn)]
-    transition_actions = [lambda: BasicActions.execute(transition_action_fn)]
+    entry_actions = [entry_action_fn]
+    exit_actions = [exit_action_fn]
+    transition_actions = [transition_action_fn]
 
     # Define states
     idle_state = State("Idle", entry_actions=entry_actions, exit_actions=exit_actions)
     working_state = State("Working", entry_actions=entry_actions, exit_actions=exit_actions)
 
     # Define transitions
-    def guard_condition():
+    def guard_condition(event):
         return True
 
-    guards = [lambda event: BasicGuards.check_condition(guard_condition)]
+    guards = [guard_condition]
 
     t = Transition(source=idle_state, target=working_state, guards=guards, actions=transition_actions, priority=10)
 
@@ -107,7 +107,6 @@ def test_synchronous_integration(hook, validator):
     eq.enqueue(Event("StartWork"))
 
     # Run executor in a separate thread
-    threading.Event()
     thread = threading.Thread(target=executor.run)
     thread.start()
 
@@ -251,7 +250,6 @@ def test_validation_integration():
     """
     Integration test ensuring that the Validator catches invalid configurations.
     """
-    # Create an invalid machine: no initial state or transitions referencing unknown states
     from hsm.core.state_machine import StateMachine
     from hsm.core.states import State
     from hsm.core.transitions import Transition
@@ -259,16 +257,17 @@ def test_validation_integration():
 
     s1 = State("S1")
     s2 = State("S2")
-    # Transition referencing s2 but never added to machine properly
-    t = Transition(source=s1, target=s2)
+    s3 = State("S3")  # This will be unreachable
+    # Add a transition from s1 to s2
+    t1 = Transition(source=s1, target=s2)
+    # Add a transition from s3 to s2 - s3 is unreachable because no transition leads to it
+    t2 = Transition(source=s3, target=s2)
+
     machine = StateMachine(initial_state=s1, validator=Validator())
-
-    # Add transition and expect validation to fail
-    machine.add_transition(t)
-
-    # Validation should fail because s2 is not reachable
+    machine.add_transition(t1)
+    # This should fail validation because s3 will be added to states but is unreachable
     with pytest.raises(ValidationError):
-        machine.validator.validate_state_machine(machine)
+        machine.add_transition(t2)
 
 
 def test_plugins_integration(hook, validator):
@@ -302,3 +301,54 @@ def test_plugins_integration(hook, validator):
     assert machine.current_state.name == "PluginEnd"
     assert hasattr(event, "processed_by_plugin")
     assert event.processed_by_plugin is True
+
+
+def test_complex_hierarchy():
+    from hsm.core.states import CompositeState, State
+
+    root = CompositeState("Root")
+    group1 = CompositeState("Group1")
+    group2 = CompositeState("Group2")
+    state1 = State("State1")
+    state2 = State("State2")
+
+    root.add_child_state(group1)
+    root.add_child_state(group2)
+    group1.add_child_state(state1)
+    group2.add_child_state(state2)
+
+    # Test navigation and state access
+    assert root.get_child_state("Group1") is group1
+    assert group1.get_child_state("State1") is state1
+
+
+def test_concurrent_event_processing():
+    import threading
+
+    from hsm.core.events import Event
+    from hsm.runtime.event_queue import EventQueue
+
+    eq = EventQueue()
+    processed = []
+
+    def producer():
+        for i in range(100):
+            eq.enqueue(Event(f"Event{i}"))
+
+    def consumer():
+        while True:
+            evt = eq.dequeue()
+            if evt:
+                processed.append(evt)
+            if len(processed) >= 100:
+                break
+
+    t1 = threading.Thread(target=producer)
+    t2 = threading.Thread(target=consumer)
+
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert len(processed) == 100

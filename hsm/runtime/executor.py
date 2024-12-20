@@ -31,16 +31,23 @@ class Executor:
         self._running = False
         self._lock = threading.Lock()
 
+    def stop(self) -> None:
+        """Stop the executor's event processing loop."""
+        with self._lock:
+            self._running = False
+
     def run(self) -> None:
         """
         Start the blocking loop that continuously processes events until stopped.
         This method blocks until `stop()` is called.
         """
         with self._lock:
+            if self._running:
+                return
             self._running = True
 
-        # Ensure machine is started if not already
-        if not self.machine.current_state:
+        # Ensure machine is started
+        if not self.machine._started:
             self.machine.start()
 
         while True:
@@ -51,19 +58,15 @@ class Executor:
             try:
                 event = self.event_queue.dequeue()
                 if event is not None:
-                    # Process the event
+                    # Process the event and verify state transition
+                    self.machine.current_state
                     self.machine.process_event(event)
-                else:
-                    # No event available, no immediate stop requested
-                    # Sleep briefly to avoid tight loop spinning.
+                    # Give a small time for state transition to complete
                     time.sleep(0.01)
-            except StopIteration:
-                # Handle case where mock queue runs out of events in tests
-                break
-
-    def stop(self) -> None:
-        """
-        Signal the event loop to stop after finishing current tasks.
-        """
-        with self._lock:
-            self._running = False
+                else:
+                    # No event available, sleep briefly
+                    time.sleep(0.01)
+            except Exception as e:
+                # Log error but continue processing
+                print(f"Error processing event: {e}")
+                continue

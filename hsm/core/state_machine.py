@@ -20,18 +20,26 @@ class _StateMachineContext:
     def __init__(self, initial_state: State) -> None:
         self._current_state = initial_state
         self._transitions: List[Transition] = []
+        self._states = {initial_state}  # Track all states
 
     def get_current_state(self) -> State:
         return self._current_state
 
     def set_current_state(self, state: State) -> None:
         self._current_state = state
+        self._states.add(state)
 
     def get_transitions(self) -> List[Transition]:
         return self._transitions
 
+    def get_states(self) -> set[State]:
+        return self._states
+
     def add_transition(self, transition: Transition) -> None:
         self._transitions.append(transition)
+        # Track states from transitions
+        self._states.add(transition.source)
+        self._states.add(transition.target)
 
     def start(self) -> None:
         """Start the context, initializing the current state."""
@@ -104,6 +112,8 @@ class StateMachine:
         :param transition: The transition to add
         """
         self._context.add_transition(transition)
+        if self.validator:
+            self.validator.validate_state_machine(self)
 
     @property
     def current_state(self) -> State:
