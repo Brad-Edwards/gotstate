@@ -11,3 +11,12 @@ repos:
       - id: bandit
         args: ["-r", "-c", "pyproject.toml"]
         additional_dependencies: ['.[toml]']
+
+  - repo: local
+    hooks:
+      - id: pytest-check
+        name: pytest-check
+        entry: pytest --cov=hsm --cov-report=term-missing --cov-report=xml:coverage-reports/coverage.xml
+        language: system
+        pass_filenames: false
+        always_run: true
