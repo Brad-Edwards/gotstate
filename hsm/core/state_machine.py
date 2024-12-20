@@ -157,24 +157,27 @@ class StateMachine:
         if self._started:
             return
 
-        # Restore current state from initial if None
-        if self._current_state is None:
-            self._current_state = self._initial_state
+        # Always start with machine's initial state
+        self._current_state = self._initial_state
 
-        # Check for history state if we're in a composite state
-        if (
-            self._current_state.parent
-            and isinstance(self._current_state.parent, CompositeState)
-            and self._context._history
-        ):  # Only check history if it exists
-            history_state = self._context.get_history_state(self._current_state.parent)
+        # If current state is in a composite state, traverse hierarchy
+        current = self._current_state
+        while current and current.parent and isinstance(current.parent, CompositeState):
+            parent = current.parent
+            # Check for history first
+            history_state = self._context.get_history_state(parent)
             if history_state:
                 self._current_state = history_state
+                break  # Found history state, stop traversing
+            # No history, use parent's initial state
+            elif parent._initial_state:
+                self._current_state = parent._initial_state
+            current = current.parent
 
         # Validate machine structure
         errors = self._graph.validate()
         if errors:
-            self._current_state = None  # Reset state if validation fails
+            self._current_state = None
             raise ValidationError("\n".join(errors))
 
         self._validator.validate_state_machine(self)
