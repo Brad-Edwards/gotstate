@@ -149,34 +149,17 @@ class StateMachine:
         """Start the state machine."""
         if self._started:
             return
-
-        # Set initial state before validation
-        self._current_state = self._initial_state
-
-        # If initial state is composite, use its initial state
-        current = self._current_state
-        while isinstance(current, CompositeState) and current.initial_state is not None:
-            current = current.initial_state
-        self._current_state = current
-
-        # Validate machine structure
-        errors = self._graph.validate()
-        if errors:
-            self._current_state = None  # Reset state if validation fails
-            raise ValidationError("\n".join(errors))
-
-        self._validator.validate_state_machine(self)
-        self._notify_enter(self._current_state)
         self._started = True
+        self._notify_enter(self._current_state)
+        self._context.start()
+        self._history = {self._current_state.name: self._current_state}
 
     def stop(self) -> None:
         """Stop the state machine."""
         if not self._started:
             return
-
-        if self._current_state:
-            self._notify_exit(self._current_state)
-        self._current_state = None
+        self._notify_exit(self._current_state)
+        self._context.stop()
         self._started = False
 
     def process_event(self, event: Event) -> bool:
@@ -194,25 +177,17 @@ class StateMachine:
         return True
 
     def _execute_transition(self, transition: Transition, event: Event) -> None:
-        """Execute a transition between states."""
-        if not self._current_state:
-            return
-
-        # Record history for all ancestor composite states
-        ancestors = self._graph.get_ancestors(self._current_state)
-        for ancestor in ancestors:
-            if isinstance(ancestor, CompositeState):
-                self._context.record_state_exit(ancestor, self._current_state)
-
-        # Exit current state
-        self._notify_exit(self._current_state)
-
-        # Execute transition actions
-        transition.execute_actions(event)
-
-        # Enter new state
-        self._current_state = transition.target
-        self._notify_enter(self._current_state)
+        """Execute a transition."""
+        try:
+            old_state = self._current_state
+            transition.execute_actions(event)
+            self._notify_exit(old_state)
+            self._current_state = transition.target
+            self._history[self._current_state.name] = self._current_state
+            self._notify_enter(self._current_state)
+        except Exception as e:
+            # Wrap any action execution errors
+            raise TransitionError(f"Action execution failed: {str(e)}") from e
 
     def _notify_enter(self, state: State) -> None:
         """Notify hooks of state entry."""

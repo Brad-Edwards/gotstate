@@ -159,6 +159,12 @@ class AsyncStateMachine:
         """
         self._context.add_transition(transition)
 
+    def add_state(self, state: State, parent: Optional[State] = None) -> None:
+        """
+        Add a state to the state machine.
+        """
+        self._context.add_state(state, parent)
+
 
 class _AsyncEventProcessingLoop:
     """
