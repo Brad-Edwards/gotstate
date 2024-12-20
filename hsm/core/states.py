@@ -60,7 +60,23 @@ class CompositeState(State):
         """
         super().__init__(name, entry_actions, exit_actions)
         self._children = set()
-        self._initial_state = initial_state
+        self._initial_state = None
+        # Set initial state through property to ensure proper parent-child relationship
+        if initial_state:
+            self.initial_state = initial_state
+
+    @property
+    def initial_state(self) -> Optional[State]:
+        """Get the initial state."""
+        return self._initial_state
+
+    @initial_state.setter
+    def initial_state(self, state: Optional[State]) -> None:
+        """Set the initial state and establish parent-child relationship."""
+        if state:
+            state.parent = self
+            self._children.add(state)
+        self._initial_state = state
 
     def add_child_state(self, state: State) -> None:
         """Add a child state to this composite state."""
@@ -68,7 +84,7 @@ class CompositeState(State):
         self._children.add(state)
 
     def get_child_state(self, name: str) -> Optional[State]:
-        """Get a child state by name"""
+        """Get a child state by name."""
         for child in self._children:
             if child.name == name:
                 return child
@@ -77,18 +93,6 @@ class CompositeState(State):
     def get_children(self) -> List[State]:
         """Get all child states."""
         return list(self._children)
-
-    @property
-    def initial_state(self) -> Optional[State]:
-        """Get the initial state."""
-        return self._initial_state
-
-    @initial_state.setter
-    def initial_state(self, state: State) -> None:
-        """Set the initial state."""
-        if state not in self._children and state is not None:
-            self.add_child_state(state)
-        self._initial_state = state
 
 
 class StateMachine:
