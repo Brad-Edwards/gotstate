@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 
 from hsm.core.base import StateBase
-from hsm.core.errors import ValidationError
+from hsm.core.errors import TransitionError, ValidationError
 from hsm.core.events import Event
 from hsm.core.transitions import Transition
 
