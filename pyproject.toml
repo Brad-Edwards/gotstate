@@ -11,7 +11,6 @@ authors = [
     {name = "Brad Edwards", email = "brad@keplerops.com"},
 ]
 requires-python = ">=3.8"
-dependencies = []
 license = {text = "MIT"}
 
 [project.optional-dependencies]
@@ -21,9 +20,23 @@ test = [
     "pytest-cov>=6.0.0",
     "coverage>=6.0.0",
 ]
+dev = [
+    "black>=24.1.0",
+    "bandit>=1.7.7",
+]
 
-[tool.setuptools]
-packages = ["hsm"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hsm*"]
+exclude = ["tests*"]
+
+[tool.black]
+line-length = 120
+target-version = ["py38", "py39", "py310"]
+include = '\.pyi?$'
+extend-exclude = '''
+^/tests/fixtures
+'''
 
 [tool.pytest.ini_options]
 minversion = "6.0"
@@ -47,3 +60,8 @@ exclude_lines = [
     "raise ImportError",
 ]
 fail_under = 80
+
+[tool.bandit]
+exclude_dirs = ["tests", "tests/unit", "tests/integration"]
+skips = ["B101"]  # Skip assert warnings globally
+targets = ["hsm"]

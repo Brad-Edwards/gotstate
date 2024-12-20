@@ -91,7 +91,12 @@ class AsyncStateMachine:
     This class parallels StateMachine, but provides async start/stop/process_event.
     """
 
-    def __init__(self, initial_state: State, validator: Validator = None, hooks: List[HookProtocol] = None):
+    def __init__(
+        self,
+        initial_state: State,
+        validator: Validator = None,
+        hooks: List[HookProtocol] = None,
+    ):
         self._context = _StateMachineContext(initial_state)
         self.validator = validator or Validator()
         self._hooks = HookManager(hooks or [])

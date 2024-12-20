@@ -85,7 +85,13 @@ def test_synchronous_integration(hook, validator):
 
     guards = [guard_condition]
 
-    t = Transition(source=idle_state, target=working_state, guards=guards, actions=transition_actions, priority=10)
+    t = Transition(
+        source=idle_state,
+        target=working_state,
+        guards=guards,
+        actions=transition_actions,
+        priority=10,
+    )
 
     # Construct StateMachine
     machine = StateMachine(initial_state=idle_state, validator=validator, hooks=[hook])

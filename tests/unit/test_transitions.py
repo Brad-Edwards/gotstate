@@ -6,7 +6,13 @@
 def test_transition_init(dummy_state, dummy_guard, dummy_action):
     from hsm.core.transitions import Transition
 
-    t = Transition(source=dummy_state, target=dummy_state, guards=[dummy_guard], actions=[dummy_action], priority=5)
+    t = Transition(
+        source=dummy_state,
+        target=dummy_state,
+        guards=[dummy_guard],
+        actions=[dummy_action],
+        priority=5,
+    )
     assert t.get_priority() == 5
     assert t.source == dummy_state
     assert t.target == dummy_state

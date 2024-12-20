@@ -14,7 +14,10 @@ class State:
     """
 
     def __init__(
-        self, name: str, entry_actions: List[Callable[[], None]] = None, exit_actions: List[Callable[[], None]] = None
+        self,
+        name: str,
+        entry_actions: List[Callable[[], None]] = None,
+        exit_actions: List[Callable[[], None]] = None,
     ) -> None:
         """
         Initialize the state with a name and optional lists of actions to run on
@@ -77,7 +80,10 @@ class CompositeState(State):
     """
 
     def __init__(
-        self, name: str, entry_actions: List[Callable[[], None]] = None, exit_actions: List[Callable[[], None]] = None
+        self,
+        name: str,
+        entry_actions: List[Callable[[], None]] = None,
+        exit_actions: List[Callable[[], None]] = None,
     ) -> None:
         super().__init__(name, entry_actions, exit_actions)
         self._children: Dict[str, State] = {}

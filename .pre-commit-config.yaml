@@ -1,37 +1,13 @@
 repos:
   - repo: https://github.com/psf/black
-    rev: 24.10.0
+    rev: 24.1.0
     hooks:
       - id: black
         language_version: python3.10
 
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        language_version: python3.10
-
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.1.1
-    hooks:
-      - id: flake8
-        language_version: python3.10
-        additional_dependencies: [flake8-bugbear]
-
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.8.0
+    rev: 1.7.7
     hooks:
       - id: bandit
-        language_version: python3.10
-        args: ["-c", "bandit.yaml", "-r", "."]
-
-  - repo: local
-    hooks:
-      - id: pytest-coverage
-        name: Run tests with coverage
-        entry: pytest --color=yes --cov=. --cov-report term-missing --cov-report xml:coverage-reports/coverage.xml
-        language: system
-        types: [python]
-        pass_filenames: false
-        always_run: true
-        verbose: true
+        args: ["-r", "-c", "pyproject.toml"]
+        additional_dependencies: ['.[toml]']

@@ -190,7 +190,12 @@ class CompositeStateMachine(StateMachine):
         hooks: Optional[List["HookProtocol"]] = None,
         error_recovery: Optional[_ErrorRecoveryStrategy] = None,
     ) -> None:
-        super().__init__(initial_state=initial_state, validator=validator, hooks=hooks, error_recovery=error_recovery)
+        super().__init__(
+            initial_state=initial_state,
+            validator=validator,
+            hooks=hooks,
+            error_recovery=error_recovery,
+        )
         self._submachines: Dict[CompositeState, StateMachine] = {}
 
     def add_submachine(self, state: CompositeState, submachine: StateMachine) -> None:

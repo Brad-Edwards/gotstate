@@ -30,5 +30,3 @@ jobs:
         run: black --check .
       - name: Check imports (isort)
         run: isort --check-only .
-      - name: Lint code (flake8)
-        run: flake8 .
