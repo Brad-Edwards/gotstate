@@ -719,36 +719,38 @@ def test_concurrent_state_transitions():
 def test_complex_error_recovery():
     """Test recovery from cascading errors in hierarchical states"""
     error_sequence = []
-
+    
     class ErrorState(State):
         def __init__(self, name, should_raise=False):
             def on_enter_action():
                 error_sequence.append(f"Enter_{name}")
                 if should_raise:
                     raise RuntimeError("Simulated error")
-
+                    
             def on_exit_action():
                 error_sequence.append(f"Exit_{name}")
-
+                
             super().__init__(name, entry_actions=[on_enter_action], exit_actions=[on_exit_action])
-
+    
     # Create states
     normal = ErrorState("Normal")
     error = ErrorState("ErrorState", should_raise=True)  # This state raises on entry
     fallback = ErrorState("Fallback")
-
-    # Create machine with validator and error recovery
-    validator = Validator()
-    machine = StateMachine(initial_state=normal, validator=validator)
-
-    # Set up error recovery to transition to fallback state
+    
+    # Create error recovery strategy
     class TestErrorRecovery(_ErrorRecoveryStrategy):
         def recover(self, error: Exception, state_machine: StateMachine) -> None:
             # Trigger transition to fallback state
             state_machine.process_event(Event("recover"))
-
-    machine.set_error_recovery_strategy(TestErrorRecovery())
-
+    
+    # Create machine with validator and error recovery strategy
+    validator = Validator()
+    machine = StateMachine(
+        initial_state=normal,
+        validator=validator,
+        error_recovery=TestErrorRecovery()  # Set error recovery during creation
+    )
+    
     # Add all states and transitions
     machine.add_state(error)
     machine.add_state(fallback)
@@ -756,23 +758,23 @@ def test_complex_error_recovery():
     machine.add_transition(Transition(error, fallback))
     # Add recovery transition
     machine.add_transition(Transition(error, fallback, guards=[lambda e: e.name == "recover"]))
-
+    
     # Start machine and trigger error transition
     machine.start()
     assert machine.current_state == normal
-
+    
     # Trigger transition that will cause error
     machine.process_event(Event("trigger_error"))
-
+    
     # After error recovery, we should be in the fallback state
     assert machine.current_state == fallback
-
+    
     # Verify the sequence of state entries/exits
     assert error_sequence == [
         "Enter_Normal",
         "Exit_Normal",
         "Enter_ErrorState",  # From error state's entry action
-        "Enter_Fallback",  # From recovery transition
+        "Enter_Fallback"     # From recovery transition
     ]
 
 
