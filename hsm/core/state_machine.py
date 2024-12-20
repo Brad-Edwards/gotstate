@@ -152,32 +152,55 @@ class StateMachine:
         """Get the last active state for a composite state."""
         return self._context.get_history_state(composite_state)
 
+    def _get_parent_composite_state(self, state: State) -> Optional[CompositeState]:
+        """Get the parent composite state if it exists."""
+        if state and state.parent and isinstance(state.parent, CompositeState):
+            return state.parent
+        return None
+
+    def _get_state_from_history(self, composite_state: CompositeState) -> Optional[State]:
+        """Get state from history if it exists."""
+        if self._context._history:  # Only check if history dict exists and isn't empty
+            return self._context.get_history_state(composite_state)
+        return None
+
+    def _resolve_state_for_start(self) -> State:
+        """
+        Resolve which state to use when starting the machine.
+        Resolution order:
+        1. If no current state, use machine's initial state
+        2. If in composite state, check parent's history
+        3. If no history, use parent's initial state
+        4. Fall back to machine's initial state
+        """
+        # Start with current state or initial state
+        state = self._current_state or self._initial_state
+        
+        # Check if we're in a composite state
+        parent = self._get_parent_composite_state(state)
+        if parent:
+            # Check history first
+            history_state = self._get_state_from_history(parent)
+            if history_state:
+                return history_state
+            # No history, use parent's initial state
+            if parent._initial_state:
+                return parent._initial_state
+        
+        # Fall back to machine's initial state
+        return self._initial_state
+
     def start(self) -> None:
         """Start the state machine."""
         if self._started:
             return
 
-        # Always start with machine's initial state
-        self._current_state = self._initial_state
-
-        # If current state is in a composite state, traverse hierarchy
-        current = self._current_state
-        while current and current.parent and isinstance(current.parent, CompositeState):
-            parent = current.parent
-            # Check for history first
-            history_state = self._context.get_history_state(parent)
-            if history_state:
-                self._current_state = history_state
-                break  # Found history state, stop traversing
-            # No history, use parent's initial state
-            elif parent._initial_state:
-                self._current_state = parent._initial_state
-            current = current.parent
+        # Resolve the correct starting state
+        self._current_state = self._resolve_state_for_start()
 
         # Validate machine structure
         errors = self._graph.validate()
         if errors:
-            self._current_state = None
             raise ValidationError("\n".join(errors))
 
         self._validator.validate_state_machine(self)
@@ -190,13 +213,14 @@ class StateMachine:
             return
 
         if self._current_state:
-            # Record history for composite states before stopping
-            if self._current_state.parent and isinstance(self._current_state.parent, CompositeState):
-                self._context.record_state_exit(self._current_state.parent, self._current_state)
-
+            # Record history before stopping
+            parent = self._get_parent_composite_state(self._current_state)
+            if parent:
+                self._context.record_state_exit(parent, self._current_state)
+            
             self._notify_exit(self._current_state)
             self._current_state = None
-
+            
         self._started = False
 
     def process_event(self, event: Event) -> bool:
