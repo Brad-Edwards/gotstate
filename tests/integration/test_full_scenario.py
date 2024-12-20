@@ -116,6 +116,24 @@ def test_composite_state_machine_integration(hook, validator):
     - Validate transitions occur in the nested structure
     - Verify parent-child relationships
     """
+    # Set up mock hook with required attributes
+    hook.entered = set()
+    hook.exited = set()
+    hook.errors = []
+
+    def on_enter(state):
+        hook.entered.add(state.name)
+
+    def on_exit(state):
+        hook.exited.add(state.name)
+
+    def on_error(error):
+        hook.errors.append(error)
+
+    hook.on_enter = on_enter
+    hook.on_exit = on_exit
+    hook.on_error = on_error
+
     # Define states
     child1 = State("Child1")
     child2 = State("Child2")
