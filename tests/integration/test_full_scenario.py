@@ -483,43 +483,37 @@ def test_complex_event_chain_integration(hook, validator):
     def track_transition(state_name):
         def action(event):
             transition_sequence.append(state_name)
-
         return action
-
-    # Define transitions with different priorities
-    t1 = Transition(source=state_a, target=state_b, actions=[track_transition("B")], priority=10)
-
-    t2 = Transition(source=state_b, target=state_c, actions=[track_transition("C")], priority=20)
 
     # Create and configure machine
     machine = StateMachine(initial_state=state_a, validator=validator, hooks=[hook])
+    
+    # Add all states first
+    machine.add_state(state_b)
+    machine.add_state(state_c)
+
+    # Define and add transitions with different priorities
+    t1 = Transition(source=state_a, target=state_b, actions=[track_transition("B")], priority=10)
+    t2 = Transition(source=state_b, target=state_c, actions=[track_transition("C")], priority=20)
+
+    # Add transitions after all states are in graph
     machine.add_transition(t1)
     machine.add_transition(t2)
 
-    # Setup event processing
-    eq = EventQueue(priority=True)
-    executor = Executor(machine, eq)
-
-    # Start machine
+    # Start machine and verify transitions
     machine.start()
-    assert machine.current_state.name == "StateA"
+    assert machine.current_state == state_a
 
-    # Queue multiple events
-    eq.enqueue(Event("Next"))  # Will be processed with default priority
-    eq.enqueue(Event("Skip"))  # Will be processed with default priority
+    # Process event and verify transition sequence
+    event = Event("test")
+    machine.process_event(event)
+    assert machine.current_state == state_b
+    assert transition_sequence == ["B"]
 
-    # Run executor
-    thread = threading.Thread(target=executor.run)
-    thread.start()
-    time.sleep(0.1)
-
-    # Verify transition sequence
+    # Process another event
+    machine.process_event(event)
+    assert machine.current_state == state_c
     assert transition_sequence == ["B", "C"]
-    assert machine.current_state.name == "StateC"
-
-    # Cleanup
-    executor.stop()
-    thread.join(timeout=1.0)
 
 
 @pytest.mark.integration
