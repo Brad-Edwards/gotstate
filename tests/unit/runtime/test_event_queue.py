@@ -7,6 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from hsm.core.events import Event
+from hsm.runtime.event_queue import EventQueue
+
 
 def test_event_queue_fifo(mock_event):
     from hsm.runtime.event_queue import EventQueue
@@ -140,3 +143,16 @@ def test_event_queue_clear_empty():
     eq = EventQueue()
     eq.clear()  # Should not raise any errors
     assert eq.dequeue() is None
+
+
+def test_priority_queue_ordering():
+    """Test that events are properly ordered by priority"""
+    queue = EventQueue(priority=True)
+
+    queue.enqueue(Event("low", priority=1))
+    queue.enqueue(Event("high", priority=10))
+    queue.enqueue(Event("medium", priority=5))
+
+    assert queue.dequeue().name == "high"
+    assert queue.dequeue().name == "medium"
+    assert queue.dequeue().name == "low"

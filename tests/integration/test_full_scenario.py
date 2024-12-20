@@ -674,3 +674,212 @@ def test_validation_framework_integration(hook):
     machine.add_state(state2)  # Add state2 before adding transition
     machine.add_transition(t_valid)  # Should not raise
     machine.start()  # Should not raise
+
+
+def test_concurrent_state_transitions():
+    """Test multiple transitions happening simultaneously under load"""
+
+    class SharedState(State):
+        def __init__(self, name):
+            super().__init__(name)
+            self.transition_count = 0
+            self._lock = threading.Lock()
+
+        def on_enter(self):
+            with self._lock:
+                self.transition_count += 1
+                # Force potential race condition
+                time.sleep(0.001)
+                self.transition_count -= 1
+
+    states = [SharedState(f"State{i}") for i in range(3)]
+    machine = StateMachine(initial_state=states[0])
+
+    # Add all states first
+    for state in states:
+        machine.add_state(state)
+
+    # Add transitions in a circle after all states are in graph
+    for i in range(3):
+        machine.add_transition(Transition(states[i], states[(i + 1) % 3], guards=[lambda e: True]))
+
+    def worker():
+        for _ in range(100):
+            machine.process_event(Event("next"))
+
+    threads = [threading.Thread(target=worker) for _ in range(10)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+
+    # Verify no state was left with non-zero count
+    for state in states:
+        assert state.transition_count == 0
+
+
+def test_complex_error_recovery():
+    """Test recovery from cascading errors in hierarchical states"""
+    error_sequence = []
+
+    class ErrorState(State):
+        def __init__(self, name, should_raise=False):
+            def on_enter_action():
+                error_sequence.append(f"Enter_{name}")
+                if should_raise:
+                    raise RuntimeError("Simulated error")
+
+            def on_exit_action():
+                error_sequence.append(f"Exit_{name}")
+
+            super().__init__(name, entry_actions=[on_enter_action], exit_actions=[on_exit_action])
+
+    # Create states
+    normal = ErrorState("Normal")
+    error = ErrorState("ErrorState", should_raise=True)  # This state raises on entry
+    fallback = ErrorState("Fallback")
+
+    # Create machine with validator and error recovery
+    validator = Validator()
+    machine = StateMachine(initial_state=normal, validator=validator)
+
+    # Set up error recovery to transition to fallback state
+    class TestErrorRecovery(_ErrorRecoveryStrategy):
+        def recover(self, error: Exception, state_machine: StateMachine) -> None:
+            # Trigger transition to fallback state
+            state_machine.process_event(Event("recover"))
+
+    machine.set_error_recovery_strategy(TestErrorRecovery())
+
+    # Add all states and transitions
+    machine.add_state(error)
+    machine.add_state(fallback)
+    machine.add_transition(Transition(normal, error))
+    machine.add_transition(Transition(error, fallback))
+    # Add recovery transition
+    machine.add_transition(Transition(error, fallback, guards=[lambda e: e.name == "recover"]))
+
+    # Start machine and trigger error transition
+    machine.start()
+    assert machine.current_state == normal
+
+    # Trigger transition that will cause error
+    machine.process_event(Event("trigger_error"))
+
+    # After error recovery, we should be in the fallback state
+    assert machine.current_state == fallback
+
+    # Verify the sequence of state entries/exits
+    assert error_sequence == [
+        "Enter_Normal",
+        "Exit_Normal",
+        "Enter_ErrorState",  # From error state's entry action
+        "Enter_Fallback",  # From recovery transition
+    ]
+
+
+def test_resource_cleanup_under_load():
+    """Test resource cleanup during rapid state changes"""
+    resource_count = 0
+
+    class ResourceState(State):
+        def __init__(self, name):
+            def on_enter_action():
+                nonlocal resource_count
+                resource_count += 1
+
+            def on_exit_action():
+                nonlocal resource_count
+                resource_count -= 1
+
+            super().__init__(name, entry_actions=[on_enter_action], exit_actions=[on_exit_action])
+
+    states = [ResourceState(f"State{i}") for i in range(5)]
+    machine = StateMachine(initial_state=states[0])
+
+    # Add states in a chain
+    for i in range(1, 5):
+        machine.add_state(states[i])
+        machine.add_transition(Transition(states[i - 1], states[i]))
+
+    # Start machine to trigger initial state's entry action
+    machine.start()
+    assert resource_count == 1  # Initial state entered
+
+    # Rapid transitions
+    for _ in range(1000):
+        machine.process_event(Event("next"))
+
+    # Verify no resource leaks
+    assert resource_count == 1  # Only current state should have a resource
+
+
+def test_deep_history_persistence():
+    """Test history state preservation across complex hierarchies"""
+    # Create states and hierarchy
+    root = CompositeState("Root")
+    group1 = CompositeState("Group1", initial_state=None)  # We'll set initial states after creation
+    group2 = CompositeState("Group2", initial_state=None)
+    state1 = State("State1")
+    state2 = State("State2")
+    state3 = State("State3")
+    state4 = State("State4")
+
+    # Build hierarchy
+    root.add_child_state(group1)
+    root.add_child_state(group2)
+    group1.add_child_state(state1)
+    group1.add_child_state(state2)
+    group2.add_child_state(state3)
+    group2.add_child_state(state4)
+
+    # Set initial states for composite states
+    group1.initial_state = state1
+    group2.initial_state = state3
+
+    # Create submachines for the composite states
+    submachine1 = StateMachine(initial_state=state1)
+    submachine1.add_state(state1)
+    submachine1.add_state(state2)
+    submachine1.add_transition(Transition(state1, state2))
+
+    submachine2 = StateMachine(initial_state=state3)
+    submachine2.add_state(state3)
+    submachine2.add_state(state4)
+    submachine2.add_transition(Transition(state3, state4))
+
+    # Create composite machine
+    machine = CompositeStateMachine(initial_state=root)
+    machine.add_state(group1, parent=root)
+    machine.add_state(group2, parent=root)
+
+    # Add submachines to composite states
+    machine.add_submachine(group1, submachine1)
+    machine.add_submachine(group2, submachine2)
+
+    # Add transitions between groups
+    machine.add_transition(Transition(group1, group2))
+
+    # Start all machines
+    machine.start()
+    submachine1.start()
+    submachine2.start()
+
+    # Initial state verification
+    assert submachine1.current_state == state1
+    assert submachine2.current_state == state3
+
+    # Make transitions and verify history
+    submachine1.process_event(Event("test"))
+    assert submachine1.current_state == state2  # Moved to state2 in group1
+
+    # Stop and restart submachine1 - should restore to state2
+    submachine1.stop()
+    submachine1.start()
+    assert submachine1.current_state == state2  # History preserved
+
+    # Move to group2
+    machine.process_event(Event("test"))
+    assert submachine2.current_state == state3  # Initial state of group2
+
+    # Return to group1 - should restore state2
+    machine.process_event(Event("test"))
+    assert submachine1.current_state == state2  # History preserved

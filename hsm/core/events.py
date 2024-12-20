@@ -11,19 +11,26 @@ class Event:
     machine to evaluate transitions and possibly change states.
     """
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, priority: int = 0) -> None:
         """
         Create an event identified by a name. Metadata may be attached as needed.
 
         :param name: A string identifying this event.
+        :param priority: Priority level for this event (higher numbers = higher priority).
         """
         self._name = name
+        self._priority = priority
         self._metadata: Dict[str, Any] = {}
 
     @property
     def name(self) -> str:
         """The name of the event."""
         return self._name
+
+    @property
+    def priority(self) -> int:
+        """The priority level of the event."""
+        return self._priority
 
     @property
     def metadata(self) -> Dict[str, Any]:

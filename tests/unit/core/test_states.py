@@ -2,6 +2,8 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 
+from hsm.core.states import CompositeState, State
+
 
 def test_state_init():
     from hsm.core.states import State
@@ -50,13 +52,16 @@ def test_composite_state_children():
 
 
 def test_state_data_isolation():
-    from hsm.core.states import State
+    """Test that state data is properly isolated between siblings"""
+    parent = CompositeState("Parent")
+    state1 = State("State1")
+    state2 = State("State2")
 
-    s1 = State("S1")
-    s2 = State("S2")
+    state1.data["test"] = "value1"
+    state2.data["test"] = "value2"
 
-    s1.data["test"] = "value1"
-    s2.data["test"] = "value2"
+    parent.add_child_state(state1)
+    parent.add_child_state(state2)
 
-    assert s1.data["test"] == "value1"
-    assert s2.data["test"] == "value2"
+    assert state1.data["test"] != state2.data["test"]
+    assert not hasattr(parent, "data")

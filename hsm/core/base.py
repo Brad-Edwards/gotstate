@@ -7,7 +7,6 @@ class StateBase:
     """Base class for state functionality"""
 
     name: str
-    data: Dict[str, Any] = field(default_factory=dict)
     parent: Optional["StateBase"] = None
     entry_actions: List[callable] = field(default_factory=list)
     exit_actions: List[callable] = field(default_factory=list)

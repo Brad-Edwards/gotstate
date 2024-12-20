@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 
 from hsm.core.base import StateBase
+from hsm.core.errors import ValidationError
 from hsm.core.events import Event
 from hsm.core.transitions import Transition
 
@@ -36,9 +37,10 @@ class State(StateBase):
         :param exit_actions: Actions executed upon exiting this state.
         """
         super().__init__(name=name, entry_actions=entry_actions or [], exit_actions=exit_actions or [])
+        self.data: Dict[str, Any] = {}
 
 
-class CompositeState(State):
+class CompositeState(StateBase):
     """
     A state that can contain other states, forming a hierarchy.
     """
@@ -58,7 +60,7 @@ class CompositeState(State):
         :param entry_actions: Actions executed upon entering this state.
         :param exit_actions: Actions executed upon exiting this state.
         """
-        super().__init__(name, entry_actions, exit_actions)
+        super().__init__(name=name, entry_actions=entry_actions or [], exit_actions=exit_actions or [])
         self._children = set()
         self._initial_state = None
         # Set initial state through property to ensure proper parent-child relationship
@@ -79,7 +81,19 @@ class CompositeState(State):
         self._initial_state = state
 
     def add_child_state(self, state: State) -> None:
-        """Add a child state to this composite state."""
+        """
+        Add a child state to this composite state.
+
+        :param state: The state to add as a child.
+        :raises ValidationError: If adding this state would create a circular dependency.
+        """
+        # Check for circular dependency
+        current = self
+        while current is not None:
+            if current == state:
+                raise ValidationError("Circular dependency detected in state hierarchy")
+            current = current.parent
+
         state.parent = self
         self._children.add(state)
 
