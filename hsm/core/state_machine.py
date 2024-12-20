@@ -32,6 +32,7 @@ class _StateMachineContext:
     """
 
     def __init__(self, initial_state: State) -> None:
+        self._initial_state = initial_state  # Store initial state
         self._current_state = initial_state
         self._transitions: List[Transition] = []
         self._states = {initial_state}  # Track all states
@@ -91,6 +92,12 @@ class _StateMachineContext:
         """Get the last active state for a composite state."""
         record = self._history.get(composite_state)
         return record.state if record else None
+
+    def reset_history(self) -> None:
+        """Fully reset all history state"""
+        with self._history_lock:
+            self._history.clear()
+            self._current_state = self._initial_state  # Reset to initial state
 
 
 class _ErrorRecoveryStrategy:
@@ -175,7 +182,7 @@ class StateMachine:
         """
         # Start with current state or initial state
         state = self._current_state or self._initial_state
-        
+
         # Check if we're in a composite state
         parent = self._get_parent_composite_state(state)
         if parent:
@@ -186,7 +193,7 @@ class StateMachine:
             # No history, use parent's initial state
             if parent._initial_state:
                 return parent._initial_state
-        
+
         # Fall back to machine's initial state
         return self._initial_state
 
@@ -217,10 +224,11 @@ class StateMachine:
             parent = self._get_parent_composite_state(self._current_state)
             if parent:
                 self._context.record_state_exit(parent, self._current_state)
-            
+
             self._notify_exit(self._current_state)
             self._current_state = None
-            
+            self._context._current_state = None
+
         self._started = False
 
     def process_event(self, event: Event) -> bool:
@@ -321,6 +329,12 @@ class StateMachine:
 
         visit(self._initial_state)
         return cycles
+
+    def reset(self) -> None:
+        """Reset the state machine to its initial configuration"""
+        self.stop()
+        self._context.reset_history()
+        self._current_state = self._initial_state
 
 
 class CompositeStateMachine(StateMachine):

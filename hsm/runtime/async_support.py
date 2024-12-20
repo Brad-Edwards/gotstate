@@ -93,21 +93,27 @@ class AsyncStateMachine(StateMachine):
         self._event_queue = AsyncEventQueue()
 
     async def start(self) -> None:
-        """Start the state machine asynchronously."""
+        """Start the state machine with async validation."""
         if self._started:
             return
 
-        # Validate machine before starting
-        if self._validator:
+        # Resolve the correct starting state
+        self._current_state = self._resolve_state_for_start()
+
+        # Validate machine structure with potential async validator
+        errors = self._graph.validate()
+        if errors:
+            raise ValidationError("\n".join(errors))
+
+        if hasattr(self._validator, "validate_state_machine"):
             validate_method = self._validator.validate_state_machine
             if asyncio.iscoroutinefunction(validate_method):
                 await validate_method(self)
             else:
                 validate_method(self)
 
+        self._notify_enter(self._current_state)
         self._started = True
-        self._current_state = self._initial_state
-        await self._notify_enter_async(self._current_state)
 
     async def stop(self) -> None:
         """Stop the state machine asynchronously."""

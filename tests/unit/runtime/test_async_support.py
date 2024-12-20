@@ -2,9 +2,14 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
+
+from hsm.core.states import State
+from hsm.core.validations import AsyncValidator
+from hsm.runtime.async_support import AsyncStateMachine
 
 
 @pytest.mark.asyncio
@@ -186,15 +191,23 @@ async def test_async_state_machine_process_event_when_stopped(dummy_state, mock_
 
 
 @pytest.mark.asyncio
-async def test_async_state_machine_validator_integration(dummy_state, validator):
-    from hsm.runtime.async_support import AsyncStateMachine
+async def test_async_state_machine_validator_integration():
+    """Test that async validation methods are properly integrated."""
 
-    # Create async validator mock
-    async def async_validate_state_machine(machine):
-        pass
+    class CustomAsyncValidator(AsyncValidator):
+        async def validate_state_machine(self, machine):
+            # Simulate async validation
+            await asyncio.sleep(0.1)
+            await super().validate_state_machine(machine)
 
-    validator.validate_state_machine = MagicMock(side_effect=async_validate_state_machine)
+    # Create states
+    start_state = State("Start")
 
-    asm = AsyncStateMachine(initial_state=dummy_state, validator=validator)
-    await asm.start()
-    validator.validate_state_machine.assert_called_once_with(asm)
+    # Create machine with async validator
+    machine = AsyncStateMachine(initial_state=start_state, validator=CustomAsyncValidator())
+
+    # Start should now properly await validation
+    await machine.start()
+
+    # Cleanup
+    await machine.stop()

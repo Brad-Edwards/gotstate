@@ -213,3 +213,26 @@ class _DefaultValidationRules:
         """
         if not event.name:
             raise ValidationError("Event must have a name.")
+
+
+class AsyncValidator(Validator):
+    """Base class for async validators"""
+
+    async def validate_state_machine(self, machine) -> None:
+        """Async validation of state machine configuration"""
+        errors = []
+
+        # Basic validation
+        if not machine._initial_state:
+            errors.append("State machine must have an initial state")
+
+        if not machine._current_state:
+            errors.append("State machine must have a current state")
+
+        # Validate state graph
+        graph_errors = machine._graph.validate()
+        if graph_errors:
+            errors.extend(graph_errors)
+
+        if errors:
+            raise ValidationError("\n".join(errors))

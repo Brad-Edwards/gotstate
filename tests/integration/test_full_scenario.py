@@ -457,8 +457,7 @@ def test_composite_history_integration(hook, validator):
     assert sub_machine1.current_state == state1b
 
     # Clear history
-    sub_machine1._context._history.clear()
-    sub_machine1.stop()
+    sub_machine1.reset()
     sub_machine1.start()
     assert sub_machine1.current_state == state1a
 
