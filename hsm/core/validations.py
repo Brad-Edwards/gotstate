@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Optional
 
 from hsm.core.errors import ValidationError
 from hsm.core.events import Event
+from hsm.core.states import CompositeState
 from hsm.core.transitions import Transition
 
 if TYPE_CHECKING:
@@ -137,19 +138,29 @@ class _DefaultValidationRules:
             def add_state_and_children(state):
                 """Helper to add a state and all its children to reachable states"""
                 reachable_states.add(state)
-                # If it's a composite state, add its initial state and all children
-                if hasattr(state, "_initial_state") and state._initial_state:
-                    add_state_and_children(state._initial_state)
-                if hasattr(state, "_children"):
+                # For composite states, add all children and the state itself
+                if isinstance(state, CompositeState):
                     for child in state._children:
                         reachable_states.add(child)
+                        # Recursively add children's children
+                        add_state_and_children(child)
+                    # If it's a composite state, add its initial state
+                    if state._initial_state:
+                        reachable_states.add(state._initial_state)
+                        add_state_and_children(state._initial_state)
 
-            # Add current state, its children, and all ancestors
+            # Add current state and its hierarchy
+            add_state_and_children(current)
+
+            # Add all parent states to reachable set
             while current:
-                add_state_and_children(current)
+                reachable_states.add(current)
+                if isinstance(current, CompositeState):
+                    for child in current._children:
+                        add_state_and_children(child)
                 current = current.parent
 
-            # Keep expanding reachable states until no new states are found
+            # Keep expanding reachable states through transitions
             while True:
                 new_reachable = set()
                 for t in transitions:

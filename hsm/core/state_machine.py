@@ -123,6 +123,17 @@ class StateMachine:
         # Add initial state to graph
         self._graph.add_state(initial_state)
 
+    def add_state(self, state: State, parent: Optional[State] = None) -> None:
+        """Add a state to the machine."""
+        self._graph.add_state(state, parent)
+        # Update internal state tracking
+        if parent is not None:
+            state.parent = parent
+            if hasattr(parent, "_children"):
+                parent._children.add(state)
+        # Update context's state set directly
+        self._context._states.add(state)
+
     @property
     def current_state(self) -> Optional[State]:
         """Get the current state."""
@@ -131,10 +142,6 @@ class StateMachine:
     def get_current_state(self) -> Optional[State]:
         """Get the current state (deprecated, use current_state property)."""
         return self._current_state
-
-    def add_state(self, state: State, parent: Optional[State] = None) -> None:
-        """Add a state to the machine."""
-        self._graph.add_state(state, parent)
 
     def add_transition(self, transition: Transition) -> None:
         """Add a transition to the machine."""
@@ -197,21 +204,33 @@ class StateMachine:
         if not self._current_state:
             return
 
-        # Record history for all ancestor composite states
-        ancestors = self._graph.get_ancestors(self._current_state)
-        for ancestor in ancestors:
-            if isinstance(ancestor, CompositeState):
-                self._context.record_state_exit(ancestor, self._current_state)
+        try:
+            # Record history for all ancestor composite states
+            ancestors = self._graph.get_ancestors(self._current_state)
+            for ancestor in ancestors:
+                if isinstance(ancestor, CompositeState):
+                    self._context.record_state_exit(ancestor, self._current_state)
 
-        # Exit current state
-        self._notify_exit(self._current_state)
+            # Exit current state
+            self._notify_exit(self._current_state)
 
-        # Execute transition actions
-        transition.execute_actions(event)
+            # Execute transition actions
+            transition.execute_actions(event)
 
-        # Enter new state
-        self._current_state = transition.target
-        self._notify_enter(self._current_state)
+            # Enter new state
+            self._current_state = transition.target
+            self._notify_enter(self._current_state)
+
+        except Exception as e:
+            # Notify hooks of error
+            self._notify_error(e)
+
+            # If we have an error recovery strategy, use it
+            if hasattr(self, "_error_recovery"):
+                self._error_recovery.recover(e, self)
+            else:
+                # Re-raise if no recovery strategy
+                raise
 
     def _notify_enter(self, state: State) -> None:
         """Notify hooks of state entry."""

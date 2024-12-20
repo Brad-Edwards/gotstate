@@ -86,6 +86,7 @@ async def test_async_state_machine_transition(dummy_state, mock_event):
     transition = Transition(source=dummy_state, target=target_state, guards=[lambda e: True], actions=[MagicMock()])
 
     asm = AsyncStateMachine(initial_state=dummy_state)
+    asm.add_state(target_state)
     asm.add_transition(transition)
     await asm.start()
     await asm.process_event(mock_event)
@@ -138,6 +139,11 @@ async def test_async_state_machine_error_handling(dummy_state, mock_event):
     from hsm.runtime.async_support import AsyncStateMachine
 
     error_hook = MagicMock()
+
+    async def async_on_enter(state):
+        pass
+
+    error_hook.on_enter = async_on_enter
     error_hook.on_error = MagicMock()
 
     asm = AsyncStateMachine(initial_state=dummy_state, hooks=[error_hook])
@@ -151,10 +157,10 @@ async def test_async_state_machine_error_handling(dummy_state, mock_event):
     from hsm.core.transitions import Transition
 
     target_state = State("target")
+    asm.add_state(target_state)
     transition = Transition(source=dummy_state, target=target_state, guards=[lambda e: True])
     asm.add_transition(transition)
 
-    # Process event should handle the error
     await asm.process_event(mock_event)
     error_hook.on_error.assert_called_once()
 
@@ -183,7 +189,12 @@ async def test_async_state_machine_process_event_when_stopped(dummy_state, mock_
 async def test_async_state_machine_validator_integration(dummy_state, validator):
     from hsm.runtime.async_support import AsyncStateMachine
 
-    validator.validate_state_machine = MagicMock()
+    # Create async validator mock
+    async def async_validate_state_machine(machine):
+        pass
+
+    validator.validate_state_machine = MagicMock(side_effect=async_validate_state_machine)
+
     asm = AsyncStateMachine(initial_state=dummy_state, validator=validator)
     await asm.start()
     validator.validate_state_machine.assert_called_once_with(asm)

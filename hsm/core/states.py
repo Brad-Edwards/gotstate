@@ -59,23 +59,24 @@ class CompositeState(State):
         :param exit_actions: Actions executed upon exiting this state.
         """
         super().__init__(name, entry_actions, exit_actions)
-        self._children: Dict[str, State] = {}
-        self.initial_state = initial_state
+        self._children = set()
+        self._initial_state = initial_state
 
     def add_child_state(self, state: State) -> None:
         """Add a child state to this composite state."""
-        if state.name in self._children:
-            raise ValueError(f"State '{state.name}' already exists")
-        self._children[state.name] = state
         state.parent = self
+        self._children.add(state)
 
     def get_child_state(self, name: str) -> Optional[State]:
         """Get a child state by name"""
-        return self._children.get(name)
+        for child in self._children:
+            if child.name == name:
+                return child
+        return None
 
     def get_children(self) -> List[State]:
         """Get all child states."""
-        return list(self._children.values())
+        return list(self._children)
 
     @property
     def initial_state(self) -> Optional[State]:
