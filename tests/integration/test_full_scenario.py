@@ -61,7 +61,6 @@ def test_synchronous_integration(hook, validator):
     - Ensure final states and hooks are as expected.
     """
 
-    # Define actions
     def entry_action_fn(event=None):
         pass
 
