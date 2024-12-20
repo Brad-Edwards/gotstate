@@ -122,7 +122,7 @@ class StateMachine:
         """Initialize the state machine with an initial state."""
         self._graph = StateGraph()
         self._initial_state = initial_state
-        self._current_state = initial_state  # Set current state immediately
+        self._current_state = initial_state  # Set initial state immediately
         self._validator = validator or Validator()
         self._hooks = hooks or []
         self._started = False
@@ -133,14 +133,18 @@ class StateMachine:
 
     def add_state(self, state: State, parent: Optional[State] = None) -> None:
         """Add a state to the machine."""
+        # Add state to graph first
         self._graph.add_state(state, parent)
-        # Update internal state tracking
+
+        # Update parent relationships
         if parent is not None:
             state.parent = parent
-            if hasattr(parent, "_children"):
+            if isinstance(parent, CompositeState):
                 parent._children.add(state)
-        # Update context's state set directly
-        self._context._states.add(state)
+                # If parent has no initial state, set this as initial
+                if parent._initial_state is None:
+                    parent._initial_state = state
+                    self._graph.set_initial_state(parent, state)
 
     @property
     def current_state(self) -> Optional[State]:
@@ -153,8 +157,13 @@ class StateMachine:
 
     def add_transition(self, transition: Transition) -> None:
         """Add a transition to the machine."""
+        # Ensure both states exist in graph before adding transition
+        if transition.source not in self._graph._nodes:
+            self.add_state(transition.source)
+        if transition.target not in self._graph._nodes:
+            self.add_state(transition.target)
+
         self._graph.add_transition(transition)
-        self._context.add_transition(transition)
 
     def get_history_state(self, composite_state: CompositeState) -> Optional[State]:
         """Get the last active state for a composite state."""
@@ -173,30 +182,13 @@ class StateMachine:
         return None
 
     def _resolve_state_for_start(self) -> State:
-        """
-        Resolve which state to use when starting the machine.
-        Resolution order:
-        1. If no current state, use machine's initial state
-        2. If in composite state, check parent's history
-        3. If no history, use parent's initial state
-        4. Fall back to machine's initial state
-        """
-        # Start with current state or initial state
-        state = self._current_state or self._initial_state
-
-        # Check if we're in a composite state
-        parent = self._get_parent_composite_state(state)
-        if parent:
-            # Check history first
-            history_state = self._get_state_from_history(parent)
-            if history_state:
-                return history_state
-            # No history, use parent's initial state
-            if parent._initial_state:
-                return parent._initial_state
-
-        # Fall back to machine's initial state
-        return self._initial_state
+        """Resolve the correct starting state considering hierarchy."""
+        state = self._initial_state
+        while isinstance(state, CompositeState):
+            if not state._children:
+                raise ValidationError(f"Composite state '{state.name}' has no children")
+            state = state._initial_state or next(iter(state._children))
+        return state
 
     def start(self) -> None:
         """Start the state machine."""
@@ -335,9 +327,9 @@ class StateMachine:
         return cycles
 
     def reset(self) -> None:
-        """Reset the state machine to its initial configuration"""
+        """Reset using graph capabilities"""
         self.stop()
-        self._context.reset_history()
+        self._graph.clear_history()
         self._current_state = self._initial_state
 
 

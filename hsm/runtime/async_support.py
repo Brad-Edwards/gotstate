@@ -37,50 +37,31 @@ class AsyncEventQueue:
     suitable for use with AsyncStateMachine.
     """
 
-    def __init__(self, priority: bool = False) -> None:
-        """
-        Initialize the async event queue.
-
-        :param priority: If True, operates in a priority-based mode.
-                         Currently, we only implement a simple FIFO using asyncio.Queue.
-                         Priority mode could be implemented separately if needed.
-        """
-        self._priority_mode = priority
-        # For simplicity, we ignore priority in the async variant and just use FIFO.
-        self._queue = asyncio.Queue()
+    def __init__(self, timeout: float = 0.1):
+        self._queue = asyncio.PriorityQueue()
+        self._timeout = timeout
 
     async def enqueue(self, event: Event) -> None:
-        """
-        Asynchronously insert an event into the queue.
-        """
+        """Add event to queue using event's priority."""
+        # Event already has priority, no need to tuple
         await self._queue.put(event)
 
     async def dequeue(self) -> Optional[Event]:
-        """
-        Asynchronously retrieve the next event, or None if empty.
-        This will block until an event is available.
-        If a non-blocking or timeout approach is needed, adapt accordingly.
-        """
+        """Get next event respecting priority."""
         try:
-            # Wait for an event with a small timeout
-            return await asyncio.wait_for(self._queue.get(), timeout=0.1)
+            event = await asyncio.wait_for(self._queue.get(), timeout=self._timeout)
+            self._queue.task_done()
+            return event
         except asyncio.TimeoutError:
             return None
 
     async def clear(self) -> None:
-        """
-        Asynchronously clear all events from the queue.
-        This is not a standard asyncio.Queue operation; we implement by draining.
-        """
+        """Clear all pending events."""
         while not self._queue.empty():
-            await self._queue.get()
-
-    @property
-    def priority_mode(self) -> bool:
-        """
-        Indicates if this async queue uses priority ordering.
-        """
-        return self._priority_mode
+            try:
+                await self.dequeue()
+            except asyncio.TimeoutError:
+                break
 
 
 class AsyncStateMachine(StateMachine):
@@ -91,29 +72,29 @@ class AsyncStateMachine(StateMachine):
     def __init__(self, initial_state: State, validator: Optional[Validator] = None, hooks: Optional[List] = None):
         super().__init__(initial_state, validator, hooks)
         self._event_queue = AsyncEventQueue()
+        self._async_lock = asyncio.Lock()
 
     async def start(self) -> None:
         """Start the state machine with async validation."""
-        if self._started:
-            return
+        async with self._async_lock:
+            if self._started:
+                return
 
-        # Resolve the correct starting state
-        self._current_state = self._resolve_state_for_start()
+            # Reuse parent's resolution logic
+            self._current_state = self._resolve_state_for_start()
 
-        # Validate machine structure with potential async validator
-        errors = self._graph.validate()
-        if errors:
-            raise ValidationError("\n".join(errors))
+            # Validate using parent's validation but handle async
+            errors = self._graph.validate()
+            if errors:
+                raise ValidationError("\n".join(errors))
 
-        if hasattr(self._validator, "validate_state_machine"):
-            validate_method = self._validator.validate_state_machine
-            if asyncio.iscoroutinefunction(validate_method):
-                await validate_method(self)
+            if asyncio.iscoroutinefunction(self._validator.validate_state_machine):
+                await self._validator.validate_state_machine(self)
             else:
-                validate_method(self)
+                self._validator.validate_state_machine(self)
 
-        await self._notify_enter_async(self._current_state)
-        self._started = True
+            await self._notify_enter_async(self._current_state)
+            self._started = True
 
     async def stop(self) -> None:
         """Stop the state machine asynchronously."""
@@ -126,23 +107,24 @@ class AsyncStateMachine(StateMachine):
 
     async def process_event(self, event: Event) -> bool:
         """Process an event asynchronously."""
-        if not self._started or not self._current_state:
-            return False
+        async with self._async_lock:
+            # Reuse parent's validation and transition selection
+            if not self._started or not self._current_state:
+                return False
 
-        valid_transitions = self._graph.get_valid_transitions(self._current_state, event)
-        if not valid_transitions:
-            return False
+            valid_transitions = self._graph.get_valid_transitions(self._current_state, event)
+            if not valid_transitions:
+                return False
 
-        # Take highest priority transition
-        transition = max(valid_transitions, key=lambda t: t.get_priority())
-        await self._execute_transition_async(transition, event)
-        return True
+            transition = max(valid_transitions, key=lambda t: t.get_priority())
+            await self._execute_transition_async(transition, event)
+            return True
 
     async def _execute_transition_async(self, transition: Transition, event: Event) -> None:
-        """Execute a transition asynchronously."""
+        """Execute transition actions asynchronously while reusing parent's logic."""
         try:
             await self._notify_exit_async(self._current_state)
-            
+
             # Execute actions with async support
             for action in transition.actions:
                 try:
@@ -151,32 +133,21 @@ class AsyncStateMachine(StateMachine):
                     else:
                         action(event)
                 except Exception as e:
-                    # Notify hooks of the error
-                    for hook in self._hooks:
-                        if hasattr(hook, "on_error"):
-                            hook_method = hook.on_error
-                            if asyncio.iscoroutinefunction(hook_method):
-                                await hook_method(e)
-                            else:
-                                hook_method(e)
-                    # Don't change state if action fails
+                    await self._notify_error_async(e)
                     return
-            
+
+            # Reuse parent's state update logic
             self._current_state = transition.target
             await self._notify_enter_async(self._current_state)
+
         except Exception as e:
-            # Handle any other errors during transition
-            for hook in self._hooks:
-                if hasattr(hook, "on_error"):
-                    hook_method = hook.on_error
-                    if asyncio.iscoroutinefunction(hook_method):
-                        await hook_method(e)
-                    else:
-                        hook_method(e)
+            await self._notify_error_async(e)
 
     async def _notify_enter_async(self, state: State) -> None:
-        """Notify hooks of state entry asynchronously."""
+        """Notify state entry asynchronously."""
+        # Call state's own enter method first
         state.on_enter()
+        # Then notify hooks
         for hook in self._hooks:
             if hasattr(hook, "on_enter"):
                 hook_method = hook.on_enter
@@ -196,6 +167,16 @@ class AsyncStateMachine(StateMachine):
                     await hook_method(state)
                 else:
                     hook_method(state)
+
+    async def _notify_error_async(self, error: Exception) -> None:
+        """Notify hooks of an error asynchronously."""
+        for hook in self._hooks:
+            if hasattr(hook, "on_error"):
+                hook_method = hook.on_error
+                if asyncio.iscoroutinefunction(hook_method):
+                    await hook_method(error)
+                else:
+                    hook_method(error)
 
 
 class _AsyncEventProcessingLoop:

@@ -1,20 +1,23 @@
 """Integration tests for complex state hierarchies and error recovery scenarios."""
 
 import asyncio
+from typing import Dict, List, Optional
+from unittest.mock import AsyncMock, Mock
+
 import pytest
-from typing import List, Optional, Dict
-from unittest.mock import Mock, AsyncMock
 
 from hsm.core.events import Event, TimeoutEvent
-from hsm.core.state_machine import CompositeStateMachine
-from hsm.runtime.async_support import AsyncStateMachine, AsyncEventQueue
-from hsm.core.states import State, CompositeState
-from hsm.core.transitions import Transition
-from hsm.core.validations import Validator, ValidationError
 from hsm.core.hooks import HookProtocol
+from hsm.core.state_machine import CompositeStateMachine
+from hsm.core.states import CompositeState, State
+from hsm.core.transitions import Transition
+from hsm.core.validations import ValidationError, Validator
+from hsm.runtime.async_support import AsyncEventQueue, AsyncStateMachine
+
 
 class TestHook:
     """Test hook for tracking state machine events."""
+
     def __init__(self):
         self.state_changes: List[tuple] = []
         self.errors: List[Exception] = []
@@ -32,9 +35,11 @@ class TestHook:
     async def on_action(self, action_name: str) -> None:
         self.action_calls.append(action_name)
 
+
 @pytest.fixture
 def hook():
     return TestHook()
+
 
 def create_nested_state_machine(hook: TestHook) -> CompositeStateMachine:
     """Create a complex nested state machine for testing."""
@@ -68,31 +73,18 @@ def create_nested_state_machine(hook: TestHook) -> CompositeStateMachine:
     processing.add_child_state(cleanup)
 
     # Create state machines
-    processing_machine = AsyncStateMachine(
-        initial_state=initializing,
-        validator=Validator(),
-        hooks=[hook]
-    )
+    processing_machine = AsyncStateMachine(initial_state=initializing, validator=Validator(), hooks=[hook])
     processing_machine.add_state(running)
     processing_machine.add_state(cleanup)
 
-    main_machine = CompositeStateMachine(
-        initial_state=root,
-        validator=Validator(),
-        hooks=[hook]
-    )
+    main_machine = CompositeStateMachine(initial_state=root, validator=Validator(), hooks=[hook])
     main_machine.add_submachine(processing, processing_machine)
 
     # Add transitions
-    def add_transition(source: State, target: State, event_name: str,
-                      machine: AsyncStateMachine, priority: int = 0):
-        machine.add_transition(Transition(
-            source=source,
-            target=target,
-            guards=[lambda e: True],
-            actions=[],
-            priority=priority
-        ))
+    def add_transition(source: State, target: State, event_name: str, machine: AsyncStateMachine, priority: int = 0):
+        machine.add_transition(
+            Transition(source=source, target=target, guards=[lambda e: True], actions=[], priority=priority)
+        )
 
     # Processing machine transitions
     add_transition(initializing, running, "start", processing_machine)
@@ -107,6 +99,7 @@ def create_nested_state_machine(hook: TestHook) -> CompositeStateMachine:
     add_transition(operational, shutdown, "shutdown", main_machine, priority=20)
 
     return main_machine
+
 
 @pytest.mark.asyncio
 async def test_complex_state_hierarchy(hook):
@@ -129,6 +122,7 @@ async def test_complex_state_hierarchy(hook):
     await machine.process_event(Event("finish"))
     assert "Cleanup" in [state for _, state in hook.state_changes]
 
+
 @pytest.mark.asyncio
 async def test_error_recovery_scenario(hook):
     """Test error recovery in a complex state hierarchy."""
@@ -149,6 +143,7 @@ async def test_error_recovery_scenario(hook):
     assert machine.current_state.name == "Operational"
     assert "Operational" in [state for _, state in hook.state_changes]
 
+
 @pytest.mark.asyncio
 async def test_concurrent_event_processing(hook):
     """Test concurrent event processing in nested state machines."""
@@ -156,18 +151,10 @@ async def test_concurrent_event_processing(hook):
     await machine.start()
 
     # Create multiple concurrent events
-    events = [
-        Event("begin"),
-        Event("start"),
-        Event("error"),
-        Event("recover")
-    ]
+    events = [Event("begin"), Event("start"), Event("error"), Event("recover")]
 
     # Process events concurrently
-    tasks = [
-        asyncio.create_task(machine.process_event(event))
-        for event in events
-    ]
+    tasks = [asyncio.create_task(machine.process_event(event)) for event in events]
 
     await asyncio.gather(*tasks)
 
@@ -177,6 +164,7 @@ async def test_concurrent_event_processing(hook):
     assert "Error" in state_sequence
     assert "Operational" in state_sequence
 
+
 @pytest.mark.asyncio
 async def test_shutdown_priority(hook):
     """Test that shutdown events take priority over other transitions."""
@@ -184,11 +172,7 @@ async def test_shutdown_priority(hook):
     await machine.start()
 
     # Queue multiple events including shutdown
-    events = [
-        Event("begin"),
-        Event("error"),
-        Event("shutdown")  # Should take priority
-    ]
+    events = [Event("begin"), Event("error"), Event("shutdown")]  # Should take priority
 
     for event in events:
         await machine.process_event(event)
@@ -196,6 +180,7 @@ async def test_shutdown_priority(hook):
     # Verify we reached shutdown state
     assert machine.current_state.name == "Shutdown"
     assert "Shutdown" in [state for _, state in hook.state_changes]
+
 
 @pytest.mark.asyncio
 async def test_nested_error_handling(hook):
@@ -208,13 +193,15 @@ async def test_nested_error_handling(hook):
         raise RuntimeError("Action failed")
 
     # Add error-prone transition
-    machine.add_transition(Transition(
-        source=machine.get_state("Idle"),
-        target=machine.get_state("Processing"),
-        guards=[lambda e: True],
-        actions=[failing_action],
-        priority=0
-    ))
+    machine.add_transition(
+        Transition(
+            source=machine.get_state("Idle"),
+            target=machine.get_state("Processing"),
+            guards=[lambda e: True],
+            actions=[failing_action],
+            priority=0,
+        )
+    )
 
     # Attempt transition with failing action
     await machine.process_event(Event("begin"))
@@ -224,6 +211,7 @@ async def test_nested_error_handling(hook):
     assert isinstance(hook.errors[0], RuntimeError)
     assert machine.current_state.name == "Error"
 
+
 @pytest.mark.asyncio
 async def test_state_reentry(hook):
     """Test re-entering the same state through different paths."""
@@ -232,18 +220,12 @@ async def test_state_reentry(hook):
 
     # Navigate to processing
     await machine.process_event(Event("begin"))
-    initial_processing_entry = len([
-        state for _, state in hook.state_changes
-        if state == "Processing"
-    ])
+    initial_processing_entry = len([state for _, state in hook.state_changes if state == "Processing"])
 
     # Exit and re-enter processing
     await machine.process_event(Event("complete"))
     await machine.process_event(Event("begin"))
 
     # Verify state was properly re-entered
-    processing_entries = len([
-        state for _, state in hook.state_changes
-        if state == "Processing"
-    ])
-    assert processing_entries == initial_processing_entry + 2  # +2 for exit and re-entry 
+    processing_entries = len([state for _, state in hook.state_changes if state == "Processing"])
+    assert processing_entries == initial_processing_entry + 2  # +2 for exit and re-entry
