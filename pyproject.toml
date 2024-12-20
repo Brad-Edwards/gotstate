@@ -97,6 +97,6 @@ directory = "coverage-reports/html"
 output = "coverage-reports/coverage.xml"
 
 [tool.bandit]
-exclude_dirs = ["tests", "tests/unit", "tests/integration"]
+exclude_dirs = ["tests/**"]
 skips = ["B101"]  # Skip assert warnings globally
 targets = ["hsm"]
