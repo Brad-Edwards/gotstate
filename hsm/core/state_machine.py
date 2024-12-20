@@ -114,7 +114,7 @@ class StateMachine:
     def __init__(self, initial_state: State, validator: Optional[Validator] = None, hooks: Optional[List] = None):
         self._graph = StateGraph()
         self._initial_state = initial_state
-        self._current_state: Optional[State] = None
+        self._current_state = initial_state
         self._validator = validator or Validator()
         self._hooks = hooks or []
         self._started = False

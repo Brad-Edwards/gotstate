@@ -111,7 +111,6 @@ class _DefaultValidationRules:
             raise ValidationError("StateMachine must have an initial state.")
 
         try:
-            # Get all transitions and states
             transitions = machine._context.get_transitions()
             all_states = machine._context.get_states()
 
@@ -132,6 +131,12 @@ class _DefaultValidationRules:
 
             # Build reachability graph starting from initial state
             reachable_states = {machine.current_state}
+            
+            # Add all ancestor states as they are implicitly reachable
+            current = machine.current_state
+            while current.parent is not None:
+                reachable_states.add(current.parent)
+                current = current.parent
 
             # Keep expanding reachable states until no new states are found
             while True:
@@ -139,6 +144,11 @@ class _DefaultValidationRules:
                 for t in transitions:
                     if t.source in reachable_states:
                         new_reachable.add(t.target)
+                        # Add parent states of the target as they are implicitly reachable
+                        current = t.target
+                        while current.parent is not None:
+                            new_reachable.add(current.parent)
+                            current = current.parent
 
                 # If no new states were added, we're done
                 if not (new_reachable - reachable_states):
@@ -146,16 +156,20 @@ class _DefaultValidationRules:
 
                 reachable_states.update(new_reachable)
 
-            # Check if any state in the machine is unreachable
-            unreachable = all_states - reachable_states
+            # Filter out composite states from unreachability check
+            leaf_states = {s for s in all_states if not hasattr(s, 'add_child_state')}
+            unreachable = leaf_states - reachable_states
+            
             if unreachable:
                 raise ValidationError(
-                    f"States {[s.name for s in unreachable]} are not"
-                    + f"reachable from initial state {machine.current_state.name}."
+                    f"States {[s.name for s in unreachable]} are not "
+                    f"reachable from initial state {machine.current_state.name}."
                 )
-        except AttributeError:
-            # This is likely a mock in tests, skip validation
-            return
+
+        except Exception as e:
+            if not isinstance(e, ValidationError):
+                raise ValidationError(f"Validation failed: {str(e)}") from e
+            raise
 
     @staticmethod
     def validate_transition(transition: "Transition") -> None:
