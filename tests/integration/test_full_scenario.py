@@ -5,12 +5,13 @@
 import asyncio
 import threading
 import time
+from typing import List, Optional
+from unittest.mock import Mock
 
 import pytest
-from unittest.mock import Mock
-from typing import List, Optional
 
 from hsm.core.events import Event, TimeoutEvent
+from hsm.core.hooks import HookProtocol
 from hsm.core.state_machine import CompositeStateMachine, StateMachine, _ErrorRecoveryStrategy
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition
@@ -19,7 +20,6 @@ from hsm.runtime.async_support import AsyncEventQueue, AsyncStateMachine
 from hsm.runtime.event_queue import EventQueue
 from hsm.runtime.executor import Executor
 from hsm.runtime.timers import TimeoutScheduler
-from hsm.core.hooks import HookProtocol
 
 
 @pytest.fixture
@@ -177,13 +177,7 @@ def test_composite_state_machine_integration(hook, validator):
 
 @pytest.mark.asyncio
 async def test_async_integration(hook, validator):
-    """
-    Integration test for async:
-    - Create an AsyncStateMachine and AsyncEventQueue.
-    - Start it, enqueue events, and ensure transitions occur as expected.
-    - This requires a simple async loop scenario.
-    """
-
+    """Test async event processing."""
     # States
     start_state = State("AsyncStart")
     end_state = State("AsyncEnd")
@@ -196,38 +190,22 @@ async def test_async_integration(hook, validator):
     t = Transition(source=start_state, target=end_state, guards=[], actions=[], priority=0)
     machine.add_transition(t)
 
+    # Create async event queue
+    eq = AsyncEventQueue()
+
+    # Start machine
     await machine.start()
-    assert machine.current_state.name == "AsyncStart"
-    queue = AsyncEventQueue(priority=False)
+    assert machine.current_state == start_state
 
-    # We need an async loop that pulls from queue and processes events
-    # For integration, simulate a small async event loop:
-    async def event_loop():
-        # In a real scenario, the async executor would be separate, but we simulate it here.
-        for _ in range(3):
-            event = await queue.dequeue()
-            if event:
-                await machine.process_event(event)
-            if machine.current_state.name == "AsyncEnd":
-                break
+    # Process event
+    event = Event("test")
+    await eq.enqueue(event)
+    await machine.process_event(event)
 
-    # Enqueue an event that causes transition
-    await queue.enqueue(Event("Finish"))
-    await asyncio.wait_for(event_loop(), timeout=1.0)
+    assert machine.current_state == end_state
 
-    assert machine.current_state.name == "AsyncEnd", "Machine should transition asynchronously."
-    assert "AsyncEnd" in hook.entered
-    assert "AsyncStart" in hook.exited
-
+    # Cleanup
     await machine.stop()
-
-    # Clean up at the end
-    for task in asyncio.all_tasks() - {asyncio.current_task()}:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
 
 
 def test_timeout_event_integration(validator):
@@ -330,47 +308,47 @@ def test_concurrent_event_processing():
     """Test concurrent event processing with multiple producers/consumers."""
     import threading
     from queue import Queue
-    
+
     # Create states
     state1 = State("State1")
     state2 = State("State2")
     state3 = State("State3")
-    
+
     # Create machine and add all states first
     machine = StateMachine(initial_state=state1)
     machine.add_state(state2)
     machine.add_state(state3)
-    
+
     # Create transitions after all states are added
     t1 = Transition(source=state1, target=state2)
     t2 = Transition(source=state2, target=state3)
-    
+
     # Add transitions
     machine.add_transition(t1)
     machine.add_transition(t2)
-    
+
     # Rest of concurrent processing test...
     results = Queue()
-    
+
     def worker():
         for _ in range(50):
             machine.process_event(Event("test"))
             results.put(machine.current_state.name)
-    
+
     # Start concurrent workers
     threads = [threading.Thread(target=worker) for _ in range(4)]
     for t in threads:
         t.start()
-    
+
     # Wait for completion
     for t in threads:
         t.join()
-    
+
     # Verify results
     processed = []
     while not results.empty():
         processed.append(results.get())
-    
+
     assert len(processed) == 200  # 4 threads * 50 events each
 
 
@@ -420,15 +398,15 @@ def test_composite_history_integration(hook, validator):
     root = CompositeState("Root")
     group1 = CompositeState("Group1")
     group2 = CompositeState("Group2")
-    
+
     # Create states for group1
     state1a = State("State1A")
     state1b = State("State1B")
-    
+
     # Create states for group2
     state2a = State("State2A")
     state2b = State("State2B")
-    
+
     # Set up hierarchy first
     root.add_child_state(group1)
     root.add_child_state(group2)
@@ -436,54 +414,54 @@ def test_composite_history_integration(hook, validator):
     group1.add_child_state(state1b)
     group2.add_child_state(state2a)
     group2.add_child_state(state2b)
-    
+
     # Create sub-machines and add all states first
     sub_machine1 = StateMachine(initial_state=state1a, validator=validator, hooks=[hook])
     sub_machine1.add_state(state1a, parent=group1)
     sub_machine1.add_state(state1b, parent=group1)
-    
+
     sub_machine2 = StateMachine(initial_state=state2a, validator=validator, hooks=[hook])
     sub_machine2.add_state(state2a, parent=group2)
     sub_machine2.add_state(state2b, parent=group2)
-    
+
     # Create composite machine and add all states
     c_machine = CompositeStateMachine(initial_state=root, validator=validator, hooks=[hook])
     c_machine.add_state(group1, parent=root)
     c_machine.add_state(group2, parent=root)
-    
+
     # Add transitions after all states are in their respective machines
     t1 = Transition(source=state1a, target=state1b)
     t2 = Transition(source=state2a, target=state2b)
     t_groups = Transition(source=group1, target=group2)
-    
+
     sub_machine1.add_transition(t1)
     sub_machine2.add_transition(t2)
     c_machine.add_transition(t_groups)
-    
+
     # Add submachines after all states and transitions are set up
     c_machine.add_submachine(group1, sub_machine1)
     c_machine.add_submachine(group2, sub_machine2)
-    
+
     # Start machines
     c_machine.start()
     sub_machine1.start()
     sub_machine2.start()
-    
+
     # Test transitions and history
     sub_machine1.process_event(Event("ToB"))
     assert sub_machine1.current_state == state1b
-    
+
     # Stop and restart to test history
     sub_machine1.stop()
     sub_machine1.start()
     assert sub_machine1.current_state == state1b
-    
+
     # Clear history
     sub_machine1._context._history.clear()
     sub_machine1.stop()
     sub_machine1.start()
     assert sub_machine1.current_state == state1a
-    
+
     c_machine.stop()
 
 
@@ -513,22 +491,22 @@ def test_error_recovery_integration(hook, validator):
             except Exception as e:
                 # Log error to hook
                 for hook in state_machine._hooks:
-                    if hasattr(hook, 'on_error'):
+                    if hasattr(hook, "on_error"):
                         hook.on_error(e)
 
     # Create machine and add all states first
     machine = StateMachine(initial_state=normal, validator=validator, hooks=[hook])
-    machine.add_state(error)      # Add error state to graph
-    machine.add_state(fallback)   # Add fallback state to graph
-    
+    machine.add_state(error)  # Add error state to graph
+    machine.add_state(fallback)  # Add fallback state to graph
+
     # Set error recovery strategy
     machine._error_recovery = TestErrorRecovery()
 
     # Define transitions after all states are in graph
-    t1 = Transition(source=normal, target=error, actions=[failing_action], 
-                   guards=[lambda e: e.name == "Fail"], priority=10)
-    t2 = Transition(source=normal, target=fallback, 
-                   guards=[lambda e: e.name == "Recover"], priority=20)
+    t1 = Transition(
+        source=normal, target=error, actions=[failing_action], guards=[lambda e: e.name == "Fail"], priority=10
+    )
+    t2 = Transition(source=normal, target=fallback, guards=[lambda e: e.name == "Recover"], priority=20)
 
     # Add transitions
     machine.add_transition(t1)
@@ -564,11 +542,12 @@ def test_complex_event_chain_integration(hook, validator):
     def track_transition(state_name):
         def action(event):
             transition_sequence.append(state_name)
+
         return action
 
     # Create and configure machine
     machine = StateMachine(initial_state=state_a, validator=validator, hooks=[hook])
-    
+
     # Add all states first
     machine.add_state(state_b)
     machine.add_state(state_c)

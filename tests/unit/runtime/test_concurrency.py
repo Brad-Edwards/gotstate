@@ -25,16 +25,17 @@ def test_lock_context_manager():
 
 def test_get_lock():
     from hsm.runtime.concurrency import get_lock
-    
+
     lock = get_lock()
     assert hasattr(lock, "acquire")
     assert hasattr(lock, "release")
-    
+
 
 def test_with_lock():
-    from hsm.runtime.concurrency import with_lock
     from unittest.mock import MagicMock
-    
+
+    from hsm.runtime.concurrency import with_lock
+
     lock = MagicMock()
     with with_lock(lock):
         lock.acquire.assert_called_once()
@@ -42,9 +43,10 @@ def test_with_lock():
 
 
 def test_with_lock_exception():
-    from hsm.runtime.concurrency import with_lock
     from unittest.mock import MagicMock
-    
+
+    from hsm.runtime.concurrency import with_lock
+
     lock = MagicMock()
     try:
         with with_lock(lock):
@@ -56,9 +58,10 @@ def test_with_lock_exception():
 
 
 def test_lock_context_manager_exception():
-    from hsm.runtime.concurrency import _LockContextManager
     from unittest.mock import MagicMock
-    
+
+    from hsm.runtime.concurrency import _LockContextManager
+
     lock = MagicMock()
     manager = _LockContextManager(lock)
     try:

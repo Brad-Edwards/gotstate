@@ -63,6 +63,7 @@ def test_executor_process_events(mock_machine, mock_event_queue, mock_event):
 def test_executor_double_run(mock_machine, mock_event_queue):
     import threading
     import time
+
     from hsm.runtime.executor import Executor
 
     ex = Executor(machine=mock_machine, event_queue=mock_event_queue)
@@ -82,9 +83,10 @@ def test_executor_double_run(mock_machine, mock_event_queue):
 
 
 def test_executor_machine_start(mock_machine, mock_event_queue):
-    from hsm.runtime.executor import Executor
     import threading
     import time
+
+    from hsm.runtime.executor import Executor
 
     mock_machine._started = False
     ex = Executor(machine=mock_machine, event_queue=mock_event_queue)
@@ -102,9 +104,10 @@ def test_executor_machine_start(mock_machine, mock_event_queue):
 
 
 def test_executor_error_handling(mock_machine, mock_event_queue, mock_event):
-    from hsm.runtime.executor import Executor
     import threading
     import time
+
+    from hsm.runtime.executor import Executor
 
     # Make process_event raise an exception
     mock_machine.process_event.side_effect = Exception("Test error")
@@ -118,7 +121,7 @@ def test_executor_error_handling(mock_machine, mock_event_queue, mock_event):
 
     ex.stop()
     thread.join(timeout=1)
-    
+
     # Verify the executor continued running despite the error
     mock_machine.process_event.assert_called_once_with(mock_event)
 

@@ -21,7 +21,7 @@ def test_timeout_event_init():
 
 def test_event_metadata():
     from hsm.core.events import Event
-    
+
     e = Event("TestEvent")
     e.metadata["key"] = "value"
     assert e.metadata["key"] == "value"
@@ -30,20 +30,20 @@ def test_event_metadata():
 
 def test_event_metadata_isolation():
     from hsm.core.events import Event
-    
+
     e1 = Event("Event1")
     e2 = Event("Event2")
-    
+
     e1.metadata["key"] = "value1"
     e2.metadata["key"] = "value2"
-    
+
     assert e1.metadata["key"] == "value1"
     assert e2.metadata["key"] == "value2"
 
 
 def test_timeout_event_inheritance():
     from hsm.core.events import Event, TimeoutEvent
-    
+
     e = TimeoutEvent("Timeout", 10.0)
     assert isinstance(e, Event)
     assert isinstance(e, TimeoutEvent)
@@ -51,7 +51,7 @@ def test_timeout_event_inheritance():
 
 def test_timeout_event_metadata():
     from hsm.core.events import TimeoutEvent
-    
+
     e = TimeoutEvent("Timeout", 10.0)
     e.metadata["key"] = "value"
     assert e.metadata["key"] == "value"
@@ -60,7 +60,7 @@ def test_timeout_event_metadata():
 
 def test_event_empty_metadata():
     from hsm.core.events import Event
-    
+
     e = Event("TestEvent")
     assert isinstance(e.metadata, dict)
     assert len(e.metadata) == 0

@@ -2,17 +2,18 @@
 
 import threading
 import time
-from typing import Dict, Optional, Set
 from dataclasses import dataclass
+from typing import Dict, Optional, Set
 
-from ..states import State, CompositeState
 from ..events import Event
+from ..states import CompositeState, State
 from .graph import StateGraph
 
 
 @dataclass
 class _StateHistoryRecord:
     """Immutable record of historical state information."""
+
     timestamp: float
     state: State
     composite_state: CompositeState
@@ -68,12 +69,10 @@ class RuntimeContext:
             for ancestor in ancestors:
                 if isinstance(ancestor, CompositeState):
                     self._history[ancestor] = _StateHistoryRecord(
-                        timestamp=time.time(),
-                        state=state,
-                        composite_state=ancestor
+                        timestamp=time.time(), state=state, composite_state=ancestor
                     )
 
     def get_history_state(self, composite_state: CompositeState) -> Optional[State]:
         """Get the last active state for a composite state."""
         record = self._history.get(composite_state)
-        return record.state if record else None 
+        return record.state if record else None

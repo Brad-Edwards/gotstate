@@ -4,11 +4,13 @@
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 from hsm.core.errors import TransitionError
 from hsm.core.events import Event
-from hsm.core.states import State
+
+if TYPE_CHECKING:
+    from hsm.core.states import State
 
 
 class Transition:

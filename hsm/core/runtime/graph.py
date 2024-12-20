@@ -1,22 +1,23 @@
 """Graph-based state machine structure management."""
 
-from typing import Dict, List, Optional, Set
 from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set
 
 from ..base import StateBase
-from ..states import State, CompositeState
-from ..transitions import Transition
-from ..events import Event
 from ..errors import ValidationError
+from ..events import Event
+from ..states import CompositeState, State
+from ..transitions import Transition
 
 
 @dataclass
 class _GraphNode:
     """Internal node representation for the state graph."""
+
     state: State
     transitions: Set[Transition] = field(default_factory=set)
-    children: Set['_GraphNode'] = field(default_factory=set)
-    parent: Optional['_GraphNode'] = None
+    children: Set["_GraphNode"] = field(default_factory=set)
+    parent: Optional["_GraphNode"] = None
 
     def __hash__(self):
         return hash(self.state)
@@ -46,10 +47,10 @@ class StateGraph:
         if parent:
             if parent not in self._nodes:
                 self.add_state(parent)
-            
+
             parent_node = self._nodes[parent]
             state_node = self._nodes[state]
-            
+
             # Update parent-child relationships
             parent_node.children.add(state_node)
             state_node.parent = parent_node
@@ -61,7 +62,7 @@ class StateGraph:
             raise ValueError(f"Source state {transition.source.name} not in graph")
         if transition.target not in self._nodes:
             raise ValueError(f"Target state {transition.target.name} not in graph")
-            
+
         self._transitions[transition.source].add(transition)
         self._nodes[transition.source].transitions.add(transition)
 
@@ -72,14 +73,14 @@ class StateGraph:
         return sorted(
             [t for t in self._transitions[state] if t.evaluate_guards(event)],
             key=lambda t: t.get_priority(),
-            reverse=True
+            reverse=True,
         )
 
     def get_ancestors(self, state: State) -> List[State]:
         """Get all ancestor states in order from immediate parent to root."""
         if state not in self._nodes:
             return []
-        
+
         ancestors = []
         current = self._nodes[state]
         while current.parent:
@@ -105,20 +106,20 @@ class StateGraph:
 
         def detect_cycle(state: State) -> None:
             if state in path:
-                cycle_names = [s.name for s in path[path.index(state):]] + [state.name]
+                cycle_names = [s.name for s in path[path.index(state) :]] + [state.name]
                 errors.append(f"Cycle detected in state hierarchy: {' -> '.join(cycle_names)}")
                 return
-            
+
             if state in visited:
                 return
-                
+
             visited.add(state)
             path.append(state)
-            
+
             node = self._nodes[state]
             for child_node in node.children:
                 detect_cycle(child_node.state)
-                
+
             path.pop()
 
         # Check composite states have children

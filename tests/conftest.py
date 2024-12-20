@@ -7,6 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from hsm.core.hooks import Hook
+
 
 @pytest.fixture
 def simple_state():
@@ -30,6 +32,12 @@ def event_queue():
     from hsm.runtime.event_queue import EventQueue
 
     return EventQueue(priority=False)
+
+
+@pytest.fixture
+def hook():
+    """A hook object for testing hooks."""
+    return Hook()
 
 
 @pytest.fixture

@@ -4,9 +4,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, List, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Callable, List, Optional, Protocol
 
-from hsm.core.states import State
+if TYPE_CHECKING:
+    from hsm.core.states import State
 
 
 class HookProtocol(Protocol):

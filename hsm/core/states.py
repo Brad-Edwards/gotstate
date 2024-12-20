@@ -4,10 +4,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional, Set
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 
 from hsm.core.base import StateBase
+from hsm.core.events import Event
+from hsm.core.transitions import Transition
+
+if TYPE_CHECKING:
+    from hsm.core.hooks import Hook
+    from hsm.core.validations import Validator
+
 
 class State(StateBase):
     """
@@ -28,9 +35,7 @@ class State(StateBase):
         :param entry_actions: Actions executed upon entering this state.
         :param exit_actions: Actions executed upon exiting this state.
         """
-        super().__init__(name=name,
-                         entry_actions=entry_actions or [],
-                         exit_actions=exit_actions or [])
+        super().__init__(name=name, entry_actions=entry_actions or [], exit_actions=exit_actions or [])
 
 
 class CompositeState(State):
