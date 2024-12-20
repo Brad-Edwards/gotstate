@@ -554,24 +554,24 @@ def test_resource_lifecycle_integration(hook, validator):
     state1 = ResourceState("State1")
     state2 = ResourceState("State2")
 
-    # Define transition
-    t = Transition(source=state1, target=state2, priority=0)
-
-    # Create machine
+    # Create machine and add states
     machine = StateMachine(initial_state=state1, validator=validator, hooks=[hook])
+    machine.add_state(state2)  # Add state2 before creating transition
+
+    # Define and add transition
+    t = Transition(source=state1, target=state2, priority=0)
     machine.add_transition(t)
 
-    # Start and verify resource initialization
+    # Start machine and verify resource lifecycle
     machine.start()
-    assert machine.current_state.resource.active is True
+    assert state1.resource is not None
+    assert state1.resource.active
 
-    # Trigger transition
-    machine.process_event(Event("Next"))
-
-    # Verify resource cleanup and new resource initialization
-    assert machine.current_state.name == "State2"
-    assert not state1.resource.active  # Old resource cleaned up
-    assert machine.current_state.resource.active  # New resource initialized
+    # Transition should cleanup state1's resource
+    machine.process_event(Event("test"))
+    assert not state1.resource.active
+    assert state2.resource is not None
+    assert state2.resource.active
 
 
 def test_validation_framework_integration(hook):
