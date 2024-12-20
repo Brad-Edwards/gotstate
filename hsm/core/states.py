@@ -80,8 +80,12 @@ class State:
         pass
 
     def cleanup_data(self) -> None:
-        """Clean up or reset the state's data dictionary when exiting this state."""
-        self._data.clear()
+        """Clean up or reset the state's data dictionary when exiting this state.
+        Only cleans up transient data (keys starting with '_'), preserving persistent data."""
+        # Only clear transient data (keys starting with '_')
+        keys_to_remove = [k for k in self._data.keys() if k.startswith("_")]
+        for k in keys_to_remove:
+            self._data.pop(k, None)
 
 
 class CompositeState(State):

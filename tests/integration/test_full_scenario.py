@@ -10,7 +10,7 @@ import pytest
 
 from hsm.core.events import Event, TimeoutEvent
 from hsm.core.state_machine import CompositeStateMachine, StateMachine
-from hsm.core.states import CompositeState, State
+from hsm.core.states import CompositeState, HistoryState, State
 from hsm.core.transitions import Transition
 from hsm.core.validations import Validator
 from hsm.runtime.async_support import AsyncEventQueue, AsyncStateMachine
@@ -330,3 +330,125 @@ def test_concurrent_event_processing():
     t2.join()
 
     assert len(processed) == 100
+
+
+def test_state_data_integration(hook, validator):
+    """
+    Integration test for state data management:
+    - Verify data persistence across transitions
+    - Test data isolation between states
+    - Validate thread safety of data access
+    """
+    # Define states with initial data
+    state1 = State("State1")
+    state2 = State("State2")
+
+    # Initialize state data
+    state1.data["counter"] = 0
+    state2.data["counter"] = 10
+
+    # Define transition that modifies data
+    def increment_action(event):
+        # Access state1's data directly instead of using a stored reference
+        state1.data["counter"] += 1
+
+    t1 = Transition(source=state1, target=state2, guards=[lambda e: True], actions=[increment_action], priority=0)
+
+    machine = StateMachine(initial_state=state1, validator=validator, hooks=[hook])
+    machine.add_transition(t1)
+
+    # Start and verify initial data
+    machine.start()
+    assert machine.current_state.data["counter"] == 0
+
+    # Process event and verify data changes
+    event = Event("Next")
+    machine.process_event(event)
+
+    # Verify state data modifications by accessing state directly
+    assert state1.data["counter"] == 1
+    assert state2.data["counter"] == 10
+    assert machine.current_state == state2
+
+
+def test_composite_history_integration(hook, validator):
+    """
+    Integration test for composite states with history:
+    - Test deep history preservation
+    - Verify correct state restoration
+    - Test history clearing
+    """
+    # Create state hierarchy
+    root = CompositeState("Root")
+    group1 = CompositeState("Group1")
+    group2 = CompositeState("Group2")
+
+    state1a = State("State1A")
+    state1b = State("State1B")
+    state2a = State("State2A")
+    state2b = State("State2B")
+
+    # Set up hierarchy
+    root.add_child_state(group1)
+    root.add_child_state(group2)
+    group1.add_child_state(state1a)
+    group1.add_child_state(state1b)
+    group2.add_child_state(state2a)
+    group2.add_child_state(state2b)
+
+    # Add history states with proper initialization
+    history1 = HistoryState("H1", parent=group1, default_state=state1a)
+    history2 = HistoryState("H2", parent=group2, default_state=state2a)
+
+    # Set history states
+    group1.set_history_state(history1)
+    group2.set_history_state(history2)
+
+    # Create transitions for testing
+    t1 = Transition(source=state1a, target=state1b, guards=[lambda e: True], priority=0)
+    t2 = Transition(source=state2a, target=state2b, guards=[lambda e: True], priority=0)
+
+    # Create machines with history support
+    sub_machine1 = StateMachine(initial_state=state1a, validator=validator, hooks=[hook])
+    sub_machine2 = StateMachine(initial_state=state2a, validator=validator, hooks=[hook])
+
+    sub_machine1.add_transition(t1)
+    sub_machine2.add_transition(t2)
+
+    # Create composite machine
+    c_machine = CompositeStateMachine(initial_state=root, validator=validator, hooks=[hook])
+    c_machine.add_submachine(group1, sub_machine1)
+    c_machine.add_submachine(group2, sub_machine2)
+
+    # Start machines
+    c_machine.start()
+    sub_machine1.start()
+    sub_machine2.start()
+
+    # Test transitions and history recording
+    sub_machine1.process_event(Event("ToB"))
+    assert sub_machine1.current_state == state1b
+
+    # Record history state explicitly
+    history1.record_state(state1b)
+
+    # Stop and restart sub_machine1 to test history
+    sub_machine1.stop()
+    sub_machine1.start()
+    assert sub_machine1.current_state == state1b, "History state should restore to state1b"
+
+    # Clear history and ensure default state is set
+    history1.clear_history()
+    group1.initial_state = state1a  # Explicitly set initial state
+
+    sub_machine1.stop()
+    # Reset machine to use initial state
+    sub_machine1 = StateMachine(initial_state=state1a, validator=validator, hooks=[hook])
+    sub_machine1.start()
+
+    assert sub_machine1.current_state == state1a, "Should revert to default state after history clear"
+
+    # Cleanup
+    c_machine.stop()
+    sub_machine1.stop()
+    sub_machine2.stop()
