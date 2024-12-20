@@ -7,20 +7,18 @@ from hsm.core.events import Event
 
 class MyCustomGuard:
     """
-    A user-defined guard example that checks a custom condition before allowing a transition.
+    A user-defined guard that evaluates a custom condition when checked.
     """
 
     def __init__(self, condition_fn: callable) -> None:
         """
-        Initialize with a condition function returning bool.
+        Initialize with a condition function.
         """
-        raise NotImplementedError()
+        self.condition_fn = condition_fn
 
-    def check(self, event: "Event") -> bool:
+    def check(self, event: Event) -> bool:
         """
-        Evaluate the custom condition with the given event.
-
-        :param event: The triggering event.
-        :return: True if allowed, False if not.
+        Check the guard condition with the given event.
+        Returns True if the condition is met, False otherwise.
         """
-        raise NotImplementedError()
+        return self.condition_fn(event)

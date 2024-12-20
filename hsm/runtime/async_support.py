@@ -5,11 +5,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import List, Optional
 
 from hsm.core.events import Event
-from hsm.core.hooks import HookProtocol
-from hsm.core.state_machine import StateMachine
+from hsm.core.hooks import HookManager, HookProtocol
+from hsm.core.state_machine import StateMachine, _StateMachineContext
 from hsm.core.states import State
 from hsm.core.transitions import Transition
 from hsm.core.validations import Validator
@@ -89,22 +89,24 @@ class AsyncStateMachine:
     This class parallels StateMachine, but provides async start/stop/process_event.
     """
 
-    def __init__(self, initial_state: "State", validator: Validator = None, hooks: list["HookProtocol"] = None):
-        self._sync_machine = StateMachine(initial_state=initial_state, validator=validator, hooks=hooks)
-        self._lock = _AsyncLock()  # Protects machine operations in async context
+    def __init__(self, initial_state: State, validator: Validator = None, hooks: List[HookProtocol] = None):
+        self._context = _StateMachineContext(initial_state)
+        self.validator = validator or Validator()
+        self._hooks = HookManager(hooks or [])
+        self._lock = _AsyncLock()
         self._started = False
         self._stopped = False
 
     @property
-    def current_state(self) -> "State":
-        return self._sync_machine.current_state
+    def current_state(self) -> State:
+        return self._context.get_current_state()
 
     async def start(self) -> None:
         if self._started:
             return
         await self._lock.acquire()
         try:
-            self._sync_machine.start()
+            self._context.start()
             self._started = True
         finally:
             self._lock.release()
@@ -114,7 +116,7 @@ class AsyncStateMachine:
             return
         await self._lock.acquire()
         try:
-            self._sync_machine.process_event(event)
+            self._context.process_event(event)
         finally:
             self._lock.release()
 
@@ -123,15 +125,16 @@ class AsyncStateMachine:
             return
         await self._lock.acquire()
         try:
-            self._sync_machine.stop()
+            self._context.stop()
             self._stopped = True
         finally:
             self._lock.release()
 
-    def add_transition(self, transition: "Transition") -> None:
-        # Adding transitions might be synchronous. If dynamic addition at runtime is needed,
-        # consider making this async as well. For now, we assume it's done before start.
-        self._sync_machine.add_transition(transition)
+    def add_transition(self, transition: Transition) -> None:
+        """
+        Add a transition to the state machine.
+        """
+        self._context.add_transition(transition)
 
 
 class _AsyncEventProcessingLoop:

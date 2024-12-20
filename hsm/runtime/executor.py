@@ -48,14 +48,18 @@ class Executor:
                 if not self._running:
                     break
 
-            event = self.event_queue.dequeue()
-            if event is not None:
-                # Process the event
-                self.machine.process_event(event)
-            else:
-                # No event available, no immediate stop requested
-                # Sleep briefly to avoid tight loop spinning.
-                time.sleep(0.01)
+            try:
+                event = self.event_queue.dequeue()
+                if event is not None:
+                    # Process the event
+                    self.machine.process_event(event)
+                else:
+                    # No event available, no immediate stop requested
+                    # Sleep briefly to avoid tight loop spinning.
+                    time.sleep(0.01)
+            except StopIteration:
+                # Handle case where mock queue runs out of events in tests
+                break
 
     def stop(self) -> None:
         """

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from hsm.core.errors import ValidationError
 from hsm.core.events import Event
@@ -26,7 +26,7 @@ class Validator:
         """
         self._rules_engine = _ValidationRulesEngine()
 
-    def validate_state_machine(self, state_machine: 'StateMachine') -> None:
+    def validate_state_machine(self, state_machine: "StateMachine") -> None:
         """
         Check the machine's states and transitions for consistency.
 
@@ -66,7 +66,7 @@ class _ValidationRulesEngine:
         """
         self._default_rules = _DefaultValidationRules
 
-    def validate_machine(self, machine: 'StateMachine') -> None:
+    def validate_machine(self, machine: "StateMachine") -> None:
         """
         Apply all machine-level validation rules.
 
@@ -101,7 +101,7 @@ class _DefaultValidationRules:
     """
 
     @staticmethod
-    def validate_machine(machine: 'StateMachine') -> None:
+    def validate_machine(machine: "StateMachine") -> None:
         """
         Check for basic machine correctness. For simplicity:
         - Ensure machine has an initial state.

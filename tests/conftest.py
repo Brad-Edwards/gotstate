@@ -2,6 +2,7 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -152,3 +153,12 @@ def mock_event():
     e = MagicMock()
     e.name = "MockEvent"
     return e
+
+
+@pytest.fixture(autouse=True)
+def cleanup_threads():
+    yield
+    # Cleanup any remaining threads after each test
+    for thread in threading.enumerate():
+        if thread != threading.current_thread() and thread.is_alive():
+            thread.join(timeout=1.0)

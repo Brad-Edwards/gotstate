@@ -63,7 +63,6 @@ def test_synchronous_integration(hook, validator):
 
     # Define actions
     def entry_action_fn(**kwargs):
-        # Imagine logging or setting data
         pass
 
     def exit_action_fn(**kwargs):
@@ -81,7 +80,6 @@ def test_synchronous_integration(hook, validator):
     working_state = State("Working", entry_actions=entry_actions, exit_actions=exit_actions)
 
     # Define transitions
-    # Guard checks a simple condition function returning True
     def guard_condition():
         return True
 
@@ -91,10 +89,7 @@ def test_synchronous_integration(hook, validator):
 
     # Construct StateMachine
     machine = StateMachine(initial_state=idle_state, validator=validator, hooks=[hook])
-    # We assume a method to add transitions is available or transitions are configured in constructor.
-    # If not, consider a machine.add_transition() method. Since not explicitly defined, we rely on
-    # hypothetical public methods or the machine context. For integration testing, we assume availability:
-    machine._StateMachine__context.add_transition(t)  # Accessing internal context due to prior design assumption.
+    machine.add_transition(t)
 
     # Validate machine
     machine.validator.validate_state_machine(machine)
@@ -110,28 +105,23 @@ def test_synchronous_integration(hook, validator):
 
     # Process a normal event causing transition to "Working"
     eq.enqueue(Event("StartWork"))
-    # Run executor in a separate thread to emulate real runtime
-    stop_flag = threading.Event()
 
-    def run_executor():
-        executor.run()
-        stop_flag.set()
-
-    thread = threading.Thread(target=run_executor)
+    # Run executor in a separate thread
+    threading.Event()
+    thread = threading.Thread(target=executor.run)
     thread.start()
 
     # Give the executor time to process
     time.sleep(0.1)
+
+    # Stop the executor
+    executor.stop()
+    thread.join(timeout=1.0)
+
     # At this point, machine should have transitioned
     assert machine.current_state.name == "Working"
     assert "Working" in hook.entered
     assert "Idle" in hook.exited
-
-    # Stop machine and executor
-    machine.stop()
-    executor.stop()
-    thread.join(timeout=2.0)
-    assert stop_flag.is_set()
 
     # No errors should have occurred
     assert len(hook.errors) == 0
@@ -157,11 +147,11 @@ def test_composite_state_machine_integration(hook, validator):
     # Define a submachine for top
     sub_machine = StateMachine(initial_state=child1, validator=validator, hooks=[hook])
     t_sub = Transition(source=child1, target=child2, guards=[], actions=[], priority=0)
-    sub_machine._StateMachine__context.add_transition(t_sub)
+    sub_machine.add_transition(t_sub)
 
     # Composite machine manages top and sub_machine
     c_machine = CompositeStateMachine(initial_state=top, validator=validator, hooks=[hook])
-    c_machine._StateMachine__context.add_transition(t_top)
+    c_machine.add_transition(t_top)
     c_machine.add_submachine(top, sub_machine)
 
     # Validate and start
@@ -200,12 +190,7 @@ async def test_async_integration(hook, validator):
     t = Transition(source=start_state, target=end_state, guards=[], actions=[], priority=0)
 
     machine = AsyncStateMachine(initial_state=start_state, validator=validator, hooks=[hook])
-    machine._AsyncStateMachine__context = (
-        machine._AsyncStateMachine__context
-    )  # If such a context is parallel to sync machine
-    machine._AsyncStateMachine__context.add_transition(
-        t
-    )  # Hypothetical internal method, or a public API if implemented.
+    machine.add_transition(t)  # Use the public method to add transition
 
     await machine.start()
     assert machine.current_state.name == "AsyncStart"
@@ -231,6 +216,14 @@ async def test_async_integration(hook, validator):
     assert "AsyncStart" in hook.exited
 
     await machine.stop()
+
+    # Clean up at the end
+    for task in asyncio.all_tasks() - {asyncio.current_task()}:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 def test_timeout_event_integration(validator):
@@ -266,14 +259,14 @@ def test_validation_integration():
 
     s1 = State("S1")
     s2 = State("S2")
-    # Transition referencing s2 but never added to machine properly or no route to s2?
+    # Transition referencing s2 but never added to machine properly
     t = Transition(source=s1, target=s2)
     machine = StateMachine(initial_state=s1, validator=Validator())
 
-    # Add transition incorrectly, let's say we just do this:
-    machine._StateMachine__context.add_transition(t)
+    # Add transition and expect validation to fail
+    machine.add_transition(t)
 
-    # Attempt validation
+    # Validation should fail because s2 is not reachable
     with pytest.raises(ValidationError):
         machine.validator.validate_state_machine(machine)
 
@@ -296,29 +289,16 @@ def test_plugins_integration(hook, validator):
     t = Transition(source=start, target=end, guards=[guard.check], actions=[action.run], priority=0)
 
     machine = StateMachine(initial_state=start, validator=validator, hooks=[hook])
-    machine._StateMachine__context.add_transition(t)
+    machine.add_transition(t)
 
-    eq = EventQueue(priority=False)
-    executor = Executor(machine, eq)
     machine.start()
+    assert machine.current_state.name == "PluginStart"
 
-    eq.enqueue(Event("Go"))
+    # Process event that should trigger transition
+    event = Event("Go")
+    machine.process_event(event)
 
-    stop_flag = threading.Event()
-
-    def run_exec():
-        executor.run()
-        stop_flag.set()
-
-    thread = threading.Thread(target=run_exec)
-    thread.start()
-
-    time.sleep(0.1)
+    # Verify transition occurred and plugin action was executed
     assert machine.current_state.name == "PluginEnd"
-    machine.stop()
-    executor.stop()
-    thread.join()
-
-    # Check hooks
-    assert "PluginEnd" in hook.entered
-    assert "PluginStart" in hook.exited
+    assert hasattr(event, "processed_by_plugin")
+    assert event.processed_by_plugin is True

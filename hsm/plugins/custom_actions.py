@@ -7,19 +7,20 @@ from hsm.core.events import Event
 
 class MyCustomAction:
     """
-    A user-defined action example that executes a custom piece of code during a transition.
+    A user-defined action that executes a custom function when triggered.
     """
 
     def __init__(self, action_fn: callable) -> None:
         """
-        Initialize with a custom action function.
+        Initialize with an action function.
         """
-        raise NotImplementedError()
+        self.action_fn = action_fn
 
-    def run(self, event: "Event") -> None:
+    def execute(self, event: Event) -> None:
         """
-        Perform the action in response to the given event.
+        Execute the custom action with the given event.
+        """
+        self.action_fn(event)
 
-        :param event: The triggering event.
-        """
-        raise NotImplementedError()
+    # Add alias for compatibility
+    run = execute

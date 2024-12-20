@@ -12,27 +12,49 @@ def test_executor_init(mock_machine, mock_event_queue):
 
 
 def test_executor_run_stop(mock_machine, mock_event_queue):
+    import threading
+    import time
+
     from hsm.runtime.executor import Executor
 
-    # Simulate event queue returning None (no events) to end the loop.
-    mock_event_queue.dequeue.side_effect = [None]  # Immediately no events
+    # Simulate event queue returning None (no events)
+    mock_event_queue.dequeue.return_value = None
     ex = Executor(machine=mock_machine, event_queue=mock_event_queue)
 
-    # run should exit gracefully if no events are available
-    ex.run()
-    # No exceptions = pass
+    # Run executor in separate thread
+    thread = threading.Thread(target=ex.run)
+    thread.start()
 
-    # Test stop method: should just set an internal flag
+    # Give it a moment to start
+    time.sleep(0.1)
+
+    # Stop the executor
     ex.stop()
-    # Cannot assert much without knowing internal state, but no error is good.
+    thread.join(timeout=1)
+    assert not thread.is_alive()
 
 
 def test_executor_process_events(mock_machine, mock_event_queue, mock_event):
+    import threading
+    import time
+
     from hsm.runtime.executor import Executor
 
     # Simulate one event then None
     mock_event_queue.dequeue.side_effect = [mock_event, None]
 
     ex = Executor(machine=mock_machine, event_queue=mock_event_queue)
-    ex.run()
+
+    # Run executor in separate thread
+    thread = threading.Thread(target=ex.run)
+    thread.start()
+
+    # Give it a moment to process events
+    time.sleep(0.1)
+
+    # Stop the executor
+    ex.stop()
+    thread.join(timeout=1)
+
+    # Verify the event was processed
     mock_machine.process_event.assert_called_once_with(mock_event)

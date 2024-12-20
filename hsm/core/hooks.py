@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import List, Protocol, Any, Callable, Optional
+from typing import Any, Callable, List, Optional, Protocol
 
 from hsm.core.states import State
 

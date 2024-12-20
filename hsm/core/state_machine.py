@@ -33,6 +33,29 @@ class _StateMachineContext:
     def add_transition(self, transition: Transition) -> None:
         self._transitions.append(transition)
 
+    def start(self) -> None:
+        """Start the context, initializing the current state."""
+        if self._current_state:
+            self._current_state.on_enter()
+
+    def stop(self) -> None:
+        """Stop the context, cleaning up the current state."""
+        if self._current_state:
+            self._current_state.on_exit()
+
+    def process_event(self, event: Event) -> None:
+        """Process an event in the current context."""
+        # Implementation similar to StateMachine.process_event
+        valid_transitions = [
+            t for t in self._transitions if t.source == self._current_state and t.evaluate_guards(event)
+        ]
+        if valid_transitions:
+            transition = sorted(valid_transitions, key=lambda t: t.get_priority(), reverse=True)[0]
+            self._current_state.on_exit()
+            transition.execute_actions(event)
+            self._current_state = transition.target
+            self._current_state.on_enter()
+
 
 class _ErrorRecoveryStrategy:
     """
@@ -55,31 +78,35 @@ class StateMachine:
     def __init__(
         self,
         initial_state: State,
-        validator: Optional[Validator] = None,
-        hooks: Optional[List["HookProtocol"]] = None,
+        validator: Validator = None,
+        hooks: List[HookProtocol] = None,
         error_recovery: Optional[_ErrorRecoveryStrategy] = None,
     ) -> None:
         """
-        Initialize the state machine with an initial state, optional validator,
-        hooks, and an error recovery strategy.
+        Initialize a new state machine instance.
 
-        :param initial_state: The starting state of the machine.
-        :param validator: Optional Validator instance for checks.
-        :param hooks: Optional list of hooks to execute on lifecycle events.
-        :param error_recovery: Optional error recovery strategy.
+        :param initial_state: The starting state for the machine
+        :param validator: Optional validator for checking machine configuration
+        :param hooks: Optional list of lifecycle hooks
+        :param error_recovery: Optional error recovery strategy
         """
         self._context = _StateMachineContext(initial_state)
-        self.validator = validator
-        self._hooks = HookManager(hooks=hooks if hooks else [])
-        self._error_recovery = error_recovery if error_recovery else _ErrorRecoveryStrategy()
+        self.validator = validator or Validator()
+        self._hooks = HookManager(hooks or [])
         self._started = False
         self._stopped = False
+        self._error_recovery = error_recovery or _ErrorRecoveryStrategy()
+
+    def add_transition(self, transition: Transition) -> None:
+        """
+        Add a transition to the state machine.
+
+        :param transition: The transition to add
+        """
+        self._context.add_transition(transition)
 
     @property
     def current_state(self) -> State:
-        """
-        Return the current active state of the state machine.
-        """
         return self._context.get_current_state()
 
     def start(self) -> None:
@@ -138,16 +165,6 @@ class StateMachine:
         self._hooks.execute_on_exit(self.current_state)
         self.current_state.on_exit()
         self._stopped = True
-
-    # Public method to add transitions if needed
-    def add_transition(self, transition: Transition) -> None:
-        """
-        Add a transition to the state machine. Useful if transitions are not all known at construction time.
-        :param transition: The transition to add.
-        """
-        if self.validator:
-            self.validator.validate_transition(transition)
-        self._context.add_transition(transition)
 
 
 class CompositeStateMachine(StateMachine):
