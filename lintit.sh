@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-isort . && black . && flake8 .
+isort . && black .

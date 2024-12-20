@@ -1,146 +1,137 @@
 # hsm/core/transitions.py
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
-from typing import List, Optional
 
-from hsm.interfaces.abc import AbstractAction, AbstractGuard, AbstractState, AbstractTransition
-from hsm.interfaces.types import StateID
+from __future__ import annotations
+
+from typing import Callable, List, Optional
+
+from hsm.core.errors import TransitionError
+from hsm.core.events import Event
+from hsm.core.states import State
 
 
-class Transition(AbstractTransition):
+class Transition:
     """
-    Concrete implementation of a state machine transition.
-
-    A transition represents a possible change from one state to another,
-    optionally guarded by a condition and executing actions when taken.
-
-    Runtime Invariants:
-    - Source and target states are immutable after creation
-    - Guards and actions are immutable after creation
-    - Priority is immutable after creation
-
-    Attributes:
-        _source: The source state.
-        _target: The target state.
-        _guard: Optional condition that must be true for transition to be taken.
-        _actions: List of actions to execute when transition is taken.
-        _priority: Integer priority for conflict resolution.
+    Defines a possible path from one state to another, guarded by conditions and
+    potentially performing actions. Used by the state machine to change states
+    when events are processed.
     """
 
     def __init__(
         self,
-        source: StateID,
-        target: StateID,
-        guard: Optional[AbstractGuard] = None,
-        actions: Optional[List[AbstractAction]] = None,
+        source: "State",
+        target: "State",
+        guards: Optional[List[Callable[[Event], bool]]] = None,
+        actions: Optional[List[Callable[[Event], None]]] = None,
         priority: int = 0,
     ) -> None:
         """
-        Initialize a new transition.
+        Initialize a transition with a source and target state, optional guards,
+        actions, and a priority used if multiple transitions are possible.
 
-        Args:
-            source: The source state ID.
-            target: The target state ID.
-            guard: Optional condition for the transition.
-            actions: Optional list of actions to execute.
-            priority: Priority for conflict resolution (default: 0)
-
-        Raises:
-            TypeError: If source or target is None, or if parameters are of wrong type
-            ValueError: If source or target is empty or whitespace
+        :param source: The origin State of this transition.
+        :param target: The destination State of this transition.
+        :param guards: Guard conditions that must be true for the transition.
+        :param actions: Actions to execute when the transition occurs.
+        :param priority: Numeric priority; higher priority transitions are chosen first.
         """
-        # Validate state IDs
-        if source is None or target is None:
-            raise TypeError("Source and target state IDs cannot be None")
-        if not isinstance(source, str) or not isinstance(target, str):
-            raise TypeError("Source and target must be strings")
-
-        # Validate priority type before any string operations
-        if not isinstance(priority, int) or isinstance(priority, bool):  # explicitly check for bool
-            raise TypeError("Priority must be an integer")
-
-        # Check for whitespace in state IDs
-        if any(c.isspace() for c in source) or any(c.isspace() for c in target):
-            raise ValueError("State IDs cannot contain whitespace")
-
-        # Strip and check if empty
-        source = source.strip()
-        target = target.strip()
-        if not source or not target:
-            raise ValueError("Source and target state IDs cannot be empty or whitespace")
-
-        # Validate guard type
-        if guard is not None and not isinstance(guard, AbstractGuard):
-            raise TypeError("Guard must be an instance of AbstractGuard")
-
-        # Validate actions type and contents
-        if actions is not None:
-            if not isinstance(actions, list):
-                raise TypeError("Actions must be a list")
-            if not all(isinstance(action, AbstractAction) for action in actions):
-                raise TypeError("All actions must be instances of AbstractAction")
-
         self._source = source
         self._target = target
-        self._guard = guard
-        # Create a new list to ensure immutability
-        self._actions = list(actions) if actions is not None else []
+        self._guards = guards if guards else []
+        self._actions = actions if actions else []
         self._priority = priority
 
-    def get_source_state_id(self) -> StateID:
-        """Get the source state ID."""
-        return self._source
+    def evaluate_guards(self, event: Event) -> bool:
+        """
+        Evaluate the attached guards to determine if the transition can occur.
 
-    def get_target_state_id(self) -> StateID:
-        """Get the target state ID."""
-        return self._target
+        :param event: The triggering event.
+        :return: True if all guards pass, otherwise False.
+        """
+        return _GuardEvaluator().evaluate(self._guards, event)
 
-    def get_guard(self) -> Optional[AbstractGuard]:
-        """Get the guard condition, if any."""
-        return self._guard
+    def execute_actions(self, event: Event) -> None:
+        """
+        Execute the transition's actions, if any, when moving to the target state.
 
-    def get_actions(self) -> List[AbstractAction]:
-        """Get the list of actions to execute."""
-        # Return a copy of the actions list to maintain immutability
-        return list(self._actions)
+        :param event: The triggering event.
+        :raises TransitionError: If any action fails.
+        """
+        try:
+            _ActionExecutor().execute(self._actions, event)
+        except Exception as e:
+            raise TransitionError(f"Action execution failed: {e}")
 
     def get_priority(self) -> int:
-        """Get the transition priority."""
+        """
+        Return the priority level assigned to this transition.
+        """
         return self._priority
 
-    def __repr__(self) -> str:
-        """Return string representation of the transition."""
-        return (
-            f"Transition(source='{self._source}', target='{self._target}', "
-            f"priority={self._priority}, guard={'present' if self._guard else 'none'}, "
-            f"actions={len(self._actions)})"
-        )
+    @property
+    def source(self) -> "State":
+        """
+        The source state of the transition.
+        """
+        return self._source
 
-    def __str__(self) -> str:
-        """Return string representation of the transition."""
-        return self.__repr__()
+    @property
+    def target(self) -> "State":
+        """
+        The target state of the transition.
+        """
+        return self._target
 
-    def __eq__(self, other: object) -> bool:
-        """Compare two transitions for equality."""
-        if not isinstance(other, Transition):
-            return False
-        return (
-            self._source == other._source
-            and self._target == other._target
-            and self._priority == other._priority
-            and self._guard == other._guard
-            and len(self._actions) == len(other._actions)
-            and all(a1 == a2 for a1, a2 in zip(self._actions, other._actions))
-        )
 
-    def __hash__(self) -> int:
-        """Generate hash for the transition."""
-        return hash(
-            (
-                self._source,
-                self._target,
-                self._priority,
-                self._guard,
-                tuple(self._actions),  # Convert list to tuple for hashing
-            )
-        )
+class _TransitionPrioritySorter:
+    """
+    Internal utility to sort a list of transitions by their priority, ensuring
+    that the highest priority valid transition is selected first.
+    """
+
+    def sort(self, transitions: List[Transition]) -> List[Transition]:
+        """
+        Sort and return transitions ordered by priority, highest first.
+
+        :param transitions: A list of Transition instances.
+        :return: A sorted list of Transition instances by descending priority.
+        """
+        return sorted(transitions, key=lambda t: t.get_priority(), reverse=True)
+
+
+class _GuardEvaluator:
+    """
+    Internal helper to evaluate a list of guard conditions against an event.
+    """
+
+    def evaluate(self, guards: List[Callable[[Event], bool]], event: Event) -> bool:
+        """
+        Check all guards. Return True if all pass, False if any fail.
+
+        :param guards: List of guard callables.
+        :param event: The event to evaluate against.
+        :return: True if all guards return True, otherwise False.
+        """
+        for g in guards:
+            if not g(event):
+                return False
+        return True
+
+
+class _ActionExecutor:
+    """
+    Internal helper to execute a list of actions when a transition fires, handling
+    errors and ensuring consistent execution order.
+    """
+
+    def execute(self, actions: List[Callable[[Event], None]], event: Event) -> None:
+        """
+        Run the given actions for the event.
+
+        :param actions: List of action callables.
+        :param event: The triggering event.
+        :raises Exception: If any action fails.
+        """
+        for a in actions:
+            a(event)

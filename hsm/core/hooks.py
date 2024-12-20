@@ -1,113 +1,117 @@
 # hsm/core/hooks.py
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
-import logging
-from typing import Any, Callable, List, TypeVar
 
-from hsm.core.errors import HSMError
-from hsm.interfaces.abc import AbstractHook, AbstractTransition, StateID
+from __future__ import annotations
 
+from typing import Any, Callable, List, Optional, Protocol
 
-class HookError(HSMError):
-    """Raised when there's an error related to hook registration or management.
-
-    Attributes:
-        details: Additional context about the error.
-    """
-
-    pass
+from hsm.core.states import State
 
 
-T = TypeVar("T")  # Type variable for hook method return type
+class HookProtocol(Protocol):
+    def on_enter(self, state: State) -> None: ...
+    def on_exit(self, state: State) -> None: ...
+    def on_error(self, error: Exception) -> None: ...
 
 
 class HookManager:
     """
-    Manages a list of hooks and invokes them at appropriate times.
-
-    Runtime Invariants:
-    - Hooks do not affect state machine behavior.
-    - Hook failures are caught and logged, not raised.
-    - Hooks are called in registration order.
-
-    Example:
-        manager = HookManager()
-        manager.register_hook(some_hook)
-        manager.call_on_enter("STATE_A")   # Calls on_enter on all registered hooks
+    Manages the registration and execution of hooks that listen to state machine
+    lifecycle events (on_enter, on_exit, on_error). Users can attach logging,
+    monitoring, or custom side effects without altering core logic.
     """
 
-    def __init__(self) -> None:
-        self._hooks: List[AbstractHook] = []
-        self._logger = logging.getLogger("hsm.core.hooks")
-
-    def register_hook(self, hook: AbstractHook) -> None:
+    def __init__(self, hooks: List["HookProtocol"] = None) -> None:
         """
-        Register a hook. If the hook is already registered, this method does nothing.
-
-        Runtime Invariants:
-        - Registration is idempotent (registering same hook multiple times has no effect)
-        - Hook identity is determined by object identity (is operator)
-
-        Raises:
-            HookError: If the object does not implement AbstractHook properly.
+        Initialize with an optional list of hook objects.
+        :param hooks: A list of hook objects implementing HookProtocol.
         """
-        if not isinstance(hook, AbstractHook):
-            raise HookError("Attempted to register a hook that does not implement AbstractHook.")
-        if hook not in self._hooks:  # Use identity comparison
-            self._hooks.append(hook)
+        self._hooks = hooks if hooks else []
+        self._invoker = _HookInvoker(self._hooks)
 
-    def unregister_hook(self, hook: AbstractHook) -> None:
+    def register_hook(self, hook: "HookProtocol") -> None:
         """
-        Unregister a previously registered hook. Removes all instances of the hook.
+        Add a new hook to the manager's list of hooks.
 
-        Runtime Invariants:
-        - All instances of the hook are removed
-        - Hook identity is determined by object identity (is operator)
-        - If the hook is not found, this method does nothing
+        :param hook: An object implementing HookProtocol methods.
         """
-        self._hooks = [h for h in self._hooks if h is not hook]
+        self._hooks.append(hook)
+        self._invoker = _HookInvoker(self._hooks)
 
-    def _call_hook_method(self, method_name: str, hook: AbstractHook, *args: Any) -> None:
-        """Helper method to call a hook method and handle exceptions."""
-        try:
-            method = getattr(hook, method_name)
-            method(*args)
-        except Exception as e:
-            self._logger.exception("Hook %s failed for args=%s: %s", method_name, args, e)
+    def execute_on_enter(self, state: "State") -> None:
+        """
+        Run all hooks' on_enter logic when entering a state.
 
-    def _call_hooks(self, method_name: str, *args: Any) -> None:
-        """Helper method to call a specific method on all hooks."""
+        :param state: The state being entered.
+        """
+        self._invoker.invoke_on_enter(state)
+
+    def execute_on_exit(self, state: "State") -> None:
+        """
+        Run all hooks' on_exit logic when exiting a state.
+
+        :param state: The state being exited.
+        """
+        self._invoker.invoke_on_exit(state)
+
+    def execute_on_error(self, error: Exception) -> None:
+        """
+        Run all hooks' on_error logic when an exception occurs.
+
+        :param error: The exception encountered.
+        """
+        self._invoker.invoke_on_error(error)
+
+
+class _HookInvoker:
+    """
+    Internal helper that iterates through a list of hooks and invokes their
+    lifecycle methods in a controlled manner.
+    """
+
+    def __init__(self, hooks: List["HookProtocol"]) -> None:
+        """
+        Store hooks for invocation.
+        :param hooks: A list of objects implementing HookProtocol methods.
+        """
+        self._hooks = hooks
+
+    def invoke_on_enter(self, state: "State") -> None:
+        """
+        Call each hook's on_enter method.
+
+        :param state: The state being entered.
+        """
         for hook in self._hooks:
-            self._call_hook_method(method_name, hook, *args)
+            if hasattr(hook, "on_enter"):
+                hook.on_enter(state)
 
-    def call_on_enter(self, state_id: StateID) -> None:
+    def invoke_on_exit(self, state: "State") -> None:
         """
-        Call on_enter(state_id) on all registered hooks.
+        Call each hook's on_exit method.
 
-        Hook failures are caught and logged.
+        :param state: The state being exited.
         """
-        self._call_hooks("on_enter", state_id)
+        for hook in self._hooks:
+            if hasattr(hook, "on_exit"):
+                hook.on_exit(state)
 
-    def call_on_exit(self, state_id: StateID) -> None:
+    def invoke_on_error(self, error: Exception) -> None:
         """
-        Call on_exit(state_id) on all registered hooks.
+        Call each hook's on_error method.
 
-        Hook failures are caught and logged.
+        :param error: The exception that occurred.
         """
-        self._call_hooks("on_exit", state_id)
+        for hook in self._hooks:
+            if hasattr(hook, "on_error"):
+                hook.on_error(error)
 
-    def call_pre_transition(self, transition: "AbstractTransition") -> None:
-        """
-        Call pre_transition(transition) on all registered hooks.
 
-        Hook failures are caught and logged.
-        """
-        self._call_hooks("pre_transition", transition)
+class Hook:
+    def __init__(self, callback: Callable[..., Any], priority: Optional[int] = None):
+        self.callback = callback
+        self.priority = priority if priority is not None else 0
 
-    def call_post_transition(self, transition: "AbstractTransition") -> None:
-        """
-        Call post_transition(transition) on all registered hooks.
-
-        Hook failures are caught and logged.
-        """
-        self._call_hooks("post_transition", transition)
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self.callback(*args, **kwargs)
