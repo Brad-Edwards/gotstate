@@ -157,8 +157,16 @@ class StateMachine:
         if self._started:
             return
 
+        # Restore current state from initial if None
+        if self._current_state is None:
+            self._current_state = self._initial_state
+
         # Check for history state if we're in a composite state
-        if self._current_state.parent and isinstance(self._current_state.parent, CompositeState):
+        if (
+            self._current_state.parent
+            and isinstance(self._current_state.parent, CompositeState)
+            and self._context._history
+        ):  # Only check history if it exists
             history_state = self._context.get_history_state(self._current_state.parent)
             if history_state:
                 self._current_state = history_state
@@ -179,8 +187,13 @@ class StateMachine:
             return
 
         if self._current_state:
+            # Record history for composite states before stopping
+            if self._current_state.parent and isinstance(self._current_state.parent, CompositeState):
+                self._context.record_state_exit(self._current_state.parent, self._current_state)
+
             self._notify_exit(self._current_state)
-        self._current_state = None
+            self._current_state = None
+
         self._started = False
 
     def process_event(self, event: Event) -> bool:
