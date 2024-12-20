@@ -125,10 +125,7 @@ class EventQueue:
         Remove all events from the queue.
         """
         with _EventQueueLock(self._lock):
-            if self._priority_mode:
-                self._queue.clear()
-            else:
-                self._queue.clear()
+            self._queue.clear()
 
     @property
     def priority_mode(self) -> bool:
