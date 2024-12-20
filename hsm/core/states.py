@@ -1,4 +1,15 @@
-### hsm/core/states.py
+# hsm/core/states.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hsm.core.actions import ActionProtocol
+
+
 class State:
     """
     Represents a named state within the machine. It may define entry and exit

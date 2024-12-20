@@ -1,4 +1,15 @@
-### hsm/runtime/timers.py
+# hsm/runtime/timers.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hsm.core.events import TimeoutEvent
+
+
 class Timer:
     """
     Represents a scheduled timeout. Useful for triggering TimeoutEvents when no

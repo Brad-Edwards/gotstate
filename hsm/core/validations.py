@@ -1,4 +1,17 @@
-### hsm/core/validation.py
+# hsm/core/validation.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hsm.core.events import Event
+    from hsm.core.state_machine import StateMachine
+    from hsm.core.transitions import Transition
+
+
 class Validator:
     """
     Performs construction-time and runtime validation of the state machine,

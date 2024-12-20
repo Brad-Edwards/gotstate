@@ -1,4 +1,6 @@
-### hsm/core/events.py
+# hsm/core/events.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
 class Event:
     """
     Represents a signal or trigger within the state machine. Events cause the

@@ -1,4 +1,15 @@
-### hsm/runtime/event_queue.py
+# hsm/runtime/event_queue.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hsm.core.events import Event
+
+
 class EventQueue:
     """
     A simple event queue that provides events to the state machine executor.

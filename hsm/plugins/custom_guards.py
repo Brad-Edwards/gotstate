@@ -1,4 +1,10 @@
-# Example plugin file: hsm/plugins/custom_guards.py
+# hsm/plugins/custom_guards.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
+from hsm.core.events import Event
+
+
 class MyCustomGuard:
     """
     A user-defined guard example that checks a custom condition before allowing a transition.

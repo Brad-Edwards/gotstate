@@ -1,4 +1,6 @@
-### hsm/core/data_management.py
+# hsm/core/data_management.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
 class _DataLockManager:
     """
     Internal lock manager controlling access to state data. Ensures thread-safe

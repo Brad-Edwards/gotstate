@@ -1,3 +1,16 @@
+# hsm/runtime/executor.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hsm.core.state_machine import StateMachine
+    from hsm.runtime.event_queue import EventQueue
+
+
 class Executor:
     """
     Runs the event processing loop for synchronous state machines, fetching events

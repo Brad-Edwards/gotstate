@@ -1,4 +1,10 @@
-# Example plugin file: hsm/plugins/custom_actions.py
+# hsm/plugins/custom_actions.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
+from hsm.core.events import Event
+
+
 class MyCustomAction:
     """
     A user-defined action example that executes a custom piece of code during a transition.

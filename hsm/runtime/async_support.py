@@ -1,4 +1,18 @@
-### hsm/runtime/async_support.py
+# hsm/runtime/async_support.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hsm.core.events import Event
+    from hsm.core.hooks import HookProtocol
+    from hsm.core.states import State
+    from hsm.core.validations import Validator
+
+
 class AsyncStateMachine:
     """
     An asynchronous version of the state machine. Allows event processing in an

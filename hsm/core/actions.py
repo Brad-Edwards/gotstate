@@ -1,4 +1,10 @@
-### hsm/core/actions.py
+# hsm/core/actions.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
+from hsm.core.events import Event
+
+
 class BasicActions:
     """
     Provides simple, built-in action handlers. Users can extend or create custom

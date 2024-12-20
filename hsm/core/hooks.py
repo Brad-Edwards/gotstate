@@ -1,3 +1,20 @@
+# hsm/core/hooks.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Protocol
+
+from hsm.core.states import State
+
+
+class HookProtocol(Protocol):
+    def on_enter(self, state: State) -> None: ...
+    def on_exit(self, state: State) -> None: ...
+    def on_error(self, error: Exception) -> None: ...
+
+
 class HookManager:
     """
     Manages the registration and execution of hooks that listen to state machine
