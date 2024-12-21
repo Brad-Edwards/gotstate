@@ -8,7 +8,7 @@ import pytest
 
 from hsm.core.events import Event, TimeoutEvent
 from hsm.core.hooks import HookProtocol
-from hsm.core.state_machine import CompositeStateMachine
+from hsm.core.state_machine import CompositeStateMachine, StateMachine
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition
 from hsm.core.validations import ValidationError, Validator
