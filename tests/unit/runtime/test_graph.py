@@ -3,7 +3,7 @@
 import pytest
 
 from hsm.core.events import Event
-from hsm.core.runtime.graph import StateGraph
+from hsm.runtime.graph import StateGraph
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition
 

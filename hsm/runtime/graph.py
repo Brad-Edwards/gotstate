@@ -5,11 +5,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
-from ..base import StateBase
-from ..errors import ValidationError
-from ..events import Event
-from ..states import CompositeState, State
-from ..transitions import Transition
+from ..core.base import StateBase
+from ..core.errors import ValidationError
+from ..core.events import Event
+from ..core.states import CompositeState, State
+from ..core.transitions import Transition
 
 
 @dataclass

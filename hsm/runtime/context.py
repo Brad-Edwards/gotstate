@@ -5,8 +5,8 @@ import time
 from dataclasses import dataclass
 from typing import Dict, Optional, Set
 
-from ..events import Event
-from ..states import CompositeState, State
+from ..core.events import Event
+from ..core.states import CompositeState, State
 from .graph import StateGraph
 
 

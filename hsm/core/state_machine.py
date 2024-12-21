@@ -10,8 +10,8 @@ from typing import Dict, List, Optional, Set
 
 from hsm.core.events import Event
 from hsm.core.hooks import HookManager, HookProtocol
-from hsm.core.runtime.context import RuntimeContext
-from hsm.core.runtime.graph import StateGraph
+from hsm.runtime.context import RuntimeContext
+from hsm.runtime.graph import StateGraph
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition, _TransitionPrioritySorter
 from hsm.core.validations import ValidationError, Validator
