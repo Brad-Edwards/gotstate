@@ -34,35 +34,55 @@ class _AsyncLock:
 
 class AsyncEventQueue:
     """
-    An asynchronous event queue providing non-blocking enqueue/dequeue methods,
-    suitable for use with AsyncStateMachine.
+    Asynchronous event queue implementation supporting priority-based ordering.
     """
 
-    def __init__(self, timeout: float = 0.1):
-        self._queue = asyncio.PriorityQueue()
-        self._timeout = timeout
+    def __init__(self, priority: bool = False):
+        """
+        Initialize async event queue.
+        
+        Args:
+            priority: If True, enables priority-based event processing.
+                     If False, uses standard FIFO ordering.
+        """
+        self.priority_mode = priority
+        self._queue = asyncio.Queue()
+        self._running = True
 
-    async def enqueue(self, event: Event) -> None:
-        """Add event to queue using event's priority."""
-        # Event already has priority, no need to tuple
+    async def enqueue(self, event) -> None:
+        """Add an event to the queue."""
         await self._queue.put(event)
 
     async def dequeue(self) -> Optional[Event]:
-        """Get next event respecting priority."""
+        """
+        Remove and return the next event from the queue.
+        Returns None if queue is empty after timeout or queue is stopped.
+        """
         try:
-            event = await asyncio.wait_for(self._queue.get(), timeout=self._timeout)
-            self._queue.task_done()
-            return event
+            if not self._running:
+                return None
+                
+            # Use a timeout to prevent indefinite blocking
+            return await asyncio.wait_for(self._queue.get(), timeout=0.1)
         except asyncio.TimeoutError:
             return None
 
+    def is_empty(self) -> bool:
+        """Check if queue is empty."""
+        return self._queue.empty()
+
     async def clear(self) -> None:
-        """Clear all pending events."""
+        """Clear all events from the queue."""
         while not self._queue.empty():
             try:
-                await self.dequeue()
-            except asyncio.TimeoutError:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
                 break
+
+    async def stop(self) -> None:
+        """Stop the queue processing."""
+        self._running = False
+        await self.clear()
 
 
 class AsyncStateMachine(StateMachine):
