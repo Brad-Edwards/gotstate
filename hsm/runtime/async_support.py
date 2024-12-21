@@ -37,7 +37,7 @@ class AsyncEventQueue:
     Asynchronous event queue implementation supporting priority-based ordering.
     """
 
-    def __init__(self, priority: bool = False):
+    def __init__(self, priority: bool = True):
         """
         Initialize async event queue.
 
@@ -46,12 +46,20 @@ class AsyncEventQueue:
                      If False, uses standard FIFO ordering.
         """
         self.priority_mode = priority
-        self._queue = asyncio.Queue()
+        self._queue = asyncio.PriorityQueue() if priority else asyncio.Queue()
         self._running = True
+        self._counter = 0  # Add counter for FIFO ordering within same priority
 
-    async def enqueue(self, event) -> None:
+    async def enqueue(self, event: Event) -> None:
         """Add an event to the queue."""
-        await self._queue.put(event)
+        if self.priority_mode:
+            # Lower number = higher priority for PriorityQueue
+            # We negate priority so higher numbers have higher priority
+            # Add counter to maintain FIFO order within same priority
+            await self._queue.put((-event.priority, self._counter, event))
+            self._counter += 1
+        else:
+            await self._queue.put(event)
 
     async def dequeue(self) -> Optional[Event]:
         """
@@ -63,7 +71,13 @@ class AsyncEventQueue:
                 return None
 
             # Use a timeout to prevent indefinite blocking
-            return await asyncio.wait_for(self._queue.get(), timeout=0.1)
+            item = await asyncio.wait_for(self._queue.get(), timeout=0.1)
+
+            # If using priority queue, extract actual event from tuple
+            if self.priority_mode:
+                return item[2]  # Return the actual event
+            return item
+
         except asyncio.TimeoutError:
             return None
 

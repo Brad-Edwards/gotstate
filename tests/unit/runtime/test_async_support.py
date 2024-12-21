@@ -128,15 +128,19 @@ async def test_async_event_processing_loop():
 
 @pytest.mark.asyncio
 async def test_async_event_queue_priority_mode():
+    from hsm.core.events import Event
     from hsm.runtime.async_support import AsyncEventQueue
 
     eq = AsyncEventQueue(priority=True)
     assert eq.priority_mode is True
-    # Even with priority=True, queue should still function as FIFO
-    await eq.enqueue(1)
-    await eq.enqueue(2)
-    assert await eq.dequeue() == 1
-    assert await eq.dequeue() == 2
+
+    await eq.enqueue(Event("first", priority=1))
+    await eq.enqueue(Event("second", priority=1))
+
+    first = await eq.dequeue()
+    second = await eq.dequeue()
+    assert first.name == "first"
+    assert second.name == "second"
 
 
 @pytest.mark.asyncio
