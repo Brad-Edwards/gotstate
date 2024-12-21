@@ -133,18 +133,10 @@ class StateMachine:
 
     def add_state(self, state: State, parent: Optional[State] = None) -> None:
         """Add a state to the machine."""
-        # Add state to graph first
         self._graph.add_state(state, parent)
-
-        # Update parent relationships
-        if parent is not None:
-            state.parent = parent
-            if isinstance(parent, CompositeState):
-                parent._children.add(state)
-                # If parent has no initial state, set this as initial
-                if parent._initial_state is None:
-                    parent._initial_state = state
-                    self._graph.set_initial_state(parent, state)
+        # Let the graph handle parent-child relationships
+        if isinstance(parent, CompositeState) and parent._initial_state is None:
+            parent._initial_state = state
 
     @property
     def current_state(self) -> Optional[State]:
@@ -167,7 +159,7 @@ class StateMachine:
 
     def get_history_state(self, composite_state: CompositeState) -> Optional[State]:
         """Get the last active state for a composite state."""
-        return self._context.get_history_state(composite_state)
+        return self._graph.get_history_state(composite_state)
 
     def _get_parent_composite_state(self, state: State) -> Optional[CompositeState]:
         """Get the parent composite state if it exists."""
@@ -249,32 +241,19 @@ class StateMachine:
             return
 
         try:
-            # Record history for all ancestor composite states
-            ancestors = self._graph.get_ancestors(self._current_state)
+            # Use graph to get ancestors and manage history
+            ancestors = self._graph.get_composite_ancestors(self._current_state)
             for ancestor in ancestors:
-                if isinstance(ancestor, CompositeState):
-                    self._context.record_state_exit(ancestor, self._current_state)
+                self._graph.record_history(ancestor, self._current_state)
 
-            # Exit current state
             self._notify_exit(self._current_state)
-
-            # Execute transition actions
             transition.execute_actions(event)
-
-            # Enter new state
-            self._current_state = transition.target
+            self._current_state = self._graph.resolve_active_state(transition.target)
             self._notify_enter(self._current_state)
 
         except Exception as e:
-            # Notify hooks of error
             self._notify_error(e)
-
-            # If we have an error recovery strategy, use it
-            if hasattr(self, "_error_recovery"):
-                self._error_recovery.recover(e, self)
-            else:
-                # Re-raise if no recovery strategy
-                raise
+            raise
 
     def _notify_enter(self, state: State) -> None:
         """Notify hooks of state entry."""
@@ -331,6 +310,10 @@ class StateMachine:
         self.stop()
         self._graph.clear_history()
         self._current_state = self._initial_state
+
+    def validate(self) -> List[str]:
+        """Validate the state machine structure."""
+        return self._graph.validate()
 
 
 class CompositeStateMachine(StateMachine):

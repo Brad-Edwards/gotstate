@@ -167,15 +167,14 @@ class StateGraph:
             )
 
     def resolve_active_state(self, state: State) -> State:
-        """Resolve the actual active state considering history and hierarchy."""
+        """Resolve the actual active state considering history and hierarchy"""
         if isinstance(state, CompositeState):
             # Check history first
             history_state = self._history.get(state)
             if history_state:
                 return history_state.state
-            # Fall back to initial state if available
-            if state._initial_state:
-                return state._initial_state
+            # Fall back to initial state
+            return state._initial_state or state
         return state
 
     def get_composite_ancestors(self, state: State) -> List[CompositeState]:

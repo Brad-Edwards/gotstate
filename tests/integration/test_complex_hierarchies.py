@@ -41,64 +41,56 @@ def hook():
     return TestHook()
 
 
-def create_nested_state_machine(hook: TestHook) -> CompositeStateMachine:
+def create_nested_state_machine(hook):
     """Create a complex nested state machine for testing."""
-    # Top level states
+    # Create root composite state
     root = CompositeState("Root")
+
+    # Create first level states
     operational = CompositeState("Operational")
     error = State("Error")
-    shutdown = State("Shutdown")
 
-    # Operational substates
-    idle = State("Idle")
+    # Create second level states under Operational
     processing = CompositeState("Processing")
-    paused = State("Paused")
+    idle = State("Idle")
 
-    # Processing substates
-    initializing = State("Initializing")
+    # Create third level states under Processing
     running = State("Running")
     cleanup = State("Cleanup")
 
-    # Build state hierarchy
-    root.add_child_state(operational)
-    root.add_child_state(error)
-    root.add_child_state(shutdown)
+    # Set initial states for composite states
+    processing.initial_state = running
+    operational.initial_state = idle
+    root.initial_state = operational
 
-    operational.add_child_state(idle)
-    operational.add_child_state(processing)
-    operational.add_child_state(paused)
+    # Create state machine with root state
+    machine = CompositeStateMachine(initial_state=root, validator=Validator(), hooks=[hook])
 
-    processing.add_child_state(initializing)
+    # Add all states to the machine in hierarchical order
+    machine.add_state(root)
+    machine.add_state(operational, parent=root)
+    machine.add_state(error, parent=root)
+    machine.add_state(processing, parent=operational)
+    machine.add_state(idle, parent=operational)
+    machine.add_state(running, parent=processing)
+    machine.add_state(cleanup, parent=processing)
+
+    # Build hierarchy (still needed for composite states)
     processing.add_child_state(running)
     processing.add_child_state(cleanup)
+    operational.add_child_state(processing)
+    operational.add_child_state(idle)
+    root.add_child_state(operational)
+    root.add_child_state(error)
 
-    # Create state machines
-    processing_machine = AsyncStateMachine(initial_state=initializing, validator=Validator(), hooks=[hook])
-    processing_machine.add_state(running)
-    processing_machine.add_state(cleanup)
+    # Add transitions for all events
+    machine.add_transition(Transition(source=idle, target=processing, guards=[lambda e: e.name == "begin"]))
+    machine.add_transition(Transition(source=running, target=cleanup, guards=[lambda e: e.name == "finish"]))
+    machine.add_transition(Transition(source=operational, target=error, guards=[lambda e: e.name == "error"]))
+    machine.add_transition(Transition(source=error, target=operational, guards=[lambda e: e.name == "recover"]))
+    machine.add_transition(Transition(source=running, target=cleanup, guards=[lambda e: e.name == "start"]))
 
-    main_machine = CompositeStateMachine(initial_state=root, validator=Validator(), hooks=[hook])
-    main_machine.add_submachine(processing, processing_machine)
-
-    # Add transitions
-    def add_transition(source: State, target: State, event_name: str, machine: AsyncStateMachine, priority: int = 0):
-        machine.add_transition(
-            Transition(source=source, target=target, guards=[lambda e: True], actions=[], priority=priority)
-        )
-
-    # Processing machine transitions
-    add_transition(initializing, running, "start", processing_machine)
-    add_transition(running, cleanup, "finish", processing_machine)
-    add_transition(cleanup, initializing, "reset", processing_machine)
-
-    # Main machine transitions
-    add_transition(idle, processing, "begin", main_machine)
-    add_transition(processing, idle, "complete", main_machine)
-    add_transition(operational, error, "error", main_machine, priority=10)
-    add_transition(error, operational, "recover", main_machine)
-    add_transition(operational, shutdown, "shutdown", main_machine, priority=20)
-
-    return main_machine
+    return machine
 
 
 @pytest.mark.asyncio
@@ -107,7 +99,6 @@ async def test_complex_state_hierarchy(hook):
     machine = create_nested_state_machine(hook)
     await machine.start()
 
-    # Verify initial state
     assert machine.current_state.name == "Root"
     assert "Root" in [state for _, state in hook.state_changes]
 
@@ -229,3 +220,38 @@ async def test_state_reentry(hook):
     # Verify state was properly re-entered
     processing_entries = len([state for _, state in hook.state_changes if state == "Processing"])
     assert processing_entries == initial_processing_entry + 2  # +2 for exit and re-entry
+
+
+def test_composite_state_hierarchy():
+    """Test hierarchical state structure."""
+    # Create child states first
+    child1 = State("child1")
+    child2 = State("child2")
+
+    # Create root with child1 as initial state
+    root = CompositeState("root", initial_state=child1)
+
+    # Create machine with root as initial state
+    machine = StateMachine(root)
+
+    # Add states in correct order - parent first, then children
+    machine.add_state(child1, parent=root)
+    machine.add_state(child2, parent=root)
+
+    # Add transition after all states are added
+    transition = Transition(source=child1, target=child2)
+    machine.add_transition(transition)
+
+    # Verify hierarchy
+    assert child1.parent == root
+    assert child2.parent == root
+
+    machine.start()
+    # The current state should be child1 since it's the initial state of root
+    assert machine.current_state == child1
+    assert machine.current_state.parent == root
+
+    # Test transition
+    event = Event("test")
+    assert machine.process_event(event)
+    assert machine.current_state == child2

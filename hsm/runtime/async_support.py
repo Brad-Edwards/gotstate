@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from typing import List, Optional
 
+from hsm.core.errors import ValidationError
 from hsm.core.events import Event
 from hsm.core.hooks import HookManager, HookProtocol
 from hsm.core.state_machine import StateMachine, _StateMachineContext
