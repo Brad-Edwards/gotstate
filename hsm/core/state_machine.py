@@ -241,18 +241,33 @@ class StateMachine:
             return
 
         try:
-            # Use graph to get ancestors and manage history
+            # Record history and handle exit
             ancestors = self._graph.get_composite_ancestors(self._current_state)
             for ancestor in ancestors:
                 self._graph.record_history(ancestor, self._current_state)
 
             self._notify_exit(self._current_state)
-            transition.execute_actions(event)
+
+            # Execute actions with error handling
+            try:
+                transition.execute_actions(event)
+            except Exception as action_error:
+                # If action fails, attempt recovery before propagating
+                if self._error_recovery:
+                    self._error_recovery.recover(action_error, self)
+                    return
+                raise
+
+            # Complete transition if actions succeed
             self._current_state = self._graph.resolve_active_state(transition.target)
             self._notify_enter(self._current_state)
 
         except Exception as e:
             self._notify_error(e)
+            # Attempt recovery if available
+            if self._error_recovery:
+                self._error_recovery.recover(e, self)
+                return
             raise
 
     def _notify_enter(self, state: State) -> None:

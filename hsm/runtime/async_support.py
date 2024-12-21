@@ -40,7 +40,7 @@ class AsyncEventQueue:
     def __init__(self, priority: bool = False):
         """
         Initialize async event queue.
-        
+
         Args:
             priority: If True, enables priority-based event processing.
                      If False, uses standard FIFO ordering.
@@ -61,7 +61,7 @@ class AsyncEventQueue:
         try:
             if not self._running:
                 return None
-                
+
             # Use a timeout to prevent indefinite blocking
             return await asyncio.wait_for(self._queue.get(), timeout=0.1)
         except asyncio.TimeoutError:
@@ -235,3 +235,47 @@ class _AsyncEventProcessingLoop:
         """
         self._running = False
         await self._machine.stop()
+
+
+def create_nested_state_machine(hook) -> AsyncStateMachine:
+    """Create a nested state machine for testing."""
+    # Create states
+    root = State("Root")
+    processing = State("Processing")
+    error = State("Error")
+    operational = State("Operational")
+    shutdown = State("Shutdown")
+
+    # Create machine with root state
+    machine = AsyncStateMachine(initial_state=root, hooks=[hook])
+
+    # Add all states first
+    machine.add_state(processing)
+    machine.add_state(error)
+    machine.add_state(operational)
+    machine.add_state(shutdown)
+
+    # Add transitions after all states are in place
+    machine.add_transition(Transition(source=root, target=processing, guards=[lambda e: e.name == "begin"]))
+
+    machine.add_transition(Transition(source=processing, target=operational, guards=[lambda e: e.name == "complete"]))
+
+    machine.add_transition(Transition(source=operational, target=processing, guards=[lambda e: e.name == "begin"]))
+
+    # Error handling transitions
+    machine.add_transition(Transition(source=processing, target=error, guards=[lambda e: e.name == "error"]))
+
+    machine.add_transition(Transition(source=error, target=operational, guards=[lambda e: e.name == "recover"]))
+
+    # Shutdown transition from any state
+    for state in [root, processing, error, operational]:
+        machine.add_transition(
+            Transition(
+                source=state,
+                target=shutdown,
+                guards=[lambda e: e.name == "shutdown"],
+                priority=10,  # Higher priority for shutdown
+            )
+        )
+
+    return machine

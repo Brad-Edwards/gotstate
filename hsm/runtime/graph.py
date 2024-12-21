@@ -53,26 +53,41 @@ class StateGraph:
 
     def add_state(self, state: State, parent: Optional[State] = None) -> None:
         """Add a state to the graph with optional parent."""
-        if state in self._nodes and parent:
-            existing_node = self._nodes[state]
-            if existing_node.parent and existing_node.parent.state != parent:
-                raise ValueError(f"Cycle detected: {state.name} already has parent {existing_node.parent.state.name}")
-
+        # Create new node if state doesn't exist
         if state not in self._nodes:
             self._nodes[state] = _GraphNode(state=state)
             self._transitions[state] = set()
 
+        node = self._nodes[state]
+
+        # Handle parent relationship
         if parent:
             if parent not in self._nodes:
                 self.add_state(parent)
 
             parent_node = self._nodes[parent]
-            state_node = self._nodes[state]
+
+            # Check for cycles before updating relationships
+            if self._would_create_cycle(state, parent):
+                raise ValueError(f"Adding state {state.name} as child of {parent.name} would create a cycle")
 
             # Update parent-child relationships
-            parent_node.children.add(state_node)
-            state_node.parent = parent_node
+            if node.parent:
+                # Remove from old parent's children
+                node.parent.children.remove(node)
+
+            parent_node.children.add(node)
+            node.parent = parent_node
             state.parent = parent
+
+    def _would_create_cycle(self, state: State, new_parent: State) -> bool:
+        """Check if adding state under new_parent would create a cycle."""
+        current = self._nodes[new_parent]
+        while current.parent:
+            if current.parent.state == state:
+                return True
+            current = current.parent
+        return False
 
     def add_transition(self, transition: Transition) -> None:
         """Add a transition to the graph."""
@@ -120,34 +135,40 @@ class StateGraph:
         """Validate the graph structure."""
         errors = []
         visited = set()
-        path = set()
+        path = []
 
         def detect_cycle(state: State) -> None:
             if state in path:
-                cycle_path = []
-                for s in self._nodes.values():
-                    if s.state in path:
-                        cycle_path.append(s.state.name)
-                errors.append(f"Cycle detected: {' -> '.join(cycle_path)}")
+                cycle_start = path.index(state)
+                cycle_path = [s.name for s in path[cycle_start:]] + [state.name]
+                errors.append(f"Cycle detected in state hierarchy: {' -> '.join(cycle_path)}")
                 return
 
             if state in visited:
                 return
 
             visited.add(state)
-            path.add(state)
+            path.append(state)
 
             node = self._nodes[state]
             for child_node in node.children:
                 detect_cycle(child_node.state)
 
-            path.remove(state)
+            path.pop()
 
+        # Start cycle detection from root states
         root_states = [state for state in self._nodes.keys() if not self._nodes[state].parent]
 
-        for state in root_states:
-            detect_cycle(state)
+        # If no root states found and graph is not empty, there must be a cycle
+        if not root_states and self._nodes:
+            errors.append("No root states found - graph contains cycles")
+            # Start from any state to find the cycle
+            detect_cycle(next(iter(self._nodes.keys())))
+        else:
+            for state in root_states:
+                detect_cycle(state)
 
+        # Validate composite states
         for node in self._nodes.values():
             state = node.state
             if isinstance(state, CompositeState):

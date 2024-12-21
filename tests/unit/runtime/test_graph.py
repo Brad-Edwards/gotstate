@@ -55,19 +55,17 @@ def test_get_ancestors():
 
 
 def test_validate_cycle_detection():
-    """Test that validation detects cycles in the hierarchy."""
+    """Test that cycle detection prevents invalid hierarchies."""
     graph = StateGraph()
     state1 = State("state1")
     state2 = State("state2")
 
     graph.add_state(state1)
     graph.add_state(state2, parent=state1)
-    # Create a cycle by making state1 a child of state2
-    graph.add_state(state1, parent=state2)
 
-    # Validate should detect the cycle
-    errors = graph.validate()
-    assert any("cycle" in error.lower() for error in errors), "Cycle detection failed"
+    # Attempt to create a cycle should raise ValueError
+    with pytest.raises(ValueError, match="would create a cycle"):
+        graph.add_state(state1, parent=state2)
 
 
 def test_validate_composite_state():

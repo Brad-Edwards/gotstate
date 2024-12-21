@@ -485,18 +485,12 @@ def test_error_recovery_integration(hook, validator):
     class TestErrorRecovery(_ErrorRecoveryStrategy):
         def recover(self, error: Exception, state_machine: StateMachine) -> None:
             # When error occurs, trigger transition to fallback
-            try:
-                state_machine.process_event(Event("Recover"))
-            except Exception as e:
-                # Log error to hook
-                for hook in state_machine._hooks:
-                    if hasattr(hook, "on_error"):
-                        hook.on_error(e)
+            state_machine.process_event(Event("Recover"))
 
     # Create machine and add all states first
     machine = StateMachine(initial_state=normal, validator=validator, hooks=[hook])
-    machine.add_state(error)  # Add error state to graph
-    machine.add_state(fallback)  # Add fallback state to graph
+    machine.add_state(error)
+    machine.add_state(fallback)
 
     # Set error recovery strategy
     machine._error_recovery = TestErrorRecovery()
@@ -515,10 +509,14 @@ def test_error_recovery_integration(hook, validator):
     machine.start()
     assert machine.current_state.name == "Normal"
 
-    # Trigger failing transition
+    # Trigger failing transition - should recover to fallback
     machine.process_event(Event("Fail"))
-    # Error recovery should have moved us to fallback state
+
+    # Verify recovery occurred
     assert machine.current_state.name == "Fallback"
+
+    # Verify error was logged to hook
+    assert len([call for call in hook.on_error.call_args_list if isinstance(call.args[0], RuntimeError)]) > 0
 
 
 @pytest.mark.integration
