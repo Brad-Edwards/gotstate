@@ -164,7 +164,23 @@ class StateMachine:
             return False
 
         try:
-            valid_transitions = self._graph.get_valid_transitions(self._current_state, event)
+            # Get potential transitions from the graph
+            potential_transitions = self._graph.get_valid_transitions(self._current_state, event)
+            if not potential_transitions:
+                return False
+
+            # Evaluate guards to find valid transitions
+            valid_transitions = []
+            for transition in potential_transitions:
+                # Check if all guards pass
+                all_guards_pass = True
+                for guard in transition.guards:
+                    if not guard(event):
+                        all_guards_pass = False
+                        break
+                if all_guards_pass:
+                    valid_transitions.append(transition)
+
             if not valid_transitions:
                 return False
 
@@ -261,14 +277,22 @@ class CompositeStateMachine(StateMachine):
         if not isinstance(state, CompositeState):
             raise ValueError(f"State {state.name} must be a composite state")
 
+        # First add the composite state if it's not already in the graph
+        if state not in self._graph._nodes:
+            self._graph.add_state(state)
+
         # Integrate submachine states into the same graph:
         for sub_state in submachine.get_states():
-            # We assume sub_state's parent can be updated to "state"
+            # Add each state with the composite state as parent
             self._graph.add_state(sub_state, parent=state)
 
         # Integrate transitions
         for t in submachine.get_transitions():
             self._graph.add_transition(t)
+
+        # Set the composite state's initial state to the submachine's initial state
+        if submachine._initial_state:
+            state._initial_state = submachine._initial_state
 
         self._submachines[state] = submachine
 

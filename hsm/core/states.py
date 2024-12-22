@@ -64,7 +64,8 @@ class CompositeState(StateBase):
         :param exit_actions: Actions executed upon exiting this state.
         """
         super().__init__(name=name, entry_actions=entry_actions or [], exit_actions=exit_actions or [])
-        # This state can contain children, but we rely on `graph.py` for storing them.
+        # Initialize the children set that will be managed by the graph
+        self._children = set()
         # We'll keep an _initial_state reference if desired, but typically that's also in the graph.
         self._initial_state: Optional[State] = None
 

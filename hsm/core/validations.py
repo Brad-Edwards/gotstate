@@ -137,6 +137,8 @@ class _DefaultValidationRules:
 
             def add_state_and_children(state):
                 """Helper to add a state and all its children to reachable states"""
+                if state is None:
+                    return
                 reachable_states.add(state)
                 # For composite states, add all children and the state itself
                 if isinstance(state, CompositeState):
@@ -160,22 +162,19 @@ class _DefaultValidationRules:
                         add_state_and_children(child)
                 current = current.parent
 
-            # Keep expanding reachable states through transitions
-            while True:
-                new_reachable = set()
+            # Keep expanding reachable states through transitions until no new states are found
+            changed = True
+            while changed:
+                changed = False
                 for t in transitions:
-                    if t.source in reachable_states:
-                        new_reachable.add(t.target)
+                    if t.source in reachable_states and t.target not in reachable_states:
+                        changed = True
+                        reachable_states.add(t.target)
                         # Add target's ancestors and children
                         current = t.target
                         while current:
                             add_state_and_children(current)
                             current = current.parent
-
-                if not (new_reachable - reachable_states):
-                    break
-
-                reachable_states.update(new_reachable)
 
             # Check unreachable states
             unreachable = all_states - reachable_states
