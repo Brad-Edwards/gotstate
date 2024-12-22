@@ -1,3 +1,7 @@
+# hsm/runtime/graph.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
 """Graph-based state machine structure management."""
 
 import threading
@@ -10,6 +14,7 @@ from ..core.errors import ValidationError
 from ..core.events import Event
 from ..core.states import CompositeState, State
 from ..core.transitions import Transition
+from ..runtime.state_history import StateHistory
 
 
 @dataclass
@@ -49,8 +54,7 @@ class StateGraph:
         self._nodes: Dict[State, _GraphNode] = {}
         # Use a set for transitions so we can do .add(transition)
         self._transitions: Dict[State, Set[Transition]] = {}
-        self._history: Dict[CompositeState, _StateHistoryRecord] = {}
-        self._history_lock = threading.Lock()
+        self._history = StateHistory()
         self._parent_map: Dict[State, Optional[State]] = {}
 
     def add_state(self, state: State, parent: Optional[State] = None) -> None:
@@ -197,18 +201,14 @@ class StateGraph:
 
     def record_history(self, composite_state: CompositeState, active_state: State) -> None:
         """Thread-safe history recording."""
-        with self._history_lock:
-            self._history[composite_state] = _StateHistoryRecord(
-                timestamp=time.time(), state=active_state, composite_state=composite_state
-            )
+        self._history.record_state(composite_state, active_state)
 
     def resolve_active_state(self, state: State) -> State:
         """Resolve active state using cached history."""
         if isinstance(state, CompositeState):
-            with self._history_lock:
-                record = self._history.get(state)
-                if record:
-                    return self.resolve_active_state(record.state)
+            hist_state = self._history.get_last_state(state)
+            if hist_state:
+                return self.resolve_active_state(hist_state)
             initial = state._initial_state or state
             return self.resolve_active_state(initial)
         return state
@@ -225,8 +225,7 @@ class StateGraph:
 
     def clear_history(self) -> None:
         """Clear all history records."""
-        with self._history_lock:
-            self._history.clear()
+        self._history.clear()
 
     def set_initial_state(self, composite: CompositeState, state: State) -> None:
         """Set the initial state for a composite state."""
