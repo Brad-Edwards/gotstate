@@ -58,3 +58,6 @@ coverage-reports/
 scratch
 starforge.yml
 prompt_endings
+
+# lintit
+lintit.sh
