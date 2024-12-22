@@ -10,7 +10,7 @@ from hsm.core.events import Event
 class BasicActions:
     """
     Provides simple, built-in action handlers for state machine transitions and events.
-    
+
     This class offers basic action handling functionality that can be used directly
     or extended through plugins. Actions are functions that are executed when states
     are entered, exited, or when specific events occur.
@@ -19,7 +19,7 @@ class BasicActions:
         ```python
         def my_action(value: str):
             print(f"Executing action with {value}")
-        
+
         # Execute a simple action
         BasicActions.execute(my_action, value="hello")
         ```
@@ -43,9 +43,9 @@ class BasicActions:
             ```python
             def log_state_change(old_state: str, new_state: str):
                 print(f"Transitioning from {old_state} to {new_state}")
-            
-            BasicActions.execute(log_state_change, 
-                               old_state="idle", 
+
+            BasicActions.execute(log_state_change,
+                               old_state="idle",
                                new_state="running")
             ```
         """
@@ -55,7 +55,7 @@ class BasicActions:
 class _ActionAdapter:
     """
     Internal adapter that wraps a user-defined callable into an ActionProtocol.
-    
+
     This adapter ensures consistent action invocation within the state machine by
     standardizing how actions handle events. It's primarily used internally by the
     state machine implementation.

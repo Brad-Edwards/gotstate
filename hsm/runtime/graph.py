@@ -7,7 +7,8 @@
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
+from threading import Lock
 
 from ..core.base import StateBase
 from ..core.errors import ValidationError
@@ -46,16 +47,21 @@ class _GraphNode:
 
 class StateGraph:
     """
-    Manages the structural relationships between states in a state machine.
-    Provides efficient access to transitions and hierarchy information.
+    Manages the structural relationships and data for all states in a state machine.
+    Provides efficient access to transitions, hierarchy information, and state data.
+    This is the single source of truth for all state-related information.
     """
 
     def __init__(self) -> None:
         self._nodes: Dict[State, _GraphNode] = {}
-        # Use a set for transitions so we can do .add(transition)
         self._transitions: Dict[State, Set[Transition]] = {}
         self._history = StateHistory()
         self._parent_map: Dict[State, Optional[State]] = {}
+        self._initial_states: Dict[CompositeState, State] = {}
+        self._state_data: Dict[State, Dict[str, Any]] = {}
+        self._data_locks: Dict[State, threading.Lock] = {}
+        self._graph_lock = threading.Lock()  # Lock for structural modifications
+        self._resolution_lock = Lock()
 
     def add_state(self, state: State, parent: Optional[State] = None) -> None:
         """
@@ -63,42 +69,94 @@ class StateGraph:
         If the state is already in the graph, raise an error if this call would
         introduce a different parent than before (i.e., re-parenting).
         """
+        with self._graph_lock:
+            # Initialize state data and lock
+            if state not in self._state_data:
+                self._state_data[state] = state.data  # Use existing state data
+                self._data_locks[state] = threading.Lock()
 
-        # If state is already in the graph, check for re-parenting
-        if state in self._nodes:
-            existing_parent = self._parent_map[state]
-            # If there's no change, do nothing and return
-            if existing_parent == parent:
-                return  # Parent is the same, or both None
-            # Otherwise, disallow re-parenting
-            raise ValueError(
-                f"Cannot re-parent state '{state.name}' from '{existing_parent.name if existing_parent else None}' "
-                f"to '{parent.name if parent else None}'. Re-parenting is disallowed."
-            )
+            # If state is already in the graph, check for re-parenting
+            if state in self._nodes:
+                existing_parent = self._parent_map[state]
+                if existing_parent == parent:
+                    return
+                raise ValueError(
+                    f"Cannot re-parent state '{state.name}' from '{existing_parent.name if existing_parent else None}' "
+                    f"to '{parent.name if parent else None}'. Re-parenting is disallowed."
+                )
 
-        # If there's a parent, ensure it is in the graph
-        if parent is not None:
-            if parent not in self._nodes:
-                raise ValueError(f"Parent state '{parent.name}' must be added to the graph first")
-            # Check for cycle
-            if self._would_create_cycle(state, parent):
-                raise ValueError(f"Adding state '{state.name}' to parent '{parent.name}' would create a cycle")
+            # If there's a parent, ensure it is in the graph
+            if parent is not None:
+                if parent not in self._nodes:
+                    raise ValueError(f"Parent state '{parent.name}' must be added to the graph first")
+                if self._would_create_cycle(state, parent):
+                    raise ValueError(f"Adding state '{state.name}' to parent '{parent.name}' would create a cycle")
 
-        # If we get here, the state is not yet in the graph
-        new_node = _GraphNode(state=state)
-        self._nodes[state] = new_node
-        self._parent_map[state] = parent
+            # Create and link the new node
+            new_node = _GraphNode(state=state)
+            self._nodes[state] = new_node
+            self._parent_map[state] = parent
 
-        # If there's a parent, link them in the _GraphNode structure
-        if parent is not None:
-            parent_node = self._nodes[parent]
-            new_node.parent = parent_node
-            parent_node.children.add(new_node)
+            if parent is not None:
+                parent_node = self._nodes[parent]
+                new_node.parent = parent_node
+                parent_node.children.add(new_node)
 
-            # If parent is a CompositeState, also update parent's _children
-            if isinstance(parent, CompositeState):
-                parent._children.add(state)
-                state.parent = parent
+                # Update state's parent reference for backward compatibility
+                if isinstance(parent, CompositeState):
+                    state.parent = parent
+                    parent._children.add(state)
+                else:
+                    state.parent = None
+
+                # Only set initial state if parent is composite and has no initial state yet
+                if isinstance(parent, CompositeState) and parent not in self._initial_states:
+                    self.set_initial_state(parent, state)
+
+    def get_state_data(self, state: State) -> Dict[str, Any]:
+        """Thread-safe access to state data."""
+        if state not in self._state_data:
+            self._state_data[state] = state.data  # Use existing state data
+            self._data_locks[state] = threading.Lock()
+        return self._state_data[state]
+
+    def set_state_data(self, state: State, key: str, value: Any) -> None:
+        """Thread-safe way to set state data."""
+        with self._data_locks[state]:
+            self._state_data[state][key] = value
+            # Update state's data for backward compatibility
+            state.data[key] = value
+
+    def get_initial_state(self, composite_state: CompositeState) -> Optional[State]:
+        """Get the initial state for a composite state."""
+        return self._initial_states.get(composite_state)
+
+    def set_initial_state(self, composite_state: CompositeState, initial_state: State) -> None:
+        """Set the initial state for a composite state."""
+        if composite_state not in self._nodes:
+            raise ValueError(f"Composite state '{composite_state.name}' not in graph")
+        if initial_state not in self._nodes:
+            raise ValueError(f"Initial state '{initial_state.name}' not in graph")
+        if initial_state not in self.get_children(composite_state):
+            raise ValueError(f"Initial state '{initial_state.name}' must be a child of '{composite_state.name}'")
+        self._initial_states[composite_state] = initial_state
+        # Update composite state's initial state reference for backward compatibility
+        composite_state._initial_state = initial_state
+
+    def get_parent(self, state: State) -> Optional[State]:
+        """Get the parent state of a state."""
+        return self._parent_map.get(state)
+
+    def get_children(self, state: State) -> Set[State]:
+        """Get the child states of a state."""
+        if state not in self._nodes:
+            return set()
+        return {node.state for node in self._nodes[state].children}
+
+    def is_composite_parent(self, state: State) -> bool:
+        """Check if a state is parented by a CompositeState."""
+        parent = self._parent_map.get(state)
+        return isinstance(parent, CompositeState) if parent else False
 
     def _would_create_cycle(self, state: State, new_parent: State) -> bool:
         """Check if adding state under new_parent would create a cycle."""
@@ -112,24 +170,26 @@ class StateGraph:
 
     def add_transition(self, transition: Transition) -> None:
         """Add a transition to the graph."""
-        if transition.source not in self._nodes:
-            raise ValueError(f"Source state {transition.source.name} not in graph")
-        if transition.target not in self._nodes:
-            raise ValueError(f"Target state {transition.target.name} not in graph")
+        with self._graph_lock:
+            if transition.source not in self._nodes:
+                raise ValueError(f"Source state {transition.source.name} not in graph")
+            if transition.target not in self._nodes:
+                raise ValueError(f"Target state {transition.target.name} not in graph")
 
-        # Initialize if needed
-        if transition.source not in self._transitions:
-            self._transitions[transition.source] = set()
+            # Initialize if needed
+            if transition.source not in self._transitions:
+                self._transitions[transition.source] = set()
 
-        self._transitions[transition.source].add(transition)
-        self._nodes[transition.source].transitions.add(transition)
+            self._transitions[transition.source].add(transition)
+            self._nodes[transition.source].transitions.add(transition)
 
     def get_valid_transitions(self, state: State, event: Event) -> List[Transition]:
         """Get all transitions from a state for an event."""
-        if state not in self._transitions:
-            return []
-        # Return all transitions sorted by priority, let the state machine evaluate guards
-        return sorted(list(self._transitions[state]), key=lambda t: t.get_priority(), reverse=True)
+        with self._graph_lock:
+            if state not in self._transitions:
+                return []
+            # Return all transitions sorted by priority, let the state machine evaluate guards
+            return sorted(list(self._transitions[state]), key=lambda t: t.get_priority(), reverse=True)
 
     def get_ancestors(self, state: State) -> List[State]:
         """Get all ancestor states in order from immediate parent to root."""
@@ -143,17 +203,10 @@ class StateGraph:
             current = self._parent_map.get(current)
         return ancestors
 
-    def get_children(self, state: State) -> Set[State]:
-        """Get immediate child states of a state."""
-        node = self._nodes.get(state)
-        if not node:
-            return set()
-        # Return the underlying .state from each child node
-        return {child_node.state for child_node in node.children}
-
     def get_root_states(self) -> Set[State]:
         """Get all states that have no parent."""
-        return {node.state for node in self._nodes.values() if node.parent is None}
+        with self._graph_lock:
+            return {node.state for node in self._nodes.values() if node.parent is None}
 
     def validate(self) -> List[str]:
         """Validate the graph structure."""
@@ -192,10 +245,9 @@ class StateGraph:
                 if not node.children:
                     errors.append(f"Composite state '{st.name}' has no children")
 
-                # If it has children but no _initial_state, pick one
-                if node.children and not st._initial_state:
-                    first_child = next(iter(node.children)).state
-                    st._initial_state = first_child
+                # If it has children but no initial state, pick one
+                if node.children and st not in self._initial_states:
+                    errors.append(f"Composite state '{st.name}' has no initial state set")
 
         return errors
 
@@ -204,13 +256,27 @@ class StateGraph:
         self._history.record_state(composite_state, active_state)
 
     def resolve_active_state(self, state: State) -> State:
-        """Resolve active state using cached history."""
-        if isinstance(state, CompositeState):
+        """Thread-safe state resolution with granular locking."""
+        if not isinstance(state, CompositeState):
+            return state
+        
+        with self._resolution_lock:
             hist_state = self._history.get_last_state(state)
             if hist_state:
-                return self.resolve_active_state(hist_state)
-            initial = state._initial_state or state
-            return self.resolve_active_state(initial)
+                # Release lock before recursive call
+                next_state = hist_state
+            else:
+                initial = self.get_initial_state(state)
+                if initial is None:
+                    children = self.get_children(state)
+                    if children:
+                        initial = next(iter(children))
+                        self.set_initial_state(state, initial)
+                next_state = initial if initial else state
+                
+        # Do recursive resolution outside the lock
+        if next_state != state:
+            return self.resolve_active_state(next_state)
         return state
 
     def get_composite_ancestors(self, state: State) -> List[CompositeState]:
@@ -228,18 +294,45 @@ class StateGraph:
         """Clear all history records."""
         self._history.clear()
 
-    def set_initial_state(self, composite: CompositeState, state: State) -> None:
-        """Set the initial state for a composite state."""
-        if composite not in self._nodes:
-            raise ValueError(f"Composite state {composite.name} not in graph")
-        if state not in self._nodes:
-            raise ValueError(f"State {state.name} not in graph")
-        composite._initial_state = state
-
     def get_all_states(self) -> Set[State]:
         """Get all states in the graph efficiently."""
-        return set(self._nodes.keys())
+        with self._graph_lock:
+            return set(self._nodes.keys())
 
     def get_history_state(self, composite: CompositeState) -> Optional[State]:
         """Get the last active state for a composite state."""
         return self._history.get_last_state(composite)
+
+    def merge_submachine(self, parent: CompositeState, submachine_graph: 'StateGraph') -> None:
+        """
+        Merge a submachine's graph into this graph under the given parent state.
+        Preserves the initial state and transition relationships from the submachine.
+        """
+        with self._graph_lock:
+            # First add all states from submachine to ensure they exist in our graph
+            states_map = {}  # Map from submachine states to our graph states
+            for state in submachine_graph.get_all_states():
+                if state not in self._nodes:  # Avoid duplicates
+                    self.add_state(state, parent=parent)
+                states_map[state] = state
+
+            # Add all transitions from submachine, updating state references
+            for source_state in submachine_graph._transitions:
+                for transition in submachine_graph._transitions[source_state]:
+                    # Create a new transition with mapped states
+                    new_transition = Transition(
+                        source=states_map[transition.source],
+                        target=states_map[transition.target],
+                        guards=transition.guards
+                    )
+                    if new_transition not in self._transitions.get(states_map[source_state], set()):
+                        self.add_transition(new_transition)
+
+            # Find the initial state from submachine's root states
+            submachine_roots = submachine_graph.get_root_states()
+            if len(submachine_roots) == 1:
+                root_state = next(iter(submachine_roots))
+                # Get the actual initial state through resolution
+                initial_state = submachine_graph.resolve_active_state(root_state)
+                if initial_state in states_map:
+                    self.set_initial_state(parent, states_map[initial_state])

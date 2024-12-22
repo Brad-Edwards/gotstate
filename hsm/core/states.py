@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 
 from hsm.core.base import StateBase
 from hsm.core.errors import TransitionError, ValidationError
@@ -20,10 +20,10 @@ if TYPE_CHECKING:
 class State(StateBase):
     """
     Represents a state in the state machine. Manages state-specific behavior
-    including entry/exit actions and local data.
+    including entry/exit actions.
 
-    This version does NOT store parent references or child references directly,
-    assuming that the 'graph.py' infrastructure handles hierarchy.
+    While state relationships and data are managed through StateGraph,
+    some attributes are maintained for backward compatibility.
     """
 
     def __init__(
@@ -32,22 +32,27 @@ class State(StateBase):
         entry_actions: List[Callable[[], None]] = None,
         exit_actions: List[Callable[[], None]] = None,
     ) -> None:
-        """
-        Initialize a state with its name and optional actions.
-
-        :param name: Name identifying this state within its parent scope.
-        :param entry_actions: Actions executed upon entering this state.
-        :param exit_actions: Actions executed upon exiting this state.
-        """
-        super().__init__(name=name, entry_actions=entry_actions or [], exit_actions=exit_actions or [])
+        """Initialize a state with name and optional actions."""
+        self.name = name
+        self.entry_actions = entry_actions or []
+        self.exit_actions = exit_actions or []
+        # Maintained for backward compatibility
         self.data: Dict[str, Any] = {}
+        self.parent: Optional[State] = None
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, State):
+            return NotImplemented
+        return self.name == other.name
+
+    def __hash__(self) -> int:
+        return hash(self.name)
 
 
-class CompositeState(StateBase):
+class CompositeState(State):
     """
-    A composite state that can contain other states. This version does NOT
-    store children or track them directly, leaving that to the StateGraph.
-    If you wish to store them here, see the commented approach below.
+    A state that can contain other states. While hierarchy is managed through
+    StateGraph, some attributes are maintained for backward compatibility.
     """
 
     def __init__(
@@ -56,28 +61,17 @@ class CompositeState(StateBase):
         entry_actions: List[Callable[[], None]] = None,
         exit_actions: List[Callable[[], None]] = None,
     ) -> None:
-        """
-        Initialize a composite state.
-
-        :param name: Name identifying this state.
-        :param entry_actions: Actions executed upon entering this state.
-        :param exit_actions: Actions executed upon exiting this state.
-        """
-        super().__init__(name=name, entry_actions=entry_actions or [], exit_actions=exit_actions or [])
-        # Initialize the children set that will be managed by the graph
-        self._children = set()
-        # We'll keep an _initial_state reference if desired, but typically that's also in the graph.
+        super().__init__(name, entry_actions, exit_actions)
+        # Maintained for backward compatibility
+        self._children: Set[State] = set()
         self._initial_state: Optional[State] = None
 
     @property
     def initial_state(self) -> Optional[State]:
-        """Optional: get the initial state. If you're using StateGraph, use set_initial_state there."""
+        """Get the initial state."""
         return self._initial_state
 
     @initial_state.setter
     def initial_state(self, state: Optional[State]) -> None:
-        """
-        Optional: set the initial state. In a graph-based design, you'd call
-        `StateGraph.set_initial_state(self, state)` instead.
-        """
+        """Set the initial state."""
         self._initial_state = state

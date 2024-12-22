@@ -4,6 +4,7 @@
 
 import asyncio
 from typing import List, Optional, Set
+from threading import Lock
 
 from hsm.core.events import Event
 from hsm.core.states import CompositeState, State
@@ -59,6 +60,7 @@ class StateMachine:
         self._hooks = hooks or []
         self._error_recovery = error_recovery
         self._started = False
+        self._transition_lock = Lock()
 
         # Add the initial state into the graph
         self._graph.add_state(initial_state)
@@ -143,29 +145,32 @@ class StateMachine:
         Raises:
             ValidationError: If the state machine structure is invalid
         """
-        if self._started:
-            return
+        with self._transition_lock:
+            if self._started:
+                return
 
-        errors = self._graph.validate()
-        if errors:
-            raise ValidationError("\n".join(errors))
+            # Validate before starting
+            errors = self._graph.validate()
+            if errors:
+                raise ValidationError("\n".join(errors))
 
-        self._validator.validate_state_machine(self)
+            self._validator.validate_state_machine(self)
+            self._validate_composite_states()
 
-        # Resolve initial or historical active state
-        resolved_state = self._graph.resolve_active_state(self._initial_state)
+            # Resolve initial or historical active state
+            resolved_state = self._graph.resolve_active_state(self._initial_state)
 
-        # Set current state without notifications first
-        self._set_current_state(resolved_state, notify=False)
+            # Set current state without notifications first
+            self._set_current_state(resolved_state, notify=False)
 
-        # Get all ancestors of the current state and notify enter from outermost to innermost
-        ancestors = self._graph.get_composite_ancestors(self._current_state)
-        # Enter ancestors first (they're already in outermost to innermost order)
-        for ancestor in ancestors:
-            self._notify_enter(ancestor)
-        self._notify_enter(self._current_state)
+            # Get all ancestors of the current state and notify enter from outermost to innermost
+            ancestors = self._graph.get_composite_ancestors(self._current_state)
+            # Enter ancestors first (they're already in outermost to innermost order)
+            for ancestor in ancestors:
+                self._notify_enter(ancestor)
+            self._notify_enter(self._current_state)
 
-        self._started = True
+            self._started = True
 
     def stop(self) -> None:
         """
@@ -372,6 +377,21 @@ class StateMachine:
         """Expose the graph's validation results."""
         return self._graph.validate()
 
+    def _validate_composite_states(self):
+        """Ensure all composite states have initial states set."""
+        def validate_composite(state):
+            if isinstance(state, CompositeState):
+                if not state.initial_state:
+                    raise ValidationError(
+                        f"CompositeState '{state.name}' has no initial state set"
+                    )
+                # Recursively validate children
+                for child in state._children:
+                    validate_composite(child)
+
+        # Start validation from root
+        validate_composite(self._initial_state)
+
 
 class CompositeStateMachine(StateMachine):
     """
@@ -389,6 +409,8 @@ class CompositeStateMachine(StateMachine):
         hooks: Optional[List] = None,
         error_recovery: Optional[_ErrorRecoveryStrategy] = None,
     ):
+        self._submachine_lock = Lock()
+        self._state_lock = Lock()
         super().__init__(initial_state, validator, hooks, error_recovery)
         self._submachines = {}
 
@@ -407,31 +429,32 @@ class CompositeStateMachine(StateMachine):
         Raises:
             ValueError: If the provided state is not a CompositeState
         """
-        if not isinstance(state, CompositeState):
-            raise ValueError(f"State {state.name} must be a composite state")
+        with self._submachine_lock:
+            if not isinstance(state, CompositeState):
+                raise ValueError(f"State {state.name} must be a composite state")
 
-        # First add the composite state if it's not already in the graph
-        if state not in self._graph._nodes:
-            self._graph.add_state(state)
+            # First add the composite state if it's not already in the graph
+            if state not in self._graph._nodes:
+                self._graph.add_state(state)
 
-        # Integrate submachine states into the same graph:
-        for sub_state in submachine.get_states():
-            # Add each state with the composite state as parent
-            self._graph.add_state(sub_state, parent=state)
+            # Integrate submachine states into the same graph:
+            for sub_state in submachine.get_states():
+                # Add each state with the composite state as parent
+                self._graph.add_state(sub_state, parent=state)
 
-        # Integrate transitions
-        for t in submachine.get_transitions():
-            self._graph.add_transition(t)
+            # Integrate transitions
+            for t in submachine.get_transitions():
+                self._graph.add_transition(t)
 
-        # Set the composite state's initial state to the submachine's initial state
-        if submachine._initial_state:
-            state._initial_state = submachine._initial_state
-            # Add a transition from the composite state to its initial state
-            self._graph.add_transition(
-                Transition(source=state, target=submachine._initial_state, guards=[lambda e: True])
-            )
+            # Set the composite state's initial state to the submachine's initial state
+            if submachine._initial_state:
+                state._initial_state = submachine._initial_state
+                # Add a transition from the composite state to its initial state
+                self._graph.add_transition(
+                    Transition(source=state, target=submachine._initial_state, guards=[lambda e: True])
+                )
 
-        self._submachines[state] = submachine
+            self._submachines[state] = submachine
 
     def process_event(self, event: Event) -> bool:
         """
@@ -512,3 +535,9 @@ class CompositeStateMachine(StateMachine):
             else:
                 raise
             return False
+
+    def start(self):
+        with self._state_lock:
+            with self._submachine_lock:
+                super().start()
+                # Initialize submachines in proper order

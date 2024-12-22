@@ -42,7 +42,7 @@ class StateBase:
     def __hash__(self) -> int:
         """
         Generate a unique hash for the state based on its name and memory address.
-        
+
         The hash is used for state comparison and container operations. It ensures
         that states with the same name but different positions in the hierarchy
         are treated as distinct.

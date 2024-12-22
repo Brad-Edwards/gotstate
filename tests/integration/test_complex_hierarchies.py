@@ -1,9 +1,10 @@
 # test_complex_hierarchy.py
 import pytest
+import threading
 
 from hsm.core.errors import ValidationError
 from hsm.core.events import Event
-from hsm.core.state_machine import CompositeStateMachine
+from hsm.core.state_machine import CompositeStateMachine, StateMachine
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition
 
@@ -180,3 +181,42 @@ def test_complex_hfsm_validation_errors():
 
     with pytest.raises(ValidationError):
         machine.start()
+
+
+def test_concurrent_submachine_start():
+    """Test that concurrent submachine initialization is thread-safe."""
+    root = CompositeState("Root")
+    sub_root = State("SubRoot")
+    sub_end = State("SubEnd")
+
+    # Create submachine
+    submachine = StateMachine(initial_state=sub_root)
+    submachine.add_state(sub_end)
+    submachine.add_transition(
+        Transition(source=sub_root, target=sub_end, guards=[lambda e: e.name == "to_sub_end"])
+    )
+
+    # Create main machine
+    main_machine = CompositeStateMachine(root)
+    main_machine.add_submachine(root, submachine)
+
+    # Create multiple threads trying to start the machine
+    threads = []
+    for _ in range(5):
+        t = threading.Thread(target=main_machine.start)
+        threads.append(t)
+        t.start()
+
+    # Wait for all threads with timeout
+    for t in threads:
+        t.join(timeout=2.0)  # Add 2 second timeout
+        assert not t.is_alive(), "Thread failed to complete within timeout - possible deadlock"
+
+    # Verify the machine ended up in the correct initial state
+    assert main_machine.current_state.name == "SubRoot", \
+        f"Expected to be in SubRoot state, but was in {main_machine.current_state.name}"
+
+    # Try transitioning to verify machine is in valid state
+    main_machine.process_event(Event("to_sub_end"))
+    assert main_machine.current_state.name == "SubEnd", \
+        "Machine failed to transition after concurrent start"

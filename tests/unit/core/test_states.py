@@ -35,7 +35,6 @@ def test_composite_state_children():
     """Test composite state child management through graph."""
     graph = StateGraph()
     cs = CompositeState("Composite")
-    cs._children = set()
     child1 = State("Child1")
     child2 = State("Child2")
 
@@ -44,31 +43,46 @@ def test_composite_state_children():
     graph.add_state(child1, parent=cs)
     graph.add_state(child2, parent=cs)
 
-    # Verify relationships
-    assert child1 in cs._children
-    assert child2 in cs._children
-    assert child1.parent == cs
-    assert child2.parent == cs
+    # Verify relationships through graph
+    children = graph.get_children(cs)
+    assert child1 in children
+    assert child2 in children
+    assert graph._parent_map[child1] == cs
+    assert graph._parent_map[child2] == cs
 
 
 def test_state_data_isolation():
     """Test that state data is properly isolated between siblings."""
     graph = StateGraph()
     parent = CompositeState("Parent")
-    parent._children = set()
     state1 = State("State1")
     state2 = State("State2")
 
-    # Set data before adding to graph
-    state1.data["test"] = "value1"
-    state2.data["test"] = "value2"
-
-    # Add states through graph
+    # Add states to graph
     graph.add_state(parent)
     graph.add_state(state1, parent=parent)
     graph.add_state(state2, parent=parent)
 
+    # Set data through graph
+    graph.set_state_data(state1, "test", "value1")
+    graph.set_state_data(state2, "test", "value2")
+
     # Verify data isolation
-    assert state1.data["test"] == "value1"
-    assert state2.data["test"] == "value2"
-    assert state1.data is not state2.data  # Ensure different dict instances
+    assert graph.get_state_data(state1)["test"] == "value1"
+    assert graph.get_state_data(state2)["test"] == "value2"
+
+
+def test_initial_state_management():
+    """Test initial state management through graph."""
+    graph = StateGraph()
+    cs = CompositeState("Composite")
+    initial = State("Initial")
+    other = State("Other")
+
+    graph.add_state(cs)
+    graph.add_state(initial, parent=cs)
+    graph.add_state(other, parent=cs)
+
+    # Set and verify initial state through graph
+    graph.set_initial_state(cs, initial)
+    assert graph.get_initial_state(cs) == initial
