@@ -33,7 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Input validation
 - Runtime checks
 
-## [1.0.1] - 2024-12-23
+## [1.0.1] - 2024-12-22
 ### Added
 - Moved package to `gotstate` and updated `pyproject.toml`
 
+## [1.0.2] - 2024-12-22
+### Changed
+- Updated `pyproject.toml`
+- Updated `sonar-project.properties`
