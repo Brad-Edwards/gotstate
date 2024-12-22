@@ -54,31 +54,52 @@ class StateGraph:
         self._parent_map: Dict[State, Optional[State]] = {}
 
     def add_state(self, state: State, parent: Optional[State] = None) -> None:
-        """Add a state with optional parent."""
-        if state in self._nodes:
-            return  # Already added
+        """
+        Add a state with an optional parent.
+        If the state is already in the graph, raise an error if this call would
+        introduce a different parent than before (i.e., re-parenting).
+        """
 
-        # Create a new _GraphNode with no parent (yet)
+        # If state is already in the graph, check for re-parenting
+        if state in self._nodes:
+            existing_parent = self._parent_map[state]
+            # If there's no change, do nothing and return
+            if existing_parent == parent:
+                return  # Parent is the same, or both None
+            # Otherwise, disallow re-parenting
+            raise ValueError(
+                f"Cannot re-parent state '{state.name}' from '{existing_parent.name if existing_parent else None}' "
+                f"to '{parent.name if parent else None}'. Re-parenting is disallowed."
+            )
+
+        # If there's a parent, ensure it is in the graph
+        if parent is not None:
+            if parent not in self._nodes:
+                raise ValueError(f"Parent state '{parent.name}' must be added to the graph first")
+            # Check for cycle
+            if self._would_create_cycle(state, parent):
+                raise ValueError(f"Adding state '{state.name}' to parent '{parent.name}' would create a cycle")
+
+        # If we get here, the state is not yet in the graph
         new_node = _GraphNode(state=state)
         self._nodes[state] = new_node
         self._parent_map[state] = parent
 
         # If there's a parent, link them in the _GraphNode structure
         if parent is not None:
-            if self._would_create_cycle(state, parent):
-                raise ValueError(f"Adding state {state.name} to parent {parent.name} would create a cycle")
             parent_node = self._nodes[parent]
             new_node.parent = parent_node
             parent_node.children.add(new_node)
 
-            # If parent is a CompositeState, also update parent's ._children
+            # If parent is a CompositeState, also update parent's _children
             if isinstance(parent, CompositeState):
                 parent._children.add(state)
                 state.parent = parent
 
     def _would_create_cycle(self, state: State, new_parent: State) -> bool:
         """Check if adding state under new_parent would create a cycle."""
-        current = self._parent_map.get(new_parent)
+        # First check if state is already in new_parent's ancestors
+        current = new_parent
         while current:
             if current == state:
                 return True

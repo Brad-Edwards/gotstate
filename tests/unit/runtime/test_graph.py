@@ -1,3 +1,7 @@
+# tests/unit/runtime/test_graph.py
+# Copyright (c) 2024 Brad Edwards
+# Licensed under the MIT License - see LICENSE file for details
+
 """Unit tests for the graph-based state machine structure."""
 
 import pytest
@@ -11,15 +15,33 @@ from hsm.runtime.graph import StateGraph
 def test_add_state():
     """Test adding states to the graph."""
     graph = StateGraph()
-    state1 = State("state1")
-    state2 = State("state2")
+    composite = CompositeState("composite")
+    composite._children = set()
+    child = State("child")
 
-    graph.add_state(state1)
-    graph.add_state(state2, parent=state1)
+    graph.add_state(composite)
+    graph.add_state(child, parent=composite)
 
     # Verify hierarchy
-    assert state2.parent == state1
-    assert state2 in graph.get_children(state1)
+    assert child.parent == composite
+    assert child in graph.get_children(composite)
+    assert graph._parent_map[child] == composite
+
+
+def test_add_regular_state_parent():
+    """Test adding states with a regular state as parent."""
+    graph = StateGraph()
+    parent = State("parent")
+    child = State("child")
+
+    graph.add_state(parent)
+    graph.add_state(child, parent=parent)
+
+    # Regular states don't update the state's parent attribute
+    assert child.parent is None
+    # But the graph tracks the relationship internally
+    assert graph._parent_map[child] == parent
+    assert child in graph.get_children(parent)
 
 
 def test_add_transition():
@@ -42,8 +64,10 @@ def test_add_transition():
 def test_get_ancestors():
     """Test retrieving ancestor states."""
     graph = StateGraph()
-    root = State("root")
-    parent = State("parent")
+    root = CompositeState("root")
+    root._children = set()
+    parent = CompositeState("parent")
+    parent._children = set()
     child = State("child")
 
     graph.add_state(root)
@@ -57,21 +81,38 @@ def test_get_ancestors():
 def test_validate_cycle_detection():
     """Test that cycle detection prevents invalid hierarchies."""
     graph = StateGraph()
-    state1 = State("state1")
-    state2 = State("state2")
+    composite = CompositeState("composite")
+    composite._children = set()
+    child = State("child")
 
-    graph.add_state(state1)
-    graph.add_state(state2, parent=state1)
+    # First add composite as parent of child
+    graph.add_state(composite)
+    graph.add_state(child, parent=composite)
 
-    # Attempt to create a cycle should raise ValueError
-    with pytest.raises(ValueError, match="would create a cycle"):
-        graph.add_state(state1, parent=state2)
+    # Then try to re-parent composite under child, which is not allowed
+    with pytest.raises(ValueError, match="Cannot re-parent state"):
+        graph.add_state(composite, parent=child)
+
+    # Also test the reverse direction
+    graph2 = StateGraph()
+    composite2 = CompositeState("composite2")
+    composite2._children = set()
+    child2 = State("child2")
+
+    # First add child as parent of composite
+    graph2.add_state(child2)
+    graph2.add_state(composite2, parent=child2)
+
+    # Then try to re-parent child under composite, which is not allowed
+    with pytest.raises(ValueError, match="Cannot re-parent state"):
+        graph2.add_state(child2, parent=composite2)
 
 
 def test_validate_composite_state():
     """Test validation of composite states."""
     graph = StateGraph()
     composite = CompositeState("composite")
+    composite._children = set()
     graph.add_state(composite)
 
     # Composite state with no children should fail validation
