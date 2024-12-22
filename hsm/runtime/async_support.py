@@ -190,6 +190,8 @@ class AsyncStateMachine(StateMachine):
 
             # Update state
             self._current_state = transition.target
+            # Notify hooks of the transition
+            await self._notify_transition_async(previous_state, self._current_state)
             await self._notify_enter_async(self._current_state)
             return True
 
@@ -237,6 +239,16 @@ class AsyncStateMachine(StateMachine):
                     await hook_method(error)
                 else:
                     hook_method(error)
+
+    async def _notify_transition_async(self, source: State, target: State) -> None:
+        """Notify hooks of a state transition asynchronously."""
+        for hook in self._hooks:
+            if hasattr(hook, "on_transition"):
+                hook_method = hook.on_transition
+                if asyncio.iscoroutinefunction(hook_method):
+                    await hook_method(source, target)
+                else:
+                    hook_method(source, target)
 
 
 class _AsyncEventProcessingLoop:
