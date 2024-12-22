@@ -155,7 +155,9 @@ class StateMachine:
             # Record history if applicable
             composite_ancestors = self._graph.get_composite_ancestors(self._current_state)
             if composite_ancestors:
-                self._graph.record_history(composite_ancestors[0], self._current_state)
+                # Record history for each composite ancestor
+                for ancestor in composite_ancestors:
+                    self._graph.record_history(ancestor, self._current_state)
 
             # Exit from innermost to outermost
             current = self._current_state
@@ -247,17 +249,17 @@ class StateMachine:
                 # Exit only the current state if transitioning within the same composite
                 if common_ancestor and common_ancestor == source_ancestors[0]:
                     self._notify_exit(self._current_state)
-                    if isinstance(self._current_state, CompositeState):
+                    if isinstance(self._current_state.parent, CompositeState):
                         # Record history when exiting composite states
-                        self._graph.record_history(self._current_state, self._current_state)
+                        self._graph.record_history(self._current_state.parent, self._current_state)
                 else:
                     # Exit up to but not including the common ancestor
                     current = self._current_state
                     while current and current != common_ancestor:
                         self._notify_exit(current)
-                        if isinstance(current, CompositeState):
+                        if isinstance(current.parent, CompositeState):
                             # Record history when exiting composite states
-                            self._graph.record_history(current, self._current_state)
+                            self._graph.record_history(current.parent, current)
                         current = current.parent
 
             # Execute transition actions
@@ -266,6 +268,11 @@ class StateMachine:
 
             # Update current state without notifications (they're handled here)
             self._set_current_state(transition.target, notify=False)
+
+            # Notify transition
+            for hook in self._hooks:
+                if hasattr(hook, "on_transition"):
+                    hook.on_transition(transition.source, transition.target)
 
             # Notify enter of new state and its ancestors from common ancestor down
             target_ancestors = self._graph.get_composite_ancestors(transition.target)

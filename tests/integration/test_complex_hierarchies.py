@@ -139,7 +139,8 @@ def test_complex_hfsm_history_capture(complex_hfsm):
     # If the library doesn't store history, the next start might revert to A1
     # The specification says we do keep history in the StateGraph if configured,
     # so let's see what actually happens:
-    hist = complex_hfsm.get_history_state(complex_hfsm._graph.get_composite_ancestors(complex_hfsm.current_state)[0])
+    subA = complex_hfsm._initial_state.initial_state  # Get SubA from Root's initial state
+    hist = complex_hfsm.get_history_state(subA)
     # 'hist' should be None or 'A2' depending on how the code is storing history.
     # If the library implements "record_history" on stop, subA's history was "A2".
     # We'll do a minimal check:

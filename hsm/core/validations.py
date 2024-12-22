@@ -109,7 +109,7 @@ class _DefaultValidationRules:
         - Check that all states referenced in transitions are reachable.
         - Handle composite state hierarchies properly.
         """
-        if machine.current_state is None:
+        if machine._initial_state is None:
             raise ValidationError("StateMachine must have an initial state.")
 
         try:
@@ -133,7 +133,7 @@ class _DefaultValidationRules:
 
             # Build reachability including composite state hierarchy
             reachable_states = set()
-            current = machine.current_state
+            current = machine._initial_state
 
             def add_state_and_children(state):
                 """Helper to add a state and all its children to reachable states"""
@@ -151,7 +151,7 @@ class _DefaultValidationRules:
                         reachable_states.add(state._initial_state)
                         add_state_and_children(state._initial_state)
 
-            # Add current state and its hierarchy
+            # Add initial state and its hierarchy
             add_state_and_children(current)
 
             # Add all parent states to reachable set
@@ -181,7 +181,7 @@ class _DefaultValidationRules:
             if unreachable:
                 raise ValidationError(
                     f"States {[s.name for s in unreachable]} are not "
-                    f"reachable from initial state {machine.current_state.name}."
+                    f"reachable from initial state {machine._initial_state.name}."
                 )
 
         except Exception as e:

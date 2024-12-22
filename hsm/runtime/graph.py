@@ -239,3 +239,7 @@ class StateGraph:
     def get_all_states(self) -> Set[State]:
         """Get all states in the graph efficiently."""
         return set(self._nodes.keys())
+
+    def get_history_state(self, composite: CompositeState) -> Optional[State]:
+        """Get the last active state for a composite state."""
+        return self._history.get_last_state(composite)
