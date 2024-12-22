@@ -164,10 +164,19 @@ class StateMachine:
             return False
 
         try:
-            # Get potential transitions from the graph
-            potential_transitions = self._graph.get_valid_transitions(self._current_state, event)
+            # Get potential transitions from both current state and its parent states
+            potential_transitions = []
+            current = self._current_state
+            while current:
+                transitions = self._graph.get_valid_transitions(current, event)
+                potential_transitions.extend(transitions)
+                current = current.parent
+
             if not potential_transitions:
                 return False
+
+            # Sort transitions by priority
+            potential_transitions.sort(key=lambda t: t.get_priority(), reverse=True)
 
             # Evaluate guards to find valid transitions
             valid_transitions = []
@@ -186,10 +195,6 @@ class StateMachine:
 
             # Pick the highest-priority transition
             transition = valid_transitions[0]
-
-            # Record history for composite states before leaving them
-            if isinstance(self._current_state.parent, CompositeState):
-                self._graph.record_history(self._current_state.parent, self._current_state)
 
             # Execute the transition
             self._execute_transition(transition, event)
@@ -216,7 +221,7 @@ class StateMachine:
     def _execute_transition(self, transition: Transition, event: Event) -> None:
         """Execute a transition, notify exit/enter, handle errors."""
         try:
-            # First notify exit of current state and its ancestors
+            # First notify exit of current state and its ancestors up to source state
             if self._current_state:
                 # Get the common ancestor between source and target states
                 source_ancestors = self._graph.get_composite_ancestors(self._current_state)
@@ -231,6 +236,9 @@ class StateMachine:
                 current = self._current_state
                 while current and current != common_ancestor:
                     self._notify_exit(current)
+                    if isinstance(current, CompositeState):
+                        # Record history when exiting composite states
+                        self._graph.record_history(current, self._current_state)
                     current = current.parent
 
             # Execute transition actions
@@ -240,12 +248,12 @@ class StateMachine:
             # Update current state without notifications (they're handled here)
             self._set_current_state(transition.target, notify=False)
 
-            # Notify enter of new state and its ancestors
+            # Notify enter of new state and its ancestors from common ancestor down
             target_ancestors = self._graph.get_composite_ancestors(transition.target)
             # Enter from common ancestor down to target state
             entered = set()
             for ancestor in reversed(target_ancestors):
-                if ancestor not in entered:
+                if ancestor not in entered and ancestor != common_ancestor:
                     self._notify_enter(ancestor)
                     entered.add(ancestor)
             self._notify_enter(transition.target)
