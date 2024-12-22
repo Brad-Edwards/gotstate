@@ -35,7 +35,7 @@ def simple_machine():
             source=idle,
             target=active,
             guards=[lambda e: e.name == "go_active"],
-            actions=[lambda e: active.data.update({"activated": True})],
+            actions=[lambda e: machine._graph.set_state_data(active, "activated", True)],
         )
     )
     machine.add_transition(
@@ -43,7 +43,7 @@ def simple_machine():
             source=active,
             target=finished,
             guards=[lambda e: e.name == "finish"],
-            actions=[lambda e: finished.data.update({"finished": True})],
+            actions=[lambda e: machine._graph.set_state_data(finished, "finished", True)],
         )
     )
     return machine
@@ -66,14 +66,14 @@ def test_simple_machine_transitions(simple_machine):
     transitioned = simple_machine.process_event(event)
     assert transitioned is True
     assert simple_machine.current_state.name == "Active"
-    assert simple_machine.current_state.data.get("activated") is True
+    assert simple_machine._graph.get_state_data(simple_machine.current_state).get("activated") is True
 
     # Transition to Finished
     event = Event("finish")
     transitioned = simple_machine.process_event(event)
     assert transitioned is True
     assert simple_machine.current_state.name == "Finished"
-    assert simple_machine.current_state.data.get("finished") is True
+    assert simple_machine._graph.get_state_data(simple_machine.current_state).get("finished") is True
 
 
 def test_no_transition_fails(simple_machine):
@@ -202,12 +202,13 @@ def test_composite_state_machine():
     sub1 = State("Sub1")
     sub2 = State("Sub2")
 
-    # The composite's initial state is set to sub1
-    top.initial_state = sub1
-
     machine = CompositeStateMachine(top)
     machine.add_state(sub1, parent=top)
     machine.add_state(sub2, parent=top)
+
+    # Set initial state through graph
+    machine._graph.set_initial_state(top, sub1)
+
     machine.add_transition(Transition(source=sub1, target=sub2, guards=[lambda e: e.name == "next"]))
 
     machine.start()
@@ -251,17 +252,20 @@ def test_sync_executor_fifo_queue(simple_machine):
     executor = Executor(simple_machine, queue)
 
     simple_machine.start()
+    assert simple_machine.current_state.name == "Idle"
+
     queue.enqueue(Event("go_active"))
     queue.enqueue(Event("finish"))
 
     t = threading.Thread(target=executor.run)
     t.start()
 
-    # Let it run a bit
-    time.sleep(0.2)
+    # Let it run a bit longer to ensure both transitions complete
+    time.sleep(0.5)
     executor.stop()
     t.join()
 
+    # Should have gone through both transitions: Idle -> Active -> Finished
     assert simple_machine.current_state.name == "Finished"
 
 

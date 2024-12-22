@@ -109,7 +109,8 @@ class _DefaultValidationRules:
         - Check that all states referenced in transitions are reachable.
         - Handle composite state hierarchies properly.
         """
-        if machine._initial_state is None:
+        initial_state = machine._graph.get_initial_state(None)  # Get root initial state
+        if initial_state is None:
             raise ValidationError("StateMachine must have an initial state.")
 
         try:
@@ -133,7 +134,7 @@ class _DefaultValidationRules:
 
             # Build reachability including composite state hierarchy
             reachable_states = set()
-            current = machine._initial_state
+            current = initial_state
 
             def add_state_and_children(state):
                 """Helper to add a state and all its children to reachable states"""
@@ -142,14 +143,15 @@ class _DefaultValidationRules:
                 reachable_states.add(state)
                 # For composite states, add all children and the state itself
                 if isinstance(state, CompositeState):
-                    for child in state._children:
+                    for child in machine._graph.get_children(state):
                         reachable_states.add(child)
                         # Recursively add children's children
                         add_state_and_children(child)
                     # If it's a composite state, add its initial state
-                    if state._initial_state:
-                        reachable_states.add(state._initial_state)
-                        add_state_and_children(state._initial_state)
+                    initial_state = machine._graph.get_initial_state(state)
+                    if initial_state:
+                        reachable_states.add(initial_state)
+                        add_state_and_children(initial_state)
 
             # Add initial state and its hierarchy
             add_state_and_children(current)
@@ -158,7 +160,7 @@ class _DefaultValidationRules:
             while current:
                 reachable_states.add(current)
                 if isinstance(current, CompositeState):
-                    for child in current._children:
+                    for child in machine._graph.get_children(current):
                         add_state_and_children(child)
                 current = current.parent
 
@@ -179,10 +181,17 @@ class _DefaultValidationRules:
             # Check unreachable states
             unreachable = all_states - reachable_states
             if unreachable:
+                root_initial = machine._graph.get_initial_state(None)  # Get root initial state
                 raise ValidationError(
                     f"States {[s.name for s in unreachable]} are not "
-                    f"reachable from initial state {machine._initial_state.name}."
+                    f"reachable from initial state {root_initial.name}."
                 )
+
+            # Validate composite states have initial states
+            for state in all_states:
+                if isinstance(state, CompositeState):
+                    if not machine._graph.get_initial_state(state):
+                        raise ValidationError(f"Composite state '{state.name}' has no initial state set")
 
         except Exception as e:
             if not isinstance(e, ValidationError):
@@ -222,10 +231,12 @@ class AsyncValidator(Validator):
         errors = []
 
         # Basic validation
-        if not machine._initial_state:
+        initial_state = machine._graph.get_initial_state(None)  # Get root initial state
+        if not initial_state:
             errors.append("State machine must have an initial state")
 
-        if not machine._current_state:
+        # Only check current state if machine is started
+        if machine._started and not machine._graph.get_current_state():
             errors.append("State machine must have a current state")
 
         # Validate state graph

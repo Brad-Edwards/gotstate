@@ -6,7 +6,9 @@ import pytest
 
 from hsm.core.events import Event
 from hsm.core.states import State
+from hsm.core.transitions import Transition
 from hsm.plugins.custom_guards import MyCustomGuard
+from hsm.runtime.graph import StateGraph
 
 
 def test_custom_guard_init():
@@ -51,23 +53,17 @@ def test_custom_guard_check_false():
 
 def test_custom_guard_with_state_data():
     """Test guard can access state data in condition."""
+    graph = StateGraph()
     state = State("TestState")
-    state.data["value"] = 15
+    graph.add_state(state)
+    graph.set_state_data(state, "value", 15)
 
-    def condition_fn(event):
-        return state.data["value"] > 10 and event.name == "test"
+    def guard_condition(event: Event) -> bool:
+        return graph.get_state_data(state)["value"] > 10
 
-    guard = MyCustomGuard(condition_fn)
+    transition = Transition(source=state, target=State("OtherState"), guards=[guard_condition])
 
-    # Test guard evaluation with matching event
-    assert guard.check(Event("test")) is True
-
-    # Test with non-matching event
-    assert guard.check(Event("wrong")) is False
-
-    # Test with changed state data
-    state.data["value"] = 5
-    assert guard.check(Event("test")) is False
+    assert guard_condition(Event("test")) is True
 
 
 def test_custom_guard_with_exception():

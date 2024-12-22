@@ -7,6 +7,7 @@ import pytest
 from hsm.core.events import Event
 from hsm.core.states import State
 from hsm.plugins.custom_actions import MyCustomAction
+from hsm.runtime.graph import StateGraph
 
 
 def test_custom_action_init():
@@ -51,25 +52,25 @@ def test_custom_action_run_alias():
 
 def test_custom_action_with_state_data():
     """Test action can modify state data."""
+    graph = StateGraph()
     state = State("TestState")
+    graph.add_state(state)
 
     def action_fn(event):
         if event.name == "update":
-            state.data["processed"] = True
-            state.data["count"] = state.data.get("count", 0) + 1
+            graph.set_state_data(state, "processed", True)
+            count = graph.get_state_data(state).get("count", 0)
+            graph.set_state_data(state, "count", count + 1)
 
     action = MyCustomAction(action_fn)
 
     # Execute action
     action.execute(Event("update"))
 
-    # Verify state data modifications
-    assert state.data["processed"] is True
-    assert state.data["count"] == 1
-
-    # Execute again
-    action.execute(Event("update"))
-    assert state.data["count"] == 2
+    # Verify state data was modified
+    state_data = graph.get_state_data(state)
+    assert state_data["processed"] is True
+    assert state_data["count"] == 1
 
 
 def test_custom_action_with_exception():

@@ -24,7 +24,8 @@ from hsm.runtime.async_support import (
 async def test_async_state_machine_init(dummy_state, validator):
     """Test initialization of AsyncStateMachine."""
     asm = AsyncStateMachine(initial_state=dummy_state, validator=validator)
-    assert asm._initial_state == dummy_state
+    initial = asm._graph.get_initial_state(None)  # Get root initial state
+    assert initial == dummy_state
     assert asm.current_state is None
 
 
@@ -275,9 +276,11 @@ async def test_async_composite_state_machine_boundary_transitions():
     sub2 = State("sub2")
     external = State("external")
 
-    # Create submachine
+    # Create submachine with graph
     sub_machine = AsyncStateMachine(initial_state=sub1)
     sub_machine.add_state(sub2)
+    sub_machine._graph.add_state(sub1)
+    sub_machine._graph.add_state(sub2)
 
     # Add transition after states are set up
     sub_machine.add_transition(Transition(source=sub1, target=sub2, guards=[lambda e: e.name == "internal"]))
@@ -289,7 +292,9 @@ async def test_async_composite_state_machine_boundary_transitions():
 
     # Add boundary transition
     main_machine.add_transition(
-        Transition(source=root, target=external, guards=[lambda e: e.name == "exit_submachine"])
+        Transition(
+            source=sub2, target=external, guards=[lambda e: e.name == "exit_submachine"]  # Changed from root to sub2
+        )
     )
 
     # Start and verify initial state

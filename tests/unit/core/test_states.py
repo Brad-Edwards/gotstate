@@ -58,16 +58,14 @@ def test_state_data_isolation():
     state1 = State("State1")
     state2 = State("State2")
 
-    # Add states to graph
     graph.add_state(parent)
     graph.add_state(state1, parent=parent)
     graph.add_state(state2, parent=parent)
 
-    # Set data through graph
+    # Set and verify data through graph only
     graph.set_state_data(state1, "test", "value1")
     graph.set_state_data(state2, "test", "value2")
 
-    # Verify data isolation
     assert graph.get_state_data(state1)["test"] == "value1"
     assert graph.get_state_data(state2)["test"] == "value2"
 

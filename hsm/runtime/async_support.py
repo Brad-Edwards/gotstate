@@ -101,7 +101,17 @@ class AsyncStateMachine(StateMachine):
         super().__init__(initial_state, validator, hooks)
         self._async_lock = asyncio.Lock()
         self._current_action: Optional[asyncio.Task] = None
-        self._current_state = None  # Start with no current state
+        # Don't set current state until start
+        self._graph.set_current_state(None)
+
+    @property
+    def current_state(self) -> Optional[State]:
+        """Get the current state from the graph."""
+        return self._graph.get_current_state()
+
+    def _set_current_state(self, state: Optional[State]) -> None:
+        """Set the current state in the graph."""
+        self._graph.set_current_state(state)
 
     async def start(self) -> None:
         """Start the state machine with async validation."""
@@ -109,10 +119,7 @@ class AsyncStateMachine(StateMachine):
             if self._started:
                 return
 
-            # Resolve initial or historical active state
-            resolved_state = self._graph.resolve_active_state(self._initial_state)
-            self._set_current_state(resolved_state)
-
+            # Validate before entering state
             errors = self._graph.validate()
             if errors:
                 raise ValidationError("\n".join(errors))
@@ -123,7 +130,14 @@ class AsyncStateMachine(StateMachine):
             else:
                 self._validator.validate_state_machine(self)
 
-            await self._notify_enter_async(self._current_state)
+            # Resolve initial or historical active state
+            initial_state = self._graph.get_initial_state(None)  # Get root initial state
+            if initial_state:
+                resolved_state = self._graph.resolve_active_state(initial_state)
+                self._set_current_state(resolved_state)
+                # Now enter the state
+                await self._notify_enter_async(self.current_state)
+
             self._started = True
 
     async def stop(self) -> None:
@@ -132,22 +146,33 @@ class AsyncStateMachine(StateMachine):
             if not self._started:
                 return
 
-            if self._current_state:
-                await self._notify_exit_async(self._current_state)
+            if self.current_state:
+                await self._notify_exit_async(self.current_state)
                 self._set_current_state(None)
 
             self._started = False
 
     async def process_event(self, event: Event) -> bool:
         """Process an event asynchronously."""
-        if not self._started or not self._current_state:
+        if not self._started:
             return False
 
         async with self._async_lock:
             valid_transitions = []
-            for transition in self._graph.get_valid_transitions(self._current_state, event):
-                if await transition.evaluate_guards(event):
-                    valid_transitions.append(transition)
+            if self.current_state:  # Only process transitions if we have a current state
+                # First try transitions from current state
+                for transition in self._graph.get_valid_transitions(self.current_state, event):
+                    if await transition.evaluate_guards(event):
+                        valid_transitions.append(transition)
+
+                # If no transitions found, try parent states
+                if not valid_transitions:
+                    current = self.current_state.parent
+                    while current and not valid_transitions:
+                        for transition in self._graph.get_valid_transitions(current, event):
+                            if await transition.evaluate_guards(event):
+                                valid_transitions.append(transition)
+                        current = current.parent
 
             if not valid_transitions:
                 return False
@@ -160,11 +185,11 @@ class AsyncStateMachine(StateMachine):
 
     async def _execute_transition_async(self, transition: Transition, event: Event) -> None:
         """Execute a transition asynchronously."""
-        previous_state = self._current_state
+        previous_state = self.current_state
         try:
             # Find the common ancestor between source and target states
             source_ancestors = []
-            current = self._current_state
+            current = self.current_state
             while current:
                 source_ancestors.append(current)
                 current = current.parent
@@ -183,7 +208,7 @@ class AsyncStateMachine(StateMachine):
                     break
 
             # Exit up to common ancestor
-            current = self._current_state
+            current = self.current_state
             while current and current != common_ancestor:
                 await self._notify_exit_async(current)
                 current = current.parent
@@ -362,14 +387,12 @@ class AsyncCompositeStateMachine(AsyncStateMachine):
             self._graph.add_transition(t)
 
         # Set the composite state's initial state to the submachine's initial state
-        if submachine._initial_state:
-            state._initial_state = submachine._initial_state
+        submachine_initial = submachine._graph.get_initial_state(None)  # Get root initial state
+        if submachine_initial:
             # Set initial state in the graph's internal state
-            self._graph.set_initial_state(state, submachine._initial_state)
+            self._graph.set_initial_state(state, submachine_initial)
             # Add a transition from the composite state to its initial state
-            self._graph.add_transition(
-                Transition(source=state, target=submachine._initial_state, guards=[lambda e: True])
-            )
+            self._graph.add_transition(Transition(source=state, target=submachine_initial, guards=[lambda e: True]))
 
         self._submachines[state] = submachine
 
@@ -378,16 +401,16 @@ class AsyncCompositeStateMachine(AsyncStateMachine):
         Process events with proper handling of submachine hierarchy and async locking.
         Submachine transitions take precedence over parent transitions.
         """
-        if not self._started or not self._current_state:
+        if not self._started or not self.current_state:
             return False
 
         async with self._async_lock:  # Ensure thread-safe state access
             try:
                 # First try transitions from the current state
-                current_transitions = self._graph.get_valid_transitions(self._current_state, event)
+                current_transitions = self._graph.get_valid_transitions(self.current_state, event)
 
                 # Then check transitions from ancestors
-                current = self._current_state.parent
+                current = self.current_state.parent
                 while current:
                     transitions = self._graph.get_valid_transitions(current, event)
                     current_transitions.extend(transitions)
@@ -423,25 +446,15 @@ class AsyncCompositeStateMachine(AsyncStateMachine):
                 transition = valid_transitions[0]
                 result = await self._execute_transition_async(transition, event)
 
-                # If target is a composite state, enter its initial state or submachine's initial state
+                # If target is a composite state, enter its initial state
                 if isinstance(transition.target, CompositeState):
-                    submachine = self._submachines.get(transition.target)
-                    if submachine:
-                        initial_state = submachine._initial_state
-                        if initial_state:
-                            # Create and execute a transition to the initial state
-                            initial_transition = Transition(
-                                source=transition.target, target=initial_state, guards=[lambda e: True]
-                            )
-                            await self._execute_transition_async(initial_transition, event)
-                    else:
-                        initial_state = transition.target._initial_state
-                        if initial_state:
-                            # Create and execute a transition to the initial state
-                            initial_transition = Transition(
-                                source=transition.target, target=initial_state, guards=[lambda e: True]
-                            )
-                            await self._execute_transition_async(initial_transition, event)
+                    initial_state = self._graph.get_initial_state(transition.target)
+                    if initial_state:
+                        # Create and execute a transition to the initial state
+                        initial_transition = Transition(
+                            source=transition.target, target=initial_state, guards=[lambda e: True]
+                        )
+                        await self._execute_transition_async(initial_transition, event)
 
                 return result if result is not None else True
 

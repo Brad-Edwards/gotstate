@@ -19,16 +19,15 @@ def test_add_state():
     """Test adding states to the graph."""
     graph = StateGraph()
     composite = CompositeState("composite")
-    composite._children = set()
     child = State("child")
 
     graph.add_state(composite)
     graph.add_state(child, parent=composite)
 
-    # Verify hierarchy
-    assert child.parent == composite
-    assert child in graph.get_children(composite)
+    # Verify hierarchy through graph methods only
     assert graph._parent_map[child] == composite
+    assert child in graph.get_children(composite)
+    assert graph.get_parent(child) == composite
 
 
 def test_add_regular_state_parent():
@@ -40,11 +39,10 @@ def test_add_regular_state_parent():
     graph.add_state(parent)
     graph.add_state(child, parent=parent)
 
-    # Regular states don't update the state's parent attribute
-    assert child.parent is None
-    # But the graph tracks the relationship internally
+    # Verify relationships through graph methods
     assert graph._parent_map[child] == parent
     assert child in graph.get_children(parent)
+    assert graph.get_parent(child) == parent
 
 
 def test_add_transition():
@@ -68,9 +66,7 @@ def test_get_ancestors():
     """Test retrieving ancestor states."""
     graph = StateGraph()
     root = CompositeState("root")
-    root._children = set()
     parent = CompositeState("parent")
-    parent._children = set()
     child = State("child")
 
     graph.add_state(root)

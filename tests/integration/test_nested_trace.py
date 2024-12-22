@@ -32,10 +32,6 @@ def test_nested_trace():
     sub1 = State("Sub1")
     sub2 = State("Sub2")
 
-    # Set initial states
-    top.initial_state = sub
-    sub.initial_state = sub1
-
     # Create machine with hook
     machine = CompositeStateMachine(top, hooks=[hook])
 
@@ -43,6 +39,10 @@ def test_nested_trace():
     machine.add_state(sub, parent=top)
     machine.add_state(sub1, parent=sub)
     machine.add_state(sub2, parent=sub)
+
+    # Set initial states through graph
+    machine._graph.set_initial_state(top, sub)
+    machine._graph.set_initial_state(sub, sub1)
 
     # Add transition with guard
     machine.add_transition(Transition(sub1, sub2, guards=[lambda e: e.name == "toSub2"]))
