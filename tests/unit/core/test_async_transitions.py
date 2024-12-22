@@ -99,23 +99,28 @@ async def test_basic_async_transition(async_machine, async_hook):
 async def test_concurrent_transitions(async_machine, async_hook):
     """Test handling of concurrent transition requests."""
     await async_machine.start()
+    assert async_machine.current_state.name == "Start"
 
     # Create multiple concurrent event processing tasks
     events = [Event("concurrent") for _ in range(5)]  # Use concurrent event type
     tasks = [asyncio.create_task(async_machine.process_event(event)) for event in events]
 
     # Wait for all transitions to complete
-    await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks)
 
     # Verify final state and transition order
     assert async_machine.current_state.name == "End"
-    assert len(async_hook.transitions) >= 1  # At least one transition should occur
 
-    # Verify no duplicate states in transition path
-    visited_states = set()
-    for source, target in async_hook.transitions:
-        assert source not in visited_states  # No repeated transitions
-        visited_states.add(source)
+    # At least one transition should have succeeded
+    assert any(results), "No transitions succeeded"
+
+    # Verify transitions were recorded
+    assert len(async_hook.transitions) == 1, "Expected exactly one successful transition"
+    assert async_hook.transitions[0] == ("Start", "End"), "Expected transition from Start to End"
+
+    # Verify state changes
+    assert "Start" in async_hook.exited_states
+    assert "End" in async_hook.entered_states
 
 
 @pytest.mark.asyncio

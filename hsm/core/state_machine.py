@@ -132,12 +132,12 @@ class StateMachine:
 
         # Resolve initial or historical active state
         resolved_state = self._graph.resolve_active_state(self._initial_state)
-        
+
         # Set current state without notifications first
         self._set_current_state(resolved_state, notify=False)
         # Then only notify enter since we're starting up
         self._notify_enter(self._current_state)
-        
+
         self._started = True
 
     def stop(self) -> None:
