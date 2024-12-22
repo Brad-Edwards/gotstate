@@ -221,7 +221,8 @@ class StateGraph:
             if isinstance(current, CompositeState):
                 ancestors.append(current)
             current = self._parent_map.get(current)
-        return ancestors
+        # Return in outermost to innermost order
+        return list(reversed(ancestors))
 
     def clear_history(self) -> None:
         """Clear all history records."""

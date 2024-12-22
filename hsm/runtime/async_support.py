@@ -417,9 +417,7 @@ class AsyncCompositeStateMachine(AsyncStateMachine):
                         if initial_state:
                             # Create and execute a transition to the initial state
                             initial_transition = Transition(
-                                source=transition.target,
-                                target=initial_state,
-                                guards=[lambda e: True]
+                                source=transition.target, target=initial_state, guards=[lambda e: True]
                             )
                             await self._execute_transition_async(initial_transition, event)
                     else:
@@ -427,9 +425,7 @@ class AsyncCompositeStateMachine(AsyncStateMachine):
                         if initial_state:
                             # Create and execute a transition to the initial state
                             initial_transition = Transition(
-                                source=transition.target,
-                                target=initial_state,
-                                guards=[lambda e: True]
+                                source=transition.target, target=initial_state, guards=[lambda e: True]
                             )
                             await self._execute_transition_async(initial_transition, event)
 

@@ -12,6 +12,7 @@ from hsm.runtime.async_support import AsyncCompositeStateMachine, AsyncStateMach
 
 class HookTestHelper(HookProtocol):
     """Hook implementation for testing state transitions and error handling."""
+
     def __init__(self):
         # Instance attributes instead of class attributes
         self.enter_states = []
@@ -237,9 +238,7 @@ class TestScenarios:
         main_machine.add_submachine(main_composite, submachine)
 
         # Add transitions that reference submachine states - must be done after adding submachine
-        main_machine.add_transition(
-            Transition(source=sub_b, target=main_b, guards=[lambda e: e.name == "ToMainB"])
-        )
+        main_machine.add_transition(Transition(source=sub_b, target=main_b, guards=[lambda e: e.name == "ToMainB"]))
 
         # Start machines
         await main_machine.start()

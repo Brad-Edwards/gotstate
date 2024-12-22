@@ -135,7 +135,13 @@ class StateMachine:
 
         # Set current state without notifications first
         self._set_current_state(resolved_state, notify=False)
-        # Then only notify enter since we're starting up
+
+        # Get all ancestors of the current state and notify enter from outermost to innermost
+        ancestors = self._graph.get_composite_ancestors(self._current_state)
+        # Enter ancestors first (they're already in outermost to innermost order)
+        for ancestor in ancestors:
+            self._notify_enter(ancestor)
+        # Then enter the current state
         self._notify_enter(self._current_state)
 
         self._started = True
@@ -151,7 +157,13 @@ class StateMachine:
             if composite_ancestors:
                 self._graph.record_history(composite_ancestors[0], self._current_state)
 
-            self._set_current_state(None, notify=True)
+            # Exit from innermost to outermost
+            current = self._current_state
+            self._notify_exit(current)
+            for ancestor in reversed(composite_ancestors):
+                self._notify_exit(ancestor)
+
+            self._set_current_state(None, notify=False)
 
         self._started = False
 
@@ -205,9 +217,7 @@ class StateMachine:
                 if initial_state:
                     # Create and execute a transition to the initial state
                     initial_transition = Transition(
-                        source=transition.target,
-                        target=initial_state,
-                        guards=[lambda e: True]
+                        source=transition.target, target=initial_state, guards=[lambda e: True]
                     )
                     self._execute_transition(initial_transition, event)
 
@@ -234,14 +244,21 @@ class StateMachine:
                         common_ancestor = s
                         break
 
-                # Exit up to but not including the common ancestor
-                current = self._current_state
-                while current and current != common_ancestor:
-                    self._notify_exit(current)
-                    if isinstance(current, CompositeState):
+                # Exit only the current state if transitioning within the same composite
+                if common_ancestor and common_ancestor == source_ancestors[0]:
+                    self._notify_exit(self._current_state)
+                    if isinstance(self._current_state, CompositeState):
                         # Record history when exiting composite states
-                        self._graph.record_history(current, self._current_state)
-                    current = current.parent
+                        self._graph.record_history(self._current_state, self._current_state)
+                else:
+                    # Exit up to but not including the common ancestor
+                    current = self._current_state
+                    while current and current != common_ancestor:
+                        self._notify_exit(current)
+                        if isinstance(current, CompositeState):
+                            # Record history when exiting composite states
+                            self._graph.record_history(current, self._current_state)
+                        current = current.parent
 
             # Execute transition actions
             for action in transition.actions:
@@ -252,12 +269,12 @@ class StateMachine:
 
             # Notify enter of new state and its ancestors from common ancestor down
             target_ancestors = self._graph.get_composite_ancestors(transition.target)
-            # Enter from common ancestor down to target state
-            entered = set()
-            for ancestor in reversed(target_ancestors):
-                if ancestor not in entered and ancestor != common_ancestor:
+            # Enter only ancestors below the common ancestor
+            for ancestor in target_ancestors:
+                if ancestor == common_ancestor:
+                    break
+                if ancestor not in source_ancestors:  # Only enter if not already active
                     self._notify_enter(ancestor)
-                    entered.add(ancestor)
             self._notify_enter(transition.target)
 
         except Exception as e:
@@ -406,9 +423,7 @@ class CompositeStateMachine(StateMachine):
                     if initial_state:
                         # Create and execute a transition to the initial state
                         initial_transition = Transition(
-                            source=transition.target,
-                            target=initial_state,
-                            guards=[lambda e: True]
+                            source=transition.target, target=initial_state, guards=[lambda e: True]
                         )
                         self._execute_transition(initial_transition, event)
                 else:
@@ -416,9 +431,7 @@ class CompositeStateMachine(StateMachine):
                     if initial_state:
                         # Create and execute a transition to the initial state
                         initial_transition = Transition(
-                            source=transition.target,
-                            target=initial_state,
-                            guards=[lambda e: True]
+                            source=transition.target, target=initial_state, guards=[lambda e: True]
                         )
                         self._execute_transition(initial_transition, event)
 
