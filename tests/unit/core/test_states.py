@@ -2,6 +2,8 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 
+import pytest
+
 from hsm.core.states import CompositeState, State
 from hsm.runtime.graph import StateGraph
 
@@ -84,3 +86,81 @@ def test_initial_state_management():
     # Set and verify initial state through graph
     graph.set_initial_state(cs, initial)
     assert graph.get_initial_state(cs) == initial
+
+
+def test_state_equality():
+    """Test state equality comparison."""
+    state1 = State("test")
+    state2 = State("test")
+    state3 = State("other")
+
+    assert state1 == state2
+    assert state1 != state3
+    assert state1 != "test"  # Compare with non-State object
+
+
+def test_state_hash():
+    """Test state hash for dictionary usage."""
+    state1 = State("test")
+    state2 = State("test")
+    state3 = State("other")
+
+    # States with same name should have same hash
+    assert hash(state1) == hash(state2)
+    assert hash(state1) != hash(state3)
+
+    # Test in dictionary
+    state_dict = {state1: "value"}
+    assert state2 in state_dict  # Should work due to same hash
+    assert state3 not in state_dict
+
+
+def test_state_data_access_error():
+    """Test error when accessing state data without graph."""
+    state = State("test")
+
+    with pytest.raises(AttributeError, match="State data cannot be accessed directly"):
+        _ = state.data
+
+
+def test_composite_state_initial_state_no_graph():
+    """Test initial_state property when no graph is set."""
+    composite = CompositeState("composite")
+    assert composite.initial_state is None
+
+
+def test_composite_state_initial_state_with_graph():
+    """Test initial_state property with graph."""
+    graph = StateGraph()
+    composite = CompositeState("composite")
+    initial = State("initial")
+
+    graph.add_state(composite)
+    graph.add_state(initial, parent=composite)
+    graph.set_initial_state(composite, initial)
+
+    # Set graph reference manually (normally done by graph.add_state)
+    composite._graph = graph
+
+    assert composite.initial_state == initial
+
+
+def test_state_with_actions():
+    """Test state with entry and exit actions."""
+    action_called = False
+
+    def test_action():
+        nonlocal action_called
+        action_called = True
+
+    state = State("test", entry_actions=[test_action], exit_actions=[test_action])
+
+    assert len(state.entry_actions) == 1
+    assert len(state.exit_actions) == 1
+
+    state.entry_actions[0]()
+    assert action_called
+
+    action_called = False
+    state.exit_actions[0]()
+    assert action_called

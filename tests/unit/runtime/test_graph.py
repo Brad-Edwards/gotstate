@@ -6,6 +6,7 @@
 
 import threading
 import time
+from unittest.mock import Mock
 
 import pytest
 
@@ -301,3 +302,248 @@ def test_invalid_initial_state():
     non_existent._children = set()
     with pytest.raises(ValueError, match="not in graph"):
         graph.set_initial_state(non_existent, state)
+
+
+def test_merge_submachine():
+    """Test merging a submachine into the main graph."""
+    main_graph = StateGraph()
+    sub_graph = StateGraph()
+
+    # Set up main graph
+    parent = CompositeState("parent")
+    main_graph.add_state(parent)
+
+    # Set up submachine
+    sub_initial = State("sub_initial")
+    sub_other = State("sub_other")
+    sub_graph.add_state(sub_initial)
+    sub_graph.add_state(sub_other)
+    sub_graph.set_initial_state(None, sub_initial)  # Set root initial state
+
+    # Add transition in submachine
+    transition = Transition(source=sub_initial, target=sub_other)
+    sub_graph.add_transition(transition)
+
+    # Add some state data
+    sub_graph.set_state_data(sub_initial, "test_key", "test_value")
+
+    # Merge submachine
+    main_graph.merge_submachine(parent, sub_graph)
+
+    # Verify states were merged correctly
+    children = main_graph.get_children(parent)
+    assert len(children) == 2
+
+    # Find merged states by name
+    merged_initial = next(s for s in children if s.name == "sub_initial")
+    merged_other = next(s for s in children if s.name == "sub_other")
+
+    # Verify initial state was preserved
+    assert main_graph.get_initial_state(parent) == merged_initial
+
+    # Verify transitions were merged
+    transitions = main_graph.get_valid_transitions(merged_initial, Event("test"))
+    assert len(transitions) == 1
+    assert transitions[0].source == merged_initial
+    assert transitions[0].target == merged_other
+
+    # Verify state data was copied
+    assert main_graph.get_state_data(merged_initial)["test_key"] == "test_value"
+
+
+def test_current_state_management():
+    """Test current state management."""
+    graph = StateGraph()
+    state1 = State("state1")
+    state2 = State("state2")
+
+    graph.add_state(state1)
+    graph.add_state(state2)
+
+    # Test initial state
+    assert graph.get_current_state() is None
+
+    # Test setting valid state
+    graph.set_current_state(state1)
+    assert graph.get_current_state() == state1
+
+    # Test setting to None
+    graph.set_current_state(None)
+    assert graph.get_current_state() is None
+
+    # Test setting invalid state
+    invalid_state = State("invalid")
+    with pytest.raises(ValueError, match="State 'invalid' not in graph"):
+        graph.set_current_state(invalid_state)
+
+
+def test_merge_submachine_error_handling():
+    """Test error handling during submachine merge."""
+    main_graph = StateGraph()
+    sub_graph = StateGraph()
+
+    # Set up graphs
+    parent = CompositeState("parent")
+    sub_state = State("sub")
+
+    main_graph.add_state(parent)
+    sub_graph.add_state(sub_state)
+
+    # Create a mock lock that always fails to acquire
+    mock_lock = Mock()
+    mock_lock.acquire.return_value = False
+
+    # Replace the graph lock with our mock
+    original_lock = main_graph._graph_lock
+    main_graph._graph_lock = mock_lock
+
+    try:
+        with pytest.raises(RuntimeError, match="Failed to acquire graph lock for merge operation"):
+            main_graph.merge_submachine(parent, sub_graph)
+    finally:
+        # Restore the original lock
+        main_graph._graph_lock = original_lock
+
+
+def test_resolve_active_state_with_no_initial():
+    """Test resolving active state when no initial state is set."""
+    graph = StateGraph()
+    composite = CompositeState("composite")
+    child1 = State("child1")
+    child2 = State("child2")
+
+    graph.add_state(composite)
+    graph.add_state(child1, parent=composite)
+    graph.add_state(child2, parent=composite)
+
+    # No initial state set, should pick first child
+    resolved = graph.resolve_active_state(composite)
+    assert resolved in {child1, child2}
+
+    # Verify initial state was set
+    assert graph.get_initial_state(composite) == resolved
+
+
+def test_cycle_detection():
+    """Test cycle detection in state hierarchy."""
+    graph = StateGraph()
+    state1 = State("state1")
+    state2 = State("state2")
+    state3 = State("state3")
+
+    graph.add_state(state1)
+    graph.add_state(state2, parent=state1)
+    graph.add_state(state3, parent=state2)
+
+    # Attempt to create a cycle
+    assert graph._would_create_cycle(state1, state3) is True
+
+
+def test_state_data_errors():
+    """Test error handling for state data operations."""
+    graph = StateGraph()
+    state = State("test")
+    non_existent = State("non_existent")
+
+    # Test accessing data for non-existent state
+    with pytest.raises(AttributeError, match="State data cannot be accessed directly"):
+        graph.get_state_data(non_existent)
+
+    # Test setting data for non-existent state
+    with pytest.raises(KeyError):
+        graph.set_state_data(non_existent, "key", "value")
+
+    # Test normal operation
+    graph.add_state(state)
+    graph.set_state_data(state, "key", "value")
+    assert graph.get_state_data(state)["key"] == "value"
+
+
+def test_history_state_management():
+    """Test history state recording and retrieval."""
+    graph = StateGraph()
+    composite = CompositeState("composite")
+    state1 = State("state1")
+    state2 = State("state2")
+
+    graph.add_state(composite)
+    graph.add_state(state1, parent=composite)
+    graph.add_state(state2, parent=composite)
+
+    # Record history
+    graph.record_history(composite, state1)
+    assert graph.get_history_state(composite) == state1
+
+    # Update history
+    graph.record_history(composite, state2)
+    assert graph.get_history_state(composite) == state2
+
+    # Clear history
+    graph.clear_history()
+    assert graph.get_history_state(composite) is None
+
+
+def test_complex_merge_scenarios():
+    """Test complex submachine merge scenarios."""
+    main_graph = StateGraph()
+    sub_graph = StateGraph()
+
+    # Set up complex submachine
+    parent = CompositeState("parent")
+    parent._children = set()  # Initialize children set for CompositeState
+    sub_comp = CompositeState("sub_comp")
+    sub_comp._children = set()  # Initialize children set for CompositeState
+    sub_state1 = State("sub_state1")
+    sub_state2 = State("sub_state2")
+
+    # Add states to submachine with proper hierarchy
+    sub_graph.add_state(sub_comp)
+    sub_graph.add_state(sub_state1, parent=sub_comp)
+    sub_graph.add_state(sub_state2, parent=sub_comp)
+
+    # Add transition and data in submachine
+    transition = Transition(source=sub_state1, target=sub_state2)
+    sub_graph.add_transition(transition)
+    sub_graph.set_state_data(sub_state1, "test_key", "test_value")
+
+    # Set initial states
+    sub_graph.set_initial_state(sub_comp, sub_state1)
+    sub_graph.set_initial_state(None, sub_comp)  # Set root initial state
+
+    # Add parent to main graph and merge
+    main_graph.add_state(parent)
+    main_graph.merge_submachine(parent, sub_graph)
+
+    # Verify states were merged correctly
+    children = main_graph.get_children(parent)
+    assert len(children) == 3  # All states become direct children
+
+    # Verify all states are present
+    state_names = {s.name for s in children}
+    assert state_names == {"sub_comp", "sub_state1", "sub_state2"}
+
+    # Find merged states by name
+    merged_state1 = next(s for s in children if s.name == "sub_state1")
+    merged_state2 = next(s for s in children if s.name == "sub_state2")
+
+    # Verify transitions were preserved
+    transitions = main_graph.get_valid_transitions(merged_state1, Event("test"))
+    assert len(transitions) == 1
+    assert transitions[0].source == merged_state1
+    assert transitions[0].target == merged_state2
+
+    # Verify state data was copied
+    assert main_graph.get_state_data(merged_state1)["test_key"] == "test_value"
+
+
+def test_validation_with_cycles():
+    """Test validation when cycles are present in the graph."""
+    graph = StateGraph()
+    composite = CompositeState("composite")
+    composite._children = set()  # Initialize children set for CompositeState
+
+    # Only add the composite state - now it truly has no children
+    graph.add_state(composite)
+
+    errors = graph.validate()
+    assert any("no children" in error.lower() for error in errors)
