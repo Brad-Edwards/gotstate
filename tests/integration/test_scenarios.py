@@ -10,7 +10,7 @@ from hsm.core.transitions import Transition
 from hsm.runtime.async_support import AsyncCompositeStateMachine, AsyncStateMachine
 
 
-class TestHook(HookProtocol):
+class HookTestHelper(HookProtocol):
     """Hook implementation for testing state transitions and error handling."""
     def __init__(self):
         # Instance attributes instead of class attributes
@@ -30,8 +30,8 @@ class TestHook(HookProtocol):
 
 @pytest.fixture
 def test_hook():
-    """Provide a fresh TestHook instance."""
-    return TestHook()
+    """Provide a fresh HookTestHelper instance."""
+    return HookTestHelper()
 
 
 class TestScenarios:
