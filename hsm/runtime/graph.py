@@ -208,8 +208,9 @@ class StateGraph:
             with self._history_lock:
                 record = self._history.get(state)
                 if record:
-                    return record.state
-            return state._initial_state or state
+                    return self.resolve_active_state(record.state)
+            initial = state._initial_state or state
+            return self.resolve_active_state(initial)
         return state
 
     def get_composite_ancestors(self, state: State) -> List[CompositeState]:

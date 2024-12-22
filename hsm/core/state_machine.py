@@ -186,7 +186,24 @@ class StateMachine:
 
             # Pick the highest-priority transition
             transition = valid_transitions[0]
+
+            # Record history for composite states before leaving them
+            if isinstance(self._current_state.parent, CompositeState):
+                self._graph.record_history(self._current_state.parent, self._current_state)
+
+            # Execute the transition
             self._execute_transition(transition, event)
+
+            # If target is a composite state, enter its initial state
+            if isinstance(transition.target, CompositeState):
+                initial_state = transition.target._initial_state
+                if initial_state:
+                    # Create and execute a transition to the initial state
+                    initial_transition = Transition(
+                        source=transition.target, target=initial_state, guards=[lambda e: True]
+                    )
+                    self._execute_transition(initial_transition, event)
+
             return True
 
         except Exception as error:
@@ -199,9 +216,22 @@ class StateMachine:
     def _execute_transition(self, transition: Transition, event: Event) -> None:
         """Execute a transition, notify exit/enter, handle errors."""
         try:
-            # First notify exit of current state
+            # First notify exit of current state and its ancestors
             if self._current_state:
-                self._notify_exit(self._current_state)
+                # Get the common ancestor between source and target states
+                source_ancestors = self._graph.get_composite_ancestors(self._current_state)
+                target_ancestors = self._graph.get_composite_ancestors(transition.target)
+                common_ancestor = None
+                for s in source_ancestors:
+                    if s in target_ancestors:
+                        common_ancestor = s
+                        break
+
+                # Exit up to but not including the common ancestor
+                current = self._current_state
+                while current and current != common_ancestor:
+                    self._notify_exit(current)
+                    current = current.parent
 
             # Execute transition actions
             for action in transition.actions:
@@ -210,8 +240,15 @@ class StateMachine:
             # Update current state without notifications (they're handled here)
             self._set_current_state(transition.target, notify=False)
 
-            # Notify enter of new state
-            self._notify_enter(self._current_state)
+            # Notify enter of new state and its ancestors
+            target_ancestors = self._graph.get_composite_ancestors(transition.target)
+            # Enter from common ancestor down to target state
+            entered = set()
+            for ancestor in reversed(target_ancestors):
+                if ancestor not in entered:
+                    self._notify_enter(ancestor)
+                    entered.add(ancestor)
+            self._notify_enter(transition.target)
 
         except Exception as e:
             self._notify_error(e)
@@ -293,6 +330,10 @@ class CompositeStateMachine(StateMachine):
         # Set the composite state's initial state to the submachine's initial state
         if submachine._initial_state:
             state._initial_state = submachine._initial_state
+            # Add a transition from the composite state to its initial state
+            self._graph.add_transition(
+                Transition(source=state, target=submachine._initial_state, guards=[lambda e: True])
+            )
 
         self._submachines[state] = submachine
 
@@ -301,21 +342,71 @@ class CompositeStateMachine(StateMachine):
         Try to process event in the current submachine if the current state is composite.
         Otherwise, process normally in this machine.
         """
-        # First try to process in the current submachine if we're in a composite state
-        if isinstance(self.current_state, CompositeState):
-            submachine = self._submachines.get(self.current_state)
-            if submachine and submachine.process_event(event):
-                return True
+        if not self._started or not self._current_state:
+            return False
 
-        # If we're in a submachine state, check for transitions in the main machine's graph
-        if self.current_state and any(
-            isinstance(s, CompositeState) for s in self._graph.get_composite_ancestors(self.current_state)
-        ):
-            valid_transitions = self._graph.get_valid_transitions(self.current_state, event)
-            if valid_transitions:
-                transition = valid_transitions[0]  # Get highest priority transition
-                self._execute_transition(transition, event)
-                return True
+        try:
+            # First try to process in the current submachine if we're in a composite state
+            if isinstance(self.current_state, CompositeState):
+                submachine = self._submachines.get(self.current_state)
+                if submachine and submachine.process_event(event):
+                    return True
 
-        # If no submachine handled it and no transition in main machine, try normal processing
-        return super().process_event(event)
+            # Get potential transitions from the graph
+            potential_transitions = self._graph.get_valid_transitions(self._current_state, event)
+            if not potential_transitions:
+                return False
+
+            # Evaluate guards to find valid transitions
+            valid_transitions = []
+            for transition in potential_transitions:
+                # Check if all guards pass
+                all_guards_pass = True
+                for guard in transition.guards:
+                    if not guard(event):
+                        all_guards_pass = False
+                        break
+                if all_guards_pass:
+                    valid_transitions.append(transition)
+
+            if not valid_transitions:
+                return False
+
+            # Pick the highest-priority transition
+            transition = valid_transitions[0]
+
+            # Record history for composite states before leaving them
+            if isinstance(self._current_state.parent, CompositeState):
+                self._graph.record_history(self._current_state.parent, self._current_state)
+
+            # Execute the transition
+            self._execute_transition(transition, event)
+
+            # If target is a composite state, enter its initial state or submachine's initial state
+            if isinstance(transition.target, CompositeState):
+                submachine = self._submachines.get(transition.target)
+                if submachine:
+                    initial_state = submachine._initial_state
+                    if initial_state:
+                        # Create and execute a transition to the initial state
+                        initial_transition = Transition(
+                            source=transition.target, target=initial_state, guards=[lambda e: True]
+                        )
+                        self._execute_transition(initial_transition, event)
+                else:
+                    initial_state = transition.target._initial_state
+                    if initial_state:
+                        # Create and execute a transition to the initial state
+                        initial_transition = Transition(
+                            source=transition.target, target=initial_state, guards=[lambda e: True]
+                        )
+                        self._execute_transition(initial_transition, event)
+
+            return True
+
+        except Exception as error:
+            if self._error_recovery:
+                self._error_recovery.recover(error, self)
+            else:
+                raise
+            return False
