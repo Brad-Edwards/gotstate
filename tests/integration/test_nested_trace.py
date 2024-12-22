@@ -56,7 +56,7 @@ def test_nested_trace():
 
     # Trigger transition
     machine.process_event(Event("toSub2"))
-    
+
     # Verify transition sequence
     assert hook.trace[-2:] == ["EXIT:Sub1", "ENTER:Sub2"]
 

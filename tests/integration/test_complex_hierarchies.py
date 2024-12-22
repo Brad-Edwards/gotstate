@@ -1,6 +1,7 @@
 # test_complex_hierarchy.py
-import pytest
 import threading
+
+import pytest
 
 from hsm.core.errors import ValidationError
 from hsm.core.events import Event
@@ -192,9 +193,7 @@ def test_concurrent_submachine_start():
     # Create submachine
     submachine = StateMachine(initial_state=sub_root)
     submachine.add_state(sub_end)
-    submachine.add_transition(
-        Transition(source=sub_root, target=sub_end, guards=[lambda e: e.name == "to_sub_end"])
-    )
+    submachine.add_transition(Transition(source=sub_root, target=sub_end, guards=[lambda e: e.name == "to_sub_end"]))
 
     # Create main machine
     main_machine = CompositeStateMachine(root)
@@ -213,10 +212,10 @@ def test_concurrent_submachine_start():
         assert not t.is_alive(), "Thread failed to complete within timeout - possible deadlock"
 
     # Verify the machine ended up in the correct initial state
-    assert main_machine.current_state.name == "SubRoot", \
-        f"Expected to be in SubRoot state, but was in {main_machine.current_state.name}"
+    assert (
+        main_machine.current_state.name == "SubRoot"
+    ), f"Expected to be in SubRoot state, but was in {main_machine.current_state.name}"
 
     # Try transitioning to verify machine is in valid state
     main_machine.process_event(Event("to_sub_end"))
-    assert main_machine.current_state.name == "SubEnd", \
-        "Machine failed to transition after concurrent start"
+    assert main_machine.current_state.name == "SubEnd", "Machine failed to transition after concurrent start"

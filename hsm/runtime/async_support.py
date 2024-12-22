@@ -162,8 +162,31 @@ class AsyncStateMachine(StateMachine):
         """Execute a transition asynchronously."""
         previous_state = self._current_state
         try:
-            # Notify exit
-            await self._notify_exit_async(self._current_state)
+            # Find the common ancestor between source and target states
+            source_ancestors = []
+            current = self._current_state
+            while current:
+                source_ancestors.append(current)
+                current = current.parent
+
+            target_ancestors = []
+            current = transition.target
+            while current:
+                target_ancestors.append(current)
+                current = current.parent
+
+            # Find common ancestor
+            common_ancestor = None
+            for state in source_ancestors:
+                if state in target_ancestors:
+                    common_ancestor = state
+                    break
+
+            # Exit up to common ancestor
+            current = self._current_state
+            while current and current != common_ancestor:
+                await self._notify_exit_async(current)
+                current = current.parent
 
             # Execute transition actions
             for action in transition.actions:
@@ -183,8 +206,15 @@ class AsyncStateMachine(StateMachine):
                     else:
                         hook.on_transition(transition.source, transition.target)
 
-            # Notify enter
-            await self._notify_enter_async(self._current_state)
+            # Enter from common ancestor to target
+            target_path = []
+            current = transition.target
+            while current and current != common_ancestor:
+                target_path.append(current)
+                current = current.parent
+
+            for state in reversed(target_path):
+                await self._notify_enter_async(state)
 
         except Exception as e:
             # Restore previous state if we failed during transition
@@ -334,6 +364,8 @@ class AsyncCompositeStateMachine(AsyncStateMachine):
         # Set the composite state's initial state to the submachine's initial state
         if submachine._initial_state:
             state._initial_state = submachine._initial_state
+            # Set initial state in the graph's internal state
+            self._graph.set_initial_state(state, submachine._initial_state)
             # Add a transition from the composite state to its initial state
             self._graph.add_transition(
                 Transition(source=state, target=submachine._initial_state, guards=[lambda e: True])
@@ -351,42 +383,25 @@ class AsyncCompositeStateMachine(AsyncStateMachine):
 
         async with self._async_lock:  # Ensure thread-safe state access
             try:
-                # First try transitions from the current state and its ancestors,
-                # but stop if we hit a composite state that's a submachine root
-                current = self._current_state
-                current_transitions = []
+                # First try transitions from the current state
+                current_transitions = self._graph.get_valid_transitions(self._current_state, event)
+
+                # Then check transitions from ancestors
+                current = self._current_state.parent
                 while current:
-                    if current in self._submachines:
-                        # We've hit a submachine root, stop here for now
-                        break
                     transitions = self._graph.get_valid_transitions(current, event)
                     current_transitions.extend(transitions)
                     current = current.parent
 
-                # Now check transitions from submachine boundaries
-                boundary_transitions = []
-                current = self._current_state
-                while current:
-                    if current.parent in self._submachines:
-                        # This is a submachine state, check parent composite transitions
-                        transitions = self._graph.get_valid_transitions(current.parent, event)
-                        boundary_transitions.extend(transitions)
-                    current = current.parent
-
-                # Evaluate transitions in order of precedence:
-                # 1. Current state and ancestors up to submachine boundary
-                # 2. Transitions crossing submachine boundaries
-                potential_transitions = current_transitions + boundary_transitions
-
-                if not potential_transitions:
+                if not current_transitions:
                     return False
 
-                # Sort transitions by priority within their groups
-                potential_transitions.sort(key=lambda t: t.get_priority(), reverse=True)
+                # Sort transitions by priority
+                current_transitions.sort(key=lambda t: t.get_priority(), reverse=True)
 
                 # Evaluate guards to find valid transitions
                 valid_transitions = []
-                for transition in potential_transitions:
+                for transition in current_transitions:
                     # Check if all guards pass
                     all_guards_pass = True
                     for guard in transition.guards:
@@ -399,8 +414,7 @@ class AsyncCompositeStateMachine(AsyncStateMachine):
                             break
                     if all_guards_pass:
                         valid_transitions.append(transition)
-                        # Take the first valid transition, respecting the priority order
-                        break
+                        break  # Take the first valid transition, respecting priority order
 
                 if not valid_transitions:
                     return False

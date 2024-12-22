@@ -3,8 +3,8 @@
 # Licensed under the MIT License - see LICENSE file for details
 
 import asyncio
-from typing import List, Optional, Set
 from threading import Lock
+from typing import List, Optional, Set
 
 from hsm.core.events import Event
 from hsm.core.states import CompositeState, State
@@ -379,12 +379,11 @@ class StateMachine:
 
     def _validate_composite_states(self):
         """Ensure all composite states have initial states set."""
+
         def validate_composite(state):
             if isinstance(state, CompositeState):
                 if not state.initial_state:
-                    raise ValidationError(
-                        f"CompositeState '{state.name}' has no initial state set"
-                    )
+                    raise ValidationError(f"CompositeState '{state.name}' has no initial state set")
                 # Recursively validate children
                 for child in state._children:
                     validate_composite(child)
@@ -447,12 +446,10 @@ class CompositeStateMachine(StateMachine):
                 self._graph.add_transition(t)
 
             # Set the composite state's initial state to the submachine's initial state
+            # without executing any transitions
             if submachine._initial_state:
                 state._initial_state = submachine._initial_state
-                # Add a transition from the composite state to its initial state
-                self._graph.add_transition(
-                    Transition(source=state, target=submachine._initial_state, guards=[lambda e: True])
-                )
+                self._graph._initial_states[state] = submachine._initial_state
 
             self._submachines[state] = submachine
 

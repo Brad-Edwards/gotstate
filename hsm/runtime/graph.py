@@ -7,8 +7,8 @@
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
 from threading import Lock
+from typing import Any, Dict, List, Optional, Set
 
 from ..core.base import StateBase
 from ..core.errors import ValidationError
@@ -259,7 +259,7 @@ class StateGraph:
         """Thread-safe state resolution with granular locking."""
         if not isinstance(state, CompositeState):
             return state
-        
+
         with self._resolution_lock:
             hist_state = self._history.get_last_state(state)
             if hist_state:
@@ -273,7 +273,7 @@ class StateGraph:
                         initial = next(iter(children))
                         self.set_initial_state(state, initial)
                 next_state = initial if initial else state
-                
+
         # Do recursive resolution outside the lock
         if next_state != state:
             return self.resolve_active_state(next_state)
@@ -303,36 +303,54 @@ class StateGraph:
         """Get the last active state for a composite state."""
         return self._history.get_last_state(composite)
 
-    def merge_submachine(self, parent: CompositeState, submachine_graph: 'StateGraph') -> None:
+    def merge_submachine(self, parent: CompositeState, submachine_graph: "StateGraph") -> None:
         """
         Merge a submachine's graph into this graph under the given parent state.
         Preserves the initial state and transition relationships from the submachine.
         """
-        with self._graph_lock:
+        # Use a shorter timeout for the lock to prevent hanging
+        if not self._graph_lock.acquire(timeout=2.0):
+            raise RuntimeError("Failed to acquire graph lock for merge operation")
+
+        try:
             # First add all states from submachine to ensure they exist in our graph
             states_map = {}  # Map from submachine states to our graph states
+
+            # Handle the parent state first since it's already in our graph
+            states_map[parent] = parent
+
+            # Then handle all other states
             for state in submachine_graph.get_all_states():
-                if state not in self._nodes:  # Avoid duplicates
-                    self.add_state(state, parent=parent)
-                states_map[state] = state
+                if state == parent:
+                    continue
+
+                # Create a new state instance to avoid sharing state between graphs
+                new_state = State(state.name) if isinstance(state, State) else CompositeState(state.name)
+                new_state.data = state.data.copy()  # Copy the state data
+
+                # Add the new state to our graph with the correct parent
+                self.add_state(new_state, parent=parent)
+                states_map[state] = new_state
 
             # Add all transitions from submachine, updating state references
             for source_state in submachine_graph._transitions:
                 for transition in submachine_graph._transitions[source_state]:
+                    # Skip transitions that involve the parent state
+                    if transition.source == parent or transition.target == parent:
+                        continue
+
                     # Create a new transition with mapped states
                     new_transition = Transition(
                         source=states_map[transition.source],
                         target=states_map[transition.target],
-                        guards=transition.guards
+                        guards=transition.guards,
                     )
-                    if new_transition not in self._transitions.get(states_map[source_state], set()):
-                        self.add_transition(new_transition)
+                    self.add_transition(new_transition)
 
-            # Find the initial state from submachine's root states
-            submachine_roots = submachine_graph.get_root_states()
-            if len(submachine_roots) == 1:
-                root_state = next(iter(submachine_roots))
-                # Get the actual initial state through resolution
-                initial_state = submachine_graph.resolve_active_state(root_state)
+            # Preserve initial state relationships from submachine
+            if parent in submachine_graph._initial_states:
+                initial_state = submachine_graph._initial_states[parent]
                 if initial_state in states_map:
                     self.set_initial_state(parent, states_map[initial_state])
+        finally:
+            self._graph_lock.release()
