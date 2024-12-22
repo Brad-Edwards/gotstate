@@ -69,7 +69,8 @@ def test_composite_state_transitions():
     graph = StateGraph()
 
     # Create composite state hierarchy
-    root = CompositeState("root", initial_state=None)
+    root = CompositeState("root")
+    root._children = set()
     state1 = State("state1")
     state2 = State("state2")
 
@@ -150,10 +151,13 @@ def test_nested_composite_state_transitions():
 
     # Create nested structure
     inner_initial = State("inner_initial")
-    inner = CompositeState("inner", initial_state=inner_initial)
-    outer = CompositeState("outer", initial_state=inner)
+    inner = CompositeState("inner")
+    inner._children = set()
+    outer = CompositeState("outer")
+    outer._children = set()
     target = State("target")
 
+    # Build hierarchy
     graph.add_state(outer)
     graph.add_state(inner, parent=outer)
     graph.add_state(inner_initial, parent=inner)
