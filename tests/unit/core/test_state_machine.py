@@ -33,7 +33,7 @@ def basic_machine():
 
     # Create machine with initial state
     machine = StateMachine(state1)
-    machine._current_state = state1  # Set current state before validation
+    machine._set_current_state(state1)  # Set current state before validation
 
     # Add states to graph
     machine.add_state(state2)
@@ -73,7 +73,7 @@ def test_no_valid_transition():
     """Test that invalid events are handled properly."""
     state = State("state")
     machine = StateMachine(state)
-    machine._current_state = state  # Set current state before validation
+    machine._set_current_state(state)  # Set current state before validation
     machine.start()
 
     event = Event("unknown")
@@ -88,7 +88,7 @@ def test_error_recovery():
 
     recovery = TestErrorRecoveryStrategy()
     machine = StateMachine(state1, error_recovery=recovery)
-    machine._current_state = state1  # Set current state before validation
+    machine._set_current_state(state1)  # Set current state before validation
     machine.add_state(state2)
 
     # Add transition that will raise an exception
@@ -112,7 +112,7 @@ def test_state_graph_integration():
     state1 = State("state1")
     state2 = State("state2")
     machine = StateMachine(state1)
-    machine._current_state = state1  # Set current state before validation
+    machine._set_current_state(state1)  # Set current state before validation
 
     # Test graph state management
     machine.add_state(state2)
@@ -135,7 +135,7 @@ def test_composite_state_hierarchy():
 
     # Create machine and build hierarchy
     machine = StateMachine(root)
-    machine._current_state = root  # Set current state before validation
+    machine._set_current_state(root)  # Set current state before validation
     machine.add_state(child1, parent=root)
     machine.add_state(child2, parent=root)
 
@@ -163,7 +163,7 @@ def test_machine_reset():
     state1 = State("state1")
     state2 = State("state2")
     machine = StateMachine(state1)
-    machine._current_state = state1  # Set current state before validation
+    machine._set_current_state(state1)  # Set current state before validation
     machine.add_state(state2)
     transition = Transition(source=state1, target=state2)
     machine.add_transition(transition)
@@ -189,7 +189,7 @@ def test_hook_behavior():
     hook.on_error = Mock()
 
     machine = StateMachine(state1, hooks=[hook])
-    machine._current_state = state1  # Set current state before validation
+    machine._set_current_state(state1)  # Set current state before validation
     machine.add_state(state2)
 
     transition = Transition(source=state1, target=state2)
@@ -219,13 +219,13 @@ def test_composite_state_machine():
 
     # Create and setup submachine
     submachine = StateMachine(sub_state1)
-    submachine._current_state = sub_state1  # Set current state before validation
+    submachine._set_current_state(sub_state1)  # Set current state before validation
     submachine.add_state(sub_state2)
     submachine.add_transition(Transition(source=sub_state1, target=sub_state2))
 
     # Create and setup main machine
     main_machine = CompositeStateMachine(main_state1)
-    main_machine._current_state = main_state1  # Set current state before validation
+    main_machine._set_current_state(main_state1)  # Set current state before validation
     main_machine.add_state(main_state2)
 
     # Add submachine after all states and transitions are set up
@@ -263,7 +263,7 @@ def test_history_state():
 
     # Create machine and build hierarchy
     machine = StateMachine(root)
-    machine._current_state = root  # Set current state before validation
+    machine._set_current_state(root)  # Set current state before validation
     machine.add_state(state1, parent=root)
     machine.add_state(state2, parent=root)
 
@@ -283,7 +283,7 @@ def test_history_state():
     machine.stop()
 
     # Reset current state before restart
-    machine._current_state = root
+    machine._set_current_state(root)
 
     # Restart machine and verify history state is used
     machine.start()

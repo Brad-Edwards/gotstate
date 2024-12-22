@@ -53,6 +53,7 @@ class StateMachine:
         self._graph.add_state(initial_state)
         self._initial_state = initial_state
         self._current_state: Optional[State] = None
+        self._set_current_state(initial_state)
 
         # If initial_state has a parent composite that doesn't have an initial, set it
         if isinstance(initial_state.parent, CompositeState):
@@ -63,6 +64,20 @@ class StateMachine:
     def current_state(self) -> Optional[State]:
         """Get the current active state."""
         return self._current_state
+
+    def _set_current_state(self, state: Optional[State], notify: bool = False) -> None:
+        """
+        Internal method to update current state.
+        :param state: The new state to set
+        :param notify: Whether to notify hooks about state change
+        """
+        if notify and self._current_state:
+            self._notify_exit(self._current_state)
+
+        self._current_state = state
+
+        if notify and state:
+            self._notify_enter(state)
 
     def add_state(self, state: State, parent: Optional[State] = None) -> None:
         """
@@ -116,9 +131,8 @@ class StateMachine:
         self._validator.validate_state_machine(self)
 
         # Resolve initial or historical active state
-        self._current_state = self._graph.resolve_active_state(self._initial_state)
-
-        self._notify_enter(self._current_state)
+        resolved_state = self._graph.resolve_active_state(self._initial_state)
+        self._set_current_state(resolved_state, notify=True)
         self._started = True
 
     def stop(self) -> None:
@@ -132,8 +146,7 @@ class StateMachine:
             if composite_ancestors:
                 self._graph.record_history(composite_ancestors[0], self._current_state)
 
-            self._notify_exit(self._current_state)
-            self._current_state = None
+            self._set_current_state(None, notify=True)
 
         self._started = False
 
@@ -165,18 +178,12 @@ class StateMachine:
     def _execute_transition(self, transition: Transition, event: Event) -> None:
         """Execute a transition, notify exit/enter, handle errors."""
         try:
-            # Notify exit
-            self._notify_exit(self._current_state)
-
             # Execute transition actions
             for action in transition.actions:
                 action(event)
 
-            # Update current state
-            self._current_state = transition.target
-
-            # Notify enter
-            self._notify_enter(self._current_state)
+            # Update current state with notifications
+            self._set_current_state(transition.target, notify=True)
 
         except Exception as e:
             self._notify_error(e)
@@ -209,7 +216,7 @@ class StateMachine:
             self.stop()
         self._graph.clear_history()
         # Restore current state to initial state before restarting
-        self._current_state = self._initial_state
+        self._set_current_state(self._initial_state)
         if was_started:
             self.start()
 

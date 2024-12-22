@@ -110,7 +110,7 @@ async def test_concurrent_transitions(async_machine, async_hook):
     # Verify final state and transition order
     assert async_machine.current_state.name == "End"
     assert len(async_hook.transitions) >= 1  # At least one transition should occur
-    
+
     # Verify no duplicate states in transition path
     visited_states = set()
     for source, target in async_hook.transitions:
@@ -260,7 +260,7 @@ async def test_concurrent_enqueue_dequeue():
         # Wait for all events to be consumed
         expected_events = event_count * producer_count
         received_count = 0
-        
+
         while received_count < expected_events:
             try:
                 await asyncio.wait_for(received_events.get(), timeout=0.1)

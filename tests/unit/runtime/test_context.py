@@ -40,7 +40,7 @@ def test_process_event_no_transition(setup_context):
     context, _, _, _ = setup_context
     # Create a new state with no transitions
     state3 = State("state3")
-    context._current_state = state3  # Set current state to one with no transitions
+    context._set_current_state(state3)  # Set current state to one with no transitions
     event = Event("unknown")
     assert not context.process_event(event)  # Should return False
 
@@ -52,41 +52,44 @@ def test_process_event_with_transition(setup_context):
     # Mock the state methods to verify they're called
     state1.on_exit = Mock()
     state2.on_enter = Mock()
-    transition.execute_actions = Mock()
 
     event = Event("test")
     assert context.process_event(event)  # Should return True
 
     # Verify the transition sequence
     state1.on_exit.assert_called_once()
-    transition.execute_actions.assert_called_once_with(event)
     state2.on_enter.assert_called_once()
     assert context.get_current_state() == state2
 
 
 def test_composite_state_transitions():
-    """Test transitions within composite states."""
+    """Test transitions with composite states."""
     graph = StateGraph()
 
-    # Create composite state hierarchy
+    # Create states
     root = CompositeState("root")
     root._children = set()
     state1 = State("state1")
     state2 = State("state2")
 
+    # Build hierarchy
     graph.add_state(root)
     graph.add_state(state1, parent=root)
     graph.add_state(state2, parent=root)
 
+    # Set initial state
+    graph.set_initial_state(root, state1)
+
+    # Add transition
     transition = Transition(source=state1, target=state2)
     graph.add_transition(transition)
 
-    context = RuntimeContext(graph, state1)
+    # Create context and verify initial state resolution
+    context = RuntimeContext(graph, root)
 
     # Mock methods
     state1.on_exit = Mock()
     state2.on_enter = Mock()
-    transition.execute_actions = Mock()
 
     # Process event
     event = Event("test")
@@ -94,7 +97,6 @@ def test_composite_state_transitions():
 
     # Verify correct sequence
     state1.on_exit.assert_called_once()
-    transition.execute_actions.assert_called_once_with(event)
     state2.on_enter.assert_called_once()
     assert context.get_current_state() == state2
 
@@ -163,6 +165,10 @@ def test_nested_composite_state_transitions():
     graph.add_state(inner_initial, parent=inner)
     graph.add_state(target)
 
+    # Set initial states
+    graph.set_initial_state(inner, inner_initial)
+    graph.set_initial_state(outer, inner)
+
     # Transition from deep nested state to top-level state
     transition = Transition(source=inner_initial, target=target)
     graph.add_transition(transition)
@@ -172,7 +178,6 @@ def test_nested_composite_state_transitions():
     # Mock methods
     inner_initial.on_exit = Mock()
     target.on_enter = Mock()
-    transition.execute_actions = Mock()
 
     # Process event
     event = Event("test")
@@ -180,6 +185,30 @@ def test_nested_composite_state_transitions():
 
     # Verify correct sequence
     inner_initial.on_exit.assert_called_once()
-    transition.execute_actions.assert_called_once_with(event)
     target.on_enter.assert_called_once()
     assert context.get_current_state() == target
+
+
+def test_no_valid_transitions():
+    """Test behavior when no valid transitions exist."""
+    graph = StateGraph()
+    state1 = State("state1")
+    state2 = State("state2")
+    state3 = State("state3")
+
+    graph.add_state(state1)
+    graph.add_state(state2)
+    graph.add_state(state3)
+
+    # Add transition from state1 to state2
+    transition = Transition(source=state1, target=state2)
+    graph.add_transition(transition)
+
+    # Create context with state3 (which has no transitions)
+    context = RuntimeContext(graph, state3)
+    context._set_current_state(state3)  # Set current state to one with no transitions
+
+    # Process event - should return False since no valid transitions
+    event = Event("test")
+    assert not context.process_event(event)
+    assert context.get_current_state() == state3

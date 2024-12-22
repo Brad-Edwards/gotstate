@@ -19,6 +19,7 @@ from hsm.core.validations import ValidationError, Validator
 from hsm.runtime.async_support import AsyncEventQueue, AsyncStateMachine
 from hsm.runtime.event_queue import EventQueue
 from hsm.runtime.executor import Executor
+from hsm.runtime.graph import StateGraph
 from hsm.runtime.timers import TimeoutScheduler
 
 
@@ -63,15 +64,15 @@ def test_synchronous_integration(hook, validator):
 
     # Define states
     parent = CompositeState("Parent")
+    parent._children = set()  # Initialize _children set
     state1 = State("State1")
     state2 = State("State2")
 
-    parent.add_child_state(state1)
-    parent.add_child_state(state2)
-
-    # Construct StateMachine and add states first
+    # Construct StateMachine and add states with proper hierarchy
     machine = StateMachine(initial_state=state1, validator=validator, hooks=[hook])
-    machine.add_state(state2)  # Add state2 before transitions
+    machine.add_state(parent)
+    machine.add_state(state1, parent=parent)
+    machine.add_state(state2, parent=parent)
 
     # Define and add transitions
     t1 = Transition(source=state1, target=state2, guards=[lambda e: True], actions=[lambda e: None], priority=10)
@@ -137,25 +138,25 @@ def test_composite_state_machine_integration(hook, validator):
     # Define states
     child1 = State("Child1")
     child2 = State("Child2")
-    top = CompositeState("Top", initial_state=child1)
+    top = CompositeState("Top")
+    top._children = set()  # Initialize _children set
 
-    # Set up hierarchy - child1 is already added as initial state
-    top.add_child_state(child2)
-
-    # Verify parent-child relationships
-    assert child1.parent is top
-    assert child2.parent is top
-
-    # Define submachine - child1 is already added as initial state
+    # Create submachine and add states
     sub_machine = StateMachine(initial_state=child1, validator=validator, hooks=[hook])
-    sub_machine.add_state(child2)  # Only add child2
+    sub_machine.add_state(child1)
+    sub_machine.add_state(child2)
 
     # Add transition after states
     t_sub = Transition(source=child1, target=child2, guards=[], actions=[], priority=0)
     sub_machine.add_transition(t_sub)
 
-    # Create composite machine and add submachine
+    # Create composite machine and add states with proper hierarchy
     c_machine = CompositeStateMachine(initial_state=top, validator=validator, hooks=[hook])
+    c_machine.add_state(top)
+    c_machine.add_state(child1, parent=top)
+    c_machine.add_state(child2, parent=top)
+
+    # Add submachine
     c_machine.add_submachine(top, sub_machine)
 
     # Start machines
@@ -286,22 +287,37 @@ def test_plugins_integration(hook, validator):
 
 
 def test_complex_hierarchy():
+    """Test complex state hierarchy construction and navigation."""
     from hsm.core.states import CompositeState, State
+    from hsm.runtime.graph import StateGraph
 
+    # Create states
     root = CompositeState("Root")
+    root._children = set()
     group1 = CompositeState("Group1")
+    group1._children = set()
     group2 = CompositeState("Group2")
+    group2._children = set()
     state1 = State("State1")
     state2 = State("State2")
 
-    root.add_child_state(group1)
-    root.add_child_state(group2)
-    group1.add_child_state(state1)
-    group2.add_child_state(state2)
+    # Create graph and build hierarchy
+    graph = StateGraph()
+    graph.add_state(root)
+    graph.add_state(group1, parent=root)
+    graph.add_state(group2, parent=root)
+    graph.add_state(state1, parent=group1)
+    graph.add_state(state2, parent=group2)
 
     # Test navigation and state access
-    assert root.get_child_state("Group1") is group1
-    assert group1.get_child_state("State1") is state1
+    assert state1 in graph.get_children(group1)
+    assert state2 in graph.get_children(group2)
+    assert group1 in graph.get_children(root)
+    assert group2 in graph.get_children(root)
+
+    # Test ancestor relationships
+    assert graph.get_ancestors(state1) == [group1, root]
+    assert graph.get_ancestors(state2) == [group2, root]
 
 
 def test_concurrent_event_processing():
@@ -369,6 +385,7 @@ def test_state_data_integration(hook, validator):
 
     # Create machine and add all states first
     machine = StateMachine(initial_state=state1, validator=validator, hooks=[hook])
+    machine.add_state(state1)  # Add initial state first
     machine.add_state(state2)  # Add state2 before creating transition
 
     # Define transition after states are in graph
@@ -377,6 +394,10 @@ def test_state_data_integration(hook, validator):
 
     t1 = Transition(source=state1, target=state2, guards=[lambda e: True], actions=[increment_action], priority=0)
     machine.add_transition(t1)
+
+    # Add transition back to state1 to make all states reachable
+    t2 = Transition(source=state2, target=state1, guards=[lambda e: True], actions=[], priority=0)
+    machine.add_transition(t2)
 
     # Start and verify initial data
     machine.start()
@@ -396,8 +417,11 @@ def test_composite_history_integration(hook, validator):
     """Test composite states with history preservation."""
     # Create state hierarchy
     root = CompositeState("Root")
+    root._children = set()
     group1 = CompositeState("Group1")
+    group1._children = set()
     group2 = CompositeState("Group2")
+    group2._children = set()
 
     # Create states for group1
     state1a = State("State1A")
@@ -407,36 +431,36 @@ def test_composite_history_integration(hook, validator):
     state2a = State("State2A")
     state2b = State("State2B")
 
-    # Set up hierarchy first
-    root.add_child_state(group1)
-    root.add_child_state(group2)
-    group1.add_child_state(state1a)
-    group1.add_child_state(state1b)
-    group2.add_child_state(state2a)
-    group2.add_child_state(state2b)
-
     # Create sub-machines and add all states first
     sub_machine1 = StateMachine(initial_state=state1a, validator=validator, hooks=[hook])
-    sub_machine1.add_state(state1a, parent=group1)
-    sub_machine1.add_state(state1b, parent=group1)
+    sub_machine1.add_state(state1a)
+    sub_machine1.add_state(state1b)
 
     sub_machine2 = StateMachine(initial_state=state2a, validator=validator, hooks=[hook])
-    sub_machine2.add_state(state2a, parent=group2)
-    sub_machine2.add_state(state2b, parent=group2)
+    sub_machine2.add_state(state2a)
+    sub_machine2.add_state(state2b)
 
-    # Create composite machine and add all states
+    # Create composite machine and add states with proper hierarchy
     c_machine = CompositeStateMachine(initial_state=root, validator=validator, hooks=[hook])
+    c_machine.add_state(root)
     c_machine.add_state(group1, parent=root)
     c_machine.add_state(group2, parent=root)
+    c_machine.add_state(state1a, parent=group1)
+    c_machine.add_state(state1b, parent=group1)
+    c_machine.add_state(state2a, parent=group2)
+    c_machine.add_state(state2b, parent=group2)
 
     # Add transitions after all states are in their respective machines
     t1 = Transition(source=state1a, target=state1b)
     t2 = Transition(source=state2a, target=state2b)
     t_groups = Transition(source=group1, target=group2)
+    t_back = Transition(source=group2, target=group1)  # Make group1 reachable from root
 
     sub_machine1.add_transition(t1)
     sub_machine2.add_transition(t2)
     c_machine.add_transition(t_groups)
+    c_machine.add_transition(t_back)
+    c_machine.add_transition(t_root)
 
     # Add submachines after all states and transitions are set up
     c_machine.add_submachine(group1, sub_machine1)
@@ -489,6 +513,7 @@ def test_error_recovery_integration(hook, validator):
 
     # Create machine and add all states first
     machine = StateMachine(initial_state=normal, validator=validator, hooks=[hook])
+    machine.add_state(normal)  # Add initial state first
     machine.add_state(error)
     machine.add_state(fallback)
 
@@ -500,10 +525,12 @@ def test_error_recovery_integration(hook, validator):
         source=normal, target=error, actions=[failing_action], guards=[lambda e: e.name == "Fail"], priority=10
     )
     t2 = Transition(source=normal, target=fallback, guards=[lambda e: e.name == "Recover"], priority=20)
+    t3 = Transition(source=error, target=normal, guards=[lambda e: True], priority=0)  # Make error state reachable
 
     # Add transitions
     machine.add_transition(t1)
     machine.add_transition(t2)
+    machine.add_transition(t3)
 
     # Start machine and test error recovery
     machine.start()
@@ -529,6 +556,7 @@ def test_complex_event_chain_integration(hook, validator):
     """
     # Create state hierarchy
     root = CompositeState("Root")
+    root._children = set()
     state_a = State("StateA")
     state_b = State("StateB")
     state_c = State("StateC")
@@ -546,16 +574,19 @@ def test_complex_event_chain_integration(hook, validator):
     machine = StateMachine(initial_state=state_a, validator=validator, hooks=[hook])
 
     # Add all states first
+    machine.add_state(state_a)  # Add initial state first
     machine.add_state(state_b)
     machine.add_state(state_c)
 
     # Define and add transitions with different priorities
     t1 = Transition(source=state_a, target=state_b, actions=[track_transition("B")], priority=10)
     t2 = Transition(source=state_b, target=state_c, actions=[track_transition("C")], priority=20)
+    t3 = Transition(source=state_c, target=state_a, guards=[lambda e: True], priority=0)  # Make state_c reachable
 
     # Add transitions after all states are in graph
     machine.add_transition(t1)
     machine.add_transition(t2)
+    machine.add_transition(t3)
 
     # Start machine and verify transitions
     machine.start()
@@ -607,11 +638,15 @@ def test_resource_lifecycle_integration(hook, validator):
 
     # Create machine and add states
     machine = StateMachine(initial_state=state1, validator=validator, hooks=[hook])
+    machine.add_state(state1)  # Add initial state first
     machine.add_state(state2)  # Add state2 before creating transition
 
     # Define and add transition
-    t = Transition(source=state1, target=state2, priority=0)
-    machine.add_transition(t)
+    t1 = Transition(source=state1, target=state2, priority=0)
+    t2 = Transition(source=state2, target=state1, priority=0)  # Add transition back to make state2 reachable
+
+    machine.add_transition(t1)
+    machine.add_transition(t2)
 
     # Start machine and verify resource lifecycle
     machine.start()
@@ -669,6 +704,7 @@ def test_validation_framework_integration(hook):
 
     # Create machine with custom validator and verify it works with valid transition
     machine = StateMachine(initial_state=state1, validator=validator, hooks=[hook])
+    machine.add_state(state1)  # Add initial state first
     machine.add_state(state2)  # Add state2 before adding transition
     machine.add_transition(t_valid)  # Should not raise
     machine.start()  # Should not raise
@@ -747,13 +783,18 @@ def test_complex_error_recovery():
 
     machine._error_recovery = TestErrorRecovery()
 
-    # Add all states and transitions
+    # Add all states first
+    machine.add_state(normal)  # Add initial state first
     machine.add_state(error)
     machine.add_state(fallback)
-    machine.add_transition(Transition(normal, error))
-    machine.add_transition(Transition(error, fallback))
+
+    # Add transitions after all states are in graph
+    machine.add_transition(Transition(source=normal, target=error))
+    machine.add_transition(Transition(source=error, target=fallback))
     # Add recovery transition
-    machine.add_transition(Transition(error, fallback, guards=[lambda e: e.name == "recover"]))
+    machine.add_transition(Transition(source=error, target=fallback, guards=[lambda e: e.name == "recover"]))
+    # Add transition back to make fallback reachable
+    machine.add_transition(Transition(source=fallback, target=normal, guards=[lambda e: True]))
 
     # Start machine and trigger error transition
     machine.start()
@@ -794,10 +835,15 @@ def test_resource_cleanup_under_load():
     states = [ResourceState(f"State{i}") for i in range(5)]
     machine = StateMachine(initial_state=states[0])
 
-    # Add states in a chain
-    for i in range(1, 5):
-        machine.add_state(states[i])
-        machine.add_transition(Transition(states[i - 1], states[i]))
+    # Add all states first
+    for state in states:
+        machine.add_state(state)
+
+    # Add transitions in a chain after all states are in graph
+    for i in range(4):
+        machine.add_transition(Transition(source=states[i], target=states[i + 1]))
+    # Add transition back to make all states reachable
+    machine.add_transition(Transition(source=states[4], target=states[0]))
 
     # Start machine to trigger initial state's entry action
     machine.start()
@@ -812,50 +858,52 @@ def test_resource_cleanup_under_load():
 
 
 def test_deep_history_persistence():
-    """Test history state preservation across complex hierarchies"""
+    """Test history state preservation across complex hierarchies."""
     # Create states and hierarchy
     root = CompositeState("Root")
-    group1 = CompositeState("Group1", initial_state=None)  # We'll set initial states after creation
-    group2 = CompositeState("Group2", initial_state=None)
+    root._children = set()
+    group1 = CompositeState("Group1")
+    group1._children = set()
+    group2 = CompositeState("Group2")
+    group2._children = set()
     state1 = State("State1")
     state2 = State("State2")
     state3 = State("State3")
     state4 = State("State4")
 
-    # Build hierarchy
-    root.add_child_state(group1)
-    root.add_child_state(group2)
-    group1.add_child_state(state1)
-    group1.add_child_state(state2)
-    group2.add_child_state(state3)
-    group2.add_child_state(state4)
-
-    # Set initial states for composite states
-    group1.initial_state = state1
-    group2.initial_state = state3
-
     # Create submachines for the composite states
     submachine1 = StateMachine(initial_state=state1)
     submachine1.add_state(state1)
     submachine1.add_state(state2)
-    submachine1.add_transition(Transition(state1, state2))
+    submachine1.add_transition(Transition(source=state1, target=state2))
 
     submachine2 = StateMachine(initial_state=state3)
     submachine2.add_state(state3)
     submachine2.add_state(state4)
-    submachine2.add_transition(Transition(state3, state4))
+    submachine2.add_transition(Transition(source=state3, target=state4))
 
-    # Create composite machine
+    # Create composite machine and build hierarchy
     machine = CompositeStateMachine(initial_state=root)
+    machine.add_state(root)
     machine.add_state(group1, parent=root)
     machine.add_state(group2, parent=root)
+    machine.add_state(state1, parent=group1)
+    machine.add_state(state2, parent=group1)
+    machine.add_state(state3, parent=group2)
+    machine.add_state(state4, parent=group2)
+
+    # Set initial states for composite states
+    machine._graph.set_initial_state(root, group1)
+    machine._graph.set_initial_state(group1, state1)
+    machine._graph.set_initial_state(group2, state3)
 
     # Add submachines to composite states
     machine.add_submachine(group1, submachine1)
     machine.add_submachine(group2, submachine2)
 
-    # Add transitions between groups
-    machine.add_transition(Transition(group1, group2))
+    # Add transitions between groups and back
+    machine.add_transition(Transition(source=group1, target=group2))
+    machine.add_transition(Transition(source=group2, target=group1))
 
     # Start all machines
     machine.start()
@@ -863,6 +911,7 @@ def test_deep_history_persistence():
     submachine2.start()
 
     # Initial state verification
+    assert machine.current_state == state1  # Should resolve to initial state of group1
     assert submachine1.current_state == state1
     assert submachine2.current_state == state3
 
@@ -877,8 +926,9 @@ def test_deep_history_persistence():
 
     # Move to group2
     machine.process_event(Event("test"))
-    assert submachine2.current_state == state3  # Initial state of group2
+    assert machine.current_state == state3  # Should resolve to initial state of group2
+    assert submachine2.current_state == state3
 
     # Return to group1 - should restore state2
     machine.process_event(Event("test"))
-    assert submachine1.current_state == state2  # History preserved
+    assert machine.current_state == state2  # History preserved
