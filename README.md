@@ -36,41 +36,6 @@ Initial release!
 - **Performance**: Minimal overhead
 - **Flexibility**: Extensible through plugins
 
-## Example
-
-```python
-from hsm.core import StateMachine, State, Event, Transition
-
-# Define states
-class Idle(State):
-    pass
-
-class Running(State):
-    pass
-
-# Define events
-class Start(Event):
-    pass
-
-class Stop(Event):
-    pass
-
-# Create state machine
-sm = StateMachine("example")
-idle = sm.add_state(Idle("idle"))
-running = sm.add_state(Running("running"))
-
-# Add transitions
-sm.add_transition(Transition(idle, running, Start))
-sm.add_transition(Transition(running, idle, Stop))
-
-# Initialize and use
-sm.initialize()
-assert sm.current_state == idle
-sm.handle_event(Start())
-assert sm.current_state == running
-```
-
 ## Installation
 
 Install using pip:
