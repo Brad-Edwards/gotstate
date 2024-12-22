@@ -1,7 +1,7 @@
 # gotstate
 
 [![Security](https://github.com/KeplerOps/gotstate/actions/workflows/security.yml/badge.svg)](https://github.com/KeplerOps/gotstate/actions/workflows/security.yml)
-[![Quality](https://github.com/KeplerOps/gotstate/actions/workflows/sonar.yml/badge.svg)](https://github.com/KeplerOps/gotstate/actions/workflows/sonar.yml)
+[![Quality](https://github.com/Brad-Edwards/gotstate/actions/workflows/sonar.yml/badge.svg)](https://github.com/Brad-Edwards/gotstate/actions/workflows/sonar.yml)
 [![Tests](https://github.com/KeplerOps/gotstate/actions/workflows/test.yml/badge.svg)](https://github.com/KeplerOps/gotstate/actions/workflows/test.yml)
 [![Lint](https://github.com/KeplerOps/gotstate/actions/workflows/lint.yml/badge.svg)](https://github.com/KeplerOps/gotstate/actions/workflows/lint.yml)
 
