@@ -9,7 +9,7 @@ import pytest
 
 
 def test_timer():
-    from hsm.runtime.timers import Timer
+    from gotstate.runtime.timers import Timer
 
     now = time.time()
     t = Timer(deadline=now + 0.5)
@@ -22,8 +22,8 @@ def test_timer():
 
 
 def test_timeout_scheduler():
-    from hsm.core.events import TimeoutEvent
-    from hsm.runtime.timers import TimeoutScheduler
+    from gotstate.core.events import TimeoutEvent
+    from gotstate.runtime.timers import TimeoutScheduler
 
     sched = TimeoutScheduler()
     now = time.time()

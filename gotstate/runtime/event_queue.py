@@ -9,7 +9,7 @@ import threading
 from collections import deque
 from typing import Optional
 
-from hsm.core.events import Event
+from gotstate.core.events import Event
 
 
 class _EventQueueLock:

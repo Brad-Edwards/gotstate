@@ -5,7 +5,7 @@
 from threading import Lock
 from typing import Dict, Optional
 
-from hsm.core.states import CompositeState, State
+from gotstate.core.states import CompositeState, State
 
 
 class StateHistory:

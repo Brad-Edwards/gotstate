@@ -2,12 +2,12 @@ from typing import List, Optional
 
 import pytest
 
-from hsm.core.events import Event
-from hsm.core.hooks import HookProtocol
-from hsm.core.state_machine import CompositeStateMachine, StateMachine
-from hsm.core.states import CompositeState, State
-from hsm.core.transitions import Transition
-from hsm.runtime.async_support import AsyncCompositeStateMachine, AsyncStateMachine
+from gotstate.core.events import Event
+from gotstate.core.hooks import HookProtocol
+from gotstate.core.state_machine import CompositeStateMachine, StateMachine
+from gotstate.core.states import CompositeState, State
+from gotstate.core.transitions import Transition
+from gotstate.runtime.async_support import AsyncCompositeStateMachine, AsyncStateMachine
 
 
 class HookTestHelper(HookProtocol):

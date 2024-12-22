@@ -1,10 +1,10 @@
 # test_trace.py
 import pytest
 
-from hsm.core.events import Event
-from hsm.core.state_machine import StateMachine
-from hsm.core.states import State
-from hsm.core.transitions import Transition
+from gotstate.core.events import Event
+from gotstate.core.state_machine import StateMachine
+from gotstate.core.states import State
+from gotstate.core.transitions import Transition
 
 
 class TraceHook:

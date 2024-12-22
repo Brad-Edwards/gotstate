@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from hsm.core.base import StateBase
+from gotstate.core.base import StateBase
 
 
 class State(StateBase):

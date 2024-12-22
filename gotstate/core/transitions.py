@@ -8,11 +8,11 @@ import asyncio
 import inspect
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
-from hsm.core.errors import TransitionError
-from hsm.core.events import Event
+from gotstate.core.errors import TransitionError
+from gotstate.core.events import Event
 
 if TYPE_CHECKING:
-    from hsm.core.states import State
+    from gotstate.core.states import State
 
 # Type aliases for clarity
 GuardFunction = Union[Callable[[Event], bool], Callable[[Event], asyncio.Future[bool]]]

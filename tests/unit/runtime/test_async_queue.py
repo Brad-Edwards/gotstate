@@ -5,8 +5,8 @@ from typing import List
 
 import pytest
 
-from hsm.core.events import Event
-from hsm.runtime.async_support import AsyncEventQueue
+from gotstate.core.events import Event
+from gotstate.runtime.async_support import AsyncEventQueue
 
 
 @pytest.fixture

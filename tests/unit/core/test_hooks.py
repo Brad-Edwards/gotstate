@@ -7,12 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hsm.core.hooks import Hook
-from hsm.core.states import State
+from gotstate.core.hooks import Hook
+from gotstate.core.states import State
 
 
 def test_hook_manager(dummy_hooks: List[Hook], dummy_state: State):
-    from hsm.core.hooks import HookManager
+    from gotstate.core.hooks import HookManager
 
     hm = HookManager(hooks=dummy_hooks)
     hm.execute_on_enter(dummy_state)
@@ -25,7 +25,7 @@ def test_hook_manager(dummy_hooks: List[Hook], dummy_state: State):
 
 
 def test_hook_manager_register(dummy_hooks: List[Hook]):
-    from hsm.core.hooks import HookManager
+    from gotstate.core.hooks import HookManager
 
     hm = HookManager()
     hm.register_hook(dummy_hooks[0])
@@ -34,7 +34,7 @@ def test_hook_manager_register(dummy_hooks: List[Hook]):
 
 
 def test_hook_manager_init():
-    from hsm.core.hooks import HookManager, HookProtocol
+    from gotstate.core.hooks import HookManager, HookProtocol
 
     # Test empty initialization
     hm = HookManager()
@@ -47,7 +47,7 @@ def test_hook_manager_init():
 
 
 def test_hook_manager_register():
-    from hsm.core.hooks import HookManager, HookProtocol
+    from gotstate.core.hooks import HookManager, HookProtocol
 
     hm = HookManager()
     mock_hook = MagicMock(spec=HookProtocol)
@@ -57,8 +57,8 @@ def test_hook_manager_register():
 
 
 def test_hook_invoker():
-    from hsm.core.hooks import HookProtocol, _HookInvoker
-    from hsm.core.states import State
+    from gotstate.core.hooks import HookProtocol, _HookInvoker
+    from gotstate.core.states import State
 
     mock_hook = MagicMock(spec=HookProtocol)
     invoker = _HookInvoker([mock_hook])
@@ -77,8 +77,8 @@ def test_hook_invoker():
 
 
 def test_hook_invoker_missing_methods():
-    from hsm.core.hooks import _HookInvoker
-    from hsm.core.states import State
+    from gotstate.core.hooks import _HookInvoker
+    from gotstate.core.states import State
 
     # Create a mock hook without all methods
     incomplete_hook = MagicMock()
@@ -95,7 +95,7 @@ def test_hook_invoker_missing_methods():
 
 
 def test_hook_class():
-    from hsm.core.hooks import Hook
+    from gotstate.core.hooks import Hook
 
     callback_called = False
 
@@ -117,7 +117,7 @@ def test_hook_class():
 
 
 def test_hook_with_arguments():
-    from hsm.core.hooks import Hook
+    from gotstate.core.hooks import Hook
 
     received_args = None
     received_kwargs = None
@@ -134,8 +134,8 @@ def test_hook_with_arguments():
 
 
 def test_hook_manager_execution_order():
-    from hsm.core.hooks import HookManager, HookProtocol
-    from hsm.core.states import State
+    from gotstate.core.hooks import HookManager, HookProtocol
+    from gotstate.core.states import State
 
     execution_order = []
 

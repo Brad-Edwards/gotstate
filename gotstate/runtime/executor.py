@@ -8,9 +8,9 @@ import threading
 import time
 from typing import Optional
 
-from hsm.core.events import Event
-from hsm.core.state_machine import StateMachine
-from hsm.runtime.event_queue import EventQueue
+from gotstate.core.events import Event
+from gotstate.core.state_machine import StateMachine
+from gotstate.runtime.event_queue import EventQueue
 
 
 class Executor:

@@ -4,7 +4,7 @@
 
 
 def test_executor_init(mock_machine, mock_event_queue):
-    from hsm.runtime.executor import Executor
+    from gotstate.runtime.executor import Executor
 
     ex = Executor(machine=mock_machine, event_queue=mock_event_queue)
     assert ex.machine is mock_machine
@@ -15,7 +15,7 @@ def test_executor_run_stop(mock_machine, mock_event_queue):
     import threading
     import time
 
-    from hsm.runtime.executor import Executor
+    from gotstate.runtime.executor import Executor
 
     # Simulate event queue returning None (no events)
     mock_event_queue.dequeue.return_value = None
@@ -38,7 +38,7 @@ def test_executor_process_events(mock_machine, mock_event_queue, mock_event):
     import threading
     import time
 
-    from hsm.runtime.executor import Executor
+    from gotstate.runtime.executor import Executor
 
     # Simulate one event then None
     mock_event_queue.dequeue.side_effect = [mock_event, None]
@@ -64,7 +64,7 @@ def test_executor_double_run(mock_machine, mock_event_queue):
     import threading
     import time
 
-    from hsm.runtime.executor import Executor
+    from gotstate.runtime.executor import Executor
 
     ex = Executor(machine=mock_machine, event_queue=mock_event_queue)
     mock_event_queue.dequeue.return_value = None
@@ -86,7 +86,7 @@ def test_executor_machine_start(mock_machine, mock_event_queue):
     import threading
     import time
 
-    from hsm.runtime.executor import Executor
+    from gotstate.runtime.executor import Executor
 
     mock_machine._started = False
     ex = Executor(machine=mock_machine, event_queue=mock_event_queue)
@@ -107,7 +107,7 @@ def test_executor_error_handling(mock_machine, mock_event_queue, mock_event):
     import threading
     import time
 
-    from hsm.runtime.executor import Executor
+    from gotstate.runtime.executor import Executor
 
     # Make process_event raise an exception
     mock_machine.process_event.side_effect = Exception("Test error")
@@ -127,7 +127,7 @@ def test_executor_error_handling(mock_machine, mock_event_queue, mock_event):
 
 
 def test_executor_stop_before_run(mock_machine, mock_event_queue):
-    from hsm.runtime.executor import Executor
+    from gotstate.runtime.executor import Executor
 
     ex = Executor(machine=mock_machine, event_queue=mock_event_queue)
     ex.stop()  # Should not raise any errors

@@ -10,10 +10,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from hsm.core.events import Event
-from hsm.core.states import CompositeState, State
-from hsm.core.transitions import Transition
-from hsm.runtime.graph import StateGraph
+from gotstate.core.events import Event
+from gotstate.core.states import CompositeState, State
+from gotstate.core.transitions import Transition
+from gotstate.runtime.graph import StateGraph
 
 
 def test_add_state():

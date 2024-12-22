@@ -4,12 +4,12 @@
 
 from unittest.mock import MagicMock
 
-from hsm.runtime.concurrency import get_lock, with_lock
+from gotstate.runtime.concurrency import get_lock, with_lock
 
 
 def test_lock_factory():
     """Test that the lock factory creates proper locks."""
-    from hsm.runtime.concurrency import _LockFactory
+    from gotstate.runtime.concurrency import _LockFactory
 
     lf = _LockFactory()
     lock = lf.create_lock()

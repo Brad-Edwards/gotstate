@@ -6,16 +6,16 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from hsm.core.errors import ValidationError
-from hsm.core.events import Event
-from hsm.core.states import CompositeState, State
-from hsm.core.transitions import Transition
-from hsm.runtime.graph import StateGraph
+from gotstate.core.errors import ValidationError
+from gotstate.core.events import Event
+from gotstate.core.states import CompositeState, State
+from gotstate.core.transitions import Transition
+from gotstate.runtime.graph import StateGraph
 
 
 def test_validator_init():
     """Test validator initialization."""
-    from hsm.core.validations import Validator
+    from gotstate.core.validations import Validator
 
     validator = Validator()
     assert hasattr(validator, "_rules_engine")
@@ -23,7 +23,7 @@ def test_validator_init():
 
 def test_validate_event_empty_name():
     """Test validation fails for event with empty name."""
-    from hsm.core.validations import Validator
+    from gotstate.core.validations import Validator
 
     validator = Validator()
     event = Event("")
@@ -34,7 +34,7 @@ def test_validate_event_empty_name():
 
 def test_validate_transition_missing_states():
     """Test validation fails for transition with missing states."""
-    from hsm.core.validations import Validator
+    from gotstate.core.validations import Validator
 
     validator = Validator()
     transition = Transition(None, None)
@@ -45,7 +45,7 @@ def test_validate_transition_missing_states():
 
 def test_validate_transition_invalid_guard():
     """Test validation fails for transition with non-callable guard."""
-    from hsm.core.validations import Validator
+    from gotstate.core.validations import Validator
 
     validator = Validator()
     source = State("source")
@@ -58,7 +58,7 @@ def test_validate_transition_invalid_guard():
 
 def test_validate_transition_invalid_action():
     """Test validation fails for transition with non-callable action."""
-    from hsm.core.validations import Validator
+    from gotstate.core.validations import Validator
 
     validator = Validator()
     source = State("source")
@@ -71,8 +71,8 @@ def test_validate_transition_invalid_action():
 
 def test_validate_machine_no_initial_state():
     """Test validation fails for machine without initial state."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import Validator
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import Validator
 
     machine = MagicMock(spec=StateMachine)
     machine._mock_return_value = None
@@ -88,8 +88,8 @@ def test_validate_machine_no_initial_state():
 
 def test_validate_machine_unreachable_states():
     """Test validation fails for machine with unreachable states."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import Validator
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import Validator
 
     machine = MagicMock(spec=StateMachine)
     machine._mock_return_value = None
@@ -109,8 +109,8 @@ def test_validate_machine_unreachable_states():
 
 def test_validate_composite_state_no_initial():
     """Test validation fails for composite state without initial state."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import Validator
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import Validator
 
     machine = MagicMock(spec=StateMachine)
     machine._mock_return_value = None
@@ -129,7 +129,7 @@ def test_validate_composite_state_no_initial():
 
 def test_async_validator():
     """Test async validator basic functionality."""
-    from hsm.core.validations import AsyncValidator
+    from gotstate.core.validations import AsyncValidator
 
     validator = AsyncValidator()
     assert isinstance(validator, AsyncValidator)
@@ -138,8 +138,8 @@ def test_async_validator():
 @pytest.mark.asyncio
 async def test_async_validator_validation():
     """Test async validator validation."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import AsyncValidator
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import AsyncValidator
 
     machine = MagicMock(spec=StateMachine)
     machine._graph = MagicMock()
@@ -154,8 +154,8 @@ async def test_async_validator_validation():
 
 def test_validate_machine_with_mock():
     """Test validation skips for mocks with _mock_return_value."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import Validator
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import Validator
 
     machine = MagicMock(spec=StateMachine)
     machine._mock_return_value = "something"  # This should trigger skip
@@ -166,8 +166,8 @@ def test_validate_machine_with_mock():
 
 def test_validate_machine_non_validation_error():
     """Test that non-ValidationErrors are wrapped."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import Validator
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import Validator
 
     machine = MagicMock(spec=StateMachine)
     machine._mock_return_value = None
@@ -181,7 +181,7 @@ def test_validate_machine_non_validation_error():
 
 def test_validate_transition_no_guards_or_actions():
     """Test transition validation with no guards or actions."""
-    from hsm.core.validations import Validator
+    from gotstate.core.validations import Validator
 
     source = State("source")
     target = State("target")
@@ -194,8 +194,8 @@ def test_validate_transition_no_guards_or_actions():
 @pytest.mark.asyncio
 async def test_async_validator_with_graph_errors():
     """Test async validator when graph validation returns errors."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import AsyncValidator
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import AsyncValidator
 
     machine = MagicMock(spec=StateMachine)
     machine._graph = MagicMock()
@@ -211,8 +211,8 @@ async def test_async_validator_with_graph_errors():
 
 def test_build_initial_reachable_set():
     """Test building the initial reachable set with composite states."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import _DefaultValidationRules
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import _DefaultValidationRules
 
     machine = MagicMock(spec=StateMachine)
     machine._graph = MagicMock()
@@ -237,8 +237,8 @@ def test_build_initial_reachable_set():
 @pytest.mark.asyncio
 async def test_async_validator_no_errors():
     """Test async validator with no validation errors."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import AsyncValidator
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import AsyncValidator
 
     machine = MagicMock(spec=StateMachine)
     machine._graph = MagicMock()
@@ -254,8 +254,8 @@ async def test_async_validator_no_errors():
 @pytest.mark.asyncio
 async def test_async_validator_not_started():
     """Test async validator with machine not started."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import AsyncValidator
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import AsyncValidator
 
     machine = MagicMock(spec=StateMachine)
     machine._graph = MagicMock()
@@ -269,8 +269,8 @@ async def test_async_validator_not_started():
 
 def test_validate_transition_states():
     """Test validation of transition states existence."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import _DefaultValidationRules
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import _DefaultValidationRules
 
     machine = MagicMock(spec=StateMachine)
     source = State("source")
@@ -288,8 +288,8 @@ def test_validate_transition_states():
 
 def test_expand_reachable_states():
     """Test expanding reachable states through transitions."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import _DefaultValidationRules
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import _DefaultValidationRules
 
     machine = MagicMock(spec=StateMachine)
     machine._graph = MagicMock()
@@ -312,8 +312,8 @@ def test_expand_reachable_states():
 
 def test_validate_state_reachability_no_unreachable():
     """Test validation passes when all states are reachable."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import _DefaultValidationRules
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import _DefaultValidationRules
 
     machine = MagicMock(spec=StateMachine)
     machine._graph = MagicMock()
@@ -324,8 +324,8 @@ def test_validate_state_reachability_no_unreachable():
 
 def test_validate_composite_states_all_valid():
     """Test validation of composite states with valid initial states."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import _DefaultValidationRules
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import _DefaultValidationRules
 
     machine = MagicMock(spec=StateMachine)
     machine._graph = MagicMock()
@@ -339,8 +339,8 @@ def test_validate_composite_states_all_valid():
 @pytest.mark.asyncio
 async def test_async_validator_with_current_state():
     """Test async validator with current state check."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.validations import AsyncValidator
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.validations import AsyncValidator
 
     machine = MagicMock(spec=StateMachine)
     machine._graph = MagicMock()

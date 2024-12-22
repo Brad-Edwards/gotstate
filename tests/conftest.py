@@ -7,13 +7,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hsm.core.hooks import Hook
+from gotstate.core.hooks import Hook
 
 
 @pytest.fixture
 def simple_state():
     """A minimal State object for basic testing."""
-    from hsm.core.states import State
+    from gotstate.core.states import State
 
     return State(name="Idle")
 
@@ -21,7 +21,7 @@ def simple_state():
 @pytest.fixture
 def another_state():
     """Another State object for transitions."""
-    from hsm.core.states import State
+    from gotstate.core.states import State
 
     return State(name="Active")
 
@@ -29,7 +29,7 @@ def another_state():
 @pytest.fixture
 def event_queue():
     """A simple, non-priority event queue."""
-    from hsm.runtime.event_queue import EventQueue
+    from gotstate.runtime.event_queue import EventQueue
 
     return EventQueue(priority=False)
 
@@ -43,7 +43,7 @@ def hook():
 @pytest.fixture
 def timeout_event():
     """A timeout event for testing timers and timeouts."""
-    from hsm.core.events import TimeoutEvent
+    from gotstate.core.events import TimeoutEvent
 
     return TimeoutEvent(name="Timeout", deadline=10.0)
 
@@ -51,7 +51,7 @@ def timeout_event():
 @pytest.fixture
 def basic_event():
     """A generic event for testing transitions."""
-    from hsm.core.events import Event
+    from gotstate.core.events import Event
 
     return Event(name="TestEvent")
 
@@ -59,7 +59,7 @@ def basic_event():
 @pytest.fixture
 def validator():
     """A default Validator that passes everything for simplicity."""
-    from hsm.core.validations import Validator
+    from gotstate.core.validations import Validator
 
     v = Validator()
     # Could mock methods if needed, but a no-op validator is fine.
@@ -83,8 +83,8 @@ def mock_guards():
 @pytest.fixture
 def machine_factory(validator):
     """Returns a factory function to create a simple state machine for tests."""
-    from hsm.core.state_machine import StateMachine
-    from hsm.core.states import State
+    from gotstate.core.state_machine import StateMachine
+    from gotstate.core.states import State
 
     def _factory():
         initial = State("Initial")
@@ -96,7 +96,7 @@ def machine_factory(validator):
 @pytest.fixture
 def dummy_state():
     """A basic State with no entry/exit actions."""
-    from hsm.core.states import State
+    from gotstate.core.states import State
 
     return State(name="Dummy")
 
@@ -104,7 +104,7 @@ def dummy_state():
 @pytest.fixture
 def dummy_event():
     """A generic Event for testing."""
-    from hsm.core.events import Event
+    from gotstate.core.events import Event
 
     return Event("TestEvent")
 
@@ -135,7 +135,7 @@ def dummy_hooks():
 @pytest.fixture
 def error_classes():
     """Provides a tuple of error classes for quick reference."""
-    from hsm.core.errors import HSMError, StateNotFoundError, TransitionError, ValidationError
+    from gotstate.core.errors import HSMError, StateNotFoundError, TransitionError, ValidationError
 
     return (HSMError, StateNotFoundError, TransitionError, ValidationError)
 

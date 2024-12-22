@@ -4,10 +4,10 @@
 
 import pytest
 
-from hsm.core.events import Event
-from hsm.core.states import State
-from hsm.plugins.custom_actions import MyCustomAction
-from hsm.runtime.graph import StateGraph
+from gotstate.core.events import Event
+from gotstate.core.states import State
+from gotstate.plugins.custom_actions import MyCustomAction
+from gotstate.runtime.graph import StateGraph
 
 
 def test_custom_action_init():

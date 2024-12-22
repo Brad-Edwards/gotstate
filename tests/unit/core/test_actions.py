@@ -4,7 +4,7 @@
 
 
 def test_basic_actions_execute():
-    from hsm.core.actions import BasicActions
+    from gotstate.core.actions import BasicActions
 
     action_called = False
 
@@ -18,7 +18,7 @@ def test_basic_actions_execute():
 
 
 def test_action_adapter_init():
-    from hsm.core.actions import _ActionAdapter
+    from gotstate.core.actions import _ActionAdapter
 
     action_called = False
 
@@ -31,8 +31,8 @@ def test_action_adapter_init():
 
 
 def test_action_adapter_run():
-    from hsm.core.actions import _ActionAdapter
-    from hsm.core.events import Event
+    from gotstate.core.actions import _ActionAdapter
+    from gotstate.core.events import Event
 
     action_event = None
 
@@ -47,7 +47,7 @@ def test_action_adapter_run():
 
 
 def test_basic_actions_execute_no_args():
-    from hsm.core.actions import BasicActions
+    from gotstate.core.actions import BasicActions
 
     action_called = False
 
@@ -60,7 +60,7 @@ def test_basic_actions_execute_no_args():
 
 
 def test_basic_actions_execute_multiple_args():
-    from hsm.core.actions import BasicActions
+    from gotstate.core.actions import BasicActions
 
     received_args = {}
 

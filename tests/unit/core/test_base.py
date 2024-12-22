@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from hsm.core.base import StateBase
+from gotstate.core.base import StateBase
 
 
 def test_state_creation_minimal():

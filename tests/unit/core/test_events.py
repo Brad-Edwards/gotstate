@@ -6,7 +6,7 @@ import pytest
 
 
 def test_event_init():
-    from hsm.core.events import Event
+    from gotstate.core.events import Event
 
     e = Event("MyEvent")
     assert e.name == "MyEvent"
@@ -14,7 +14,7 @@ def test_event_init():
 
 
 def test_timeout_event_init():
-    from hsm.core.events import TimeoutEvent
+    from gotstate.core.events import TimeoutEvent
 
     e = TimeoutEvent("Timeout", 123.456)
     assert e.name == "Timeout"
@@ -22,7 +22,7 @@ def test_timeout_event_init():
 
 
 def test_event_metadata():
-    from hsm.core.events import Event
+    from gotstate.core.events import Event
 
     e = Event("TestEvent")
     e.metadata["key"] = "value"
@@ -31,7 +31,7 @@ def test_event_metadata():
 
 
 def test_event_metadata_isolation():
-    from hsm.core.events import Event
+    from gotstate.core.events import Event
 
     e1 = Event("Event1")
     e2 = Event("Event2")
@@ -44,7 +44,7 @@ def test_event_metadata_isolation():
 
 
 def test_timeout_event_inheritance():
-    from hsm.core.events import Event, TimeoutEvent
+    from gotstate.core.events import Event, TimeoutEvent
 
     e = TimeoutEvent("Timeout", 10.0)
     assert isinstance(e, Event)
@@ -52,7 +52,7 @@ def test_timeout_event_inheritance():
 
 
 def test_timeout_event_metadata():
-    from hsm.core.events import TimeoutEvent
+    from gotstate.core.events import TimeoutEvent
 
     e = TimeoutEvent("Timeout", 10.0)
     e.metadata["key"] = "value"
@@ -61,7 +61,7 @@ def test_timeout_event_metadata():
 
 
 def test_event_empty_metadata():
-    from hsm.core.events import Event
+    from gotstate.core.events import Event
 
     e = Event("TestEvent")
     assert isinstance(e.metadata, dict)
@@ -69,14 +69,14 @@ def test_event_empty_metadata():
 
 
 def test_event_priority():
-    from hsm.core.events import Event
+    from gotstate.core.events import Event
 
     e = Event("TestEvent", priority=5)
     assert e.priority == 5
 
 
 def test_event_comparison_by_priority():
-    from hsm.core.events import Event
+    from gotstate.core.events import Event
 
     high_priority = Event("High", priority=2)
     low_priority = Event("Low", priority=1)
@@ -89,7 +89,7 @@ def test_event_comparison_by_priority():
 def test_event_comparison_by_timestamp():
     import time
 
-    from hsm.core.events import Event
+    from gotstate.core.events import Event
 
     e1 = Event("First")
     time.sleep(0.001)  # Ensure different timestamps
@@ -101,7 +101,7 @@ def test_event_comparison_by_timestamp():
 
 
 def test_event_equality():
-    from hsm.core.events import Event
+    from gotstate.core.events import Event
 
     e1 = Event("Test", priority=1)
     e2 = Event("Test", priority=1)
@@ -113,7 +113,7 @@ def test_event_equality():
 
 
 def test_event_comparison_with_non_event():
-    from hsm.core.events import Event
+    from gotstate.core.events import Event
 
     e = Event("Test")
     # Less than should raise TypeError

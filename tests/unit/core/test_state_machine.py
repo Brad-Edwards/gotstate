@@ -6,12 +6,12 @@ from unittest.mock import Mock, call, patch
 
 import pytest
 
-from hsm.core.events import Event
-from hsm.core.state_machine import CompositeStateMachine, StateMachine, _ErrorRecoveryStrategy
-from hsm.core.states import CompositeState, State
-from hsm.core.transitions import Transition
-from hsm.core.validations import ValidationError
-from hsm.runtime.graph import StateGraph
+from gotstate.core.events import Event
+from gotstate.core.state_machine import CompositeStateMachine, StateMachine, _ErrorRecoveryStrategy
+from gotstate.core.states import CompositeState, State
+from gotstate.core.transitions import Transition
+from gotstate.core.validations import ValidationError
+from gotstate.runtime.graph import StateGraph
 
 
 class TestErrorRecoveryStrategy(_ErrorRecoveryStrategy):

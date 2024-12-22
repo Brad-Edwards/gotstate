@@ -4,10 +4,10 @@ import asyncio
 
 import pytest
 
-from hsm.core.events import Event
-from hsm.core.states import State
-from hsm.core.transitions import Transition
-from hsm.runtime.async_support import AsyncStateMachine
+from gotstate.core.events import Event
+from gotstate.core.states import State
+from gotstate.core.transitions import Transition
+from gotstate.runtime.async_support import AsyncStateMachine
 
 
 class AsyncTraceHook:

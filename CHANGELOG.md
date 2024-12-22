@@ -32,3 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Security scanning in CI
 - Input validation
 - Runtime checks
+
+## [1.0.1] - 2024-12-23
+### Added
+- Moved package to `gotstate` and updated `pyproject.toml`

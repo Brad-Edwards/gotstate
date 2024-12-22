@@ -2,7 +2,7 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 
-from hsm.core.events import Event
+from gotstate.core.events import Event
 
 
 class MyCustomAction:

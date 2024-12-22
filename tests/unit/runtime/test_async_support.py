@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hsm.core.errors import ValidationError
-from hsm.core.events import Event
-from hsm.core.states import CompositeState, State
-from hsm.core.transitions import Transition
-from hsm.core.validations import AsyncValidator, Validator
-from hsm.runtime.async_support import (
+from gotstate.core.errors import ValidationError
+from gotstate.core.events import Event
+from gotstate.core.states import CompositeState, State
+from gotstate.core.transitions import Transition
+from gotstate.core.validations import AsyncValidator, Validator
+from gotstate.runtime.async_support import (
     AsyncCompositeStateMachine,
     AsyncEventQueue,
     AsyncStateMachine,

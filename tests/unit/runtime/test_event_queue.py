@@ -7,12 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hsm.core.events import Event
-from hsm.runtime.event_queue import EventQueue
+from gotstate.core.events import Event
+from gotstate.runtime.event_queue import EventQueue
 
 
 def test_event_queue_fifo(mock_event):
-    from hsm.runtime.event_queue import EventQueue
+    from gotstate.runtime.event_queue import EventQueue
 
     eq = EventQueue(priority=False)
     eq.enqueue(mock_event)
@@ -22,7 +22,7 @@ def test_event_queue_fifo(mock_event):
 
 
 def test_event_queue_clear(mock_event):
-    from hsm.runtime.event_queue import EventQueue
+    from gotstate.runtime.event_queue import EventQueue
 
     eq = EventQueue(priority=False)
     eq.enqueue(mock_event)
@@ -31,7 +31,7 @@ def test_event_queue_clear(mock_event):
 
 
 def test_event_queue_priority(mock_event):
-    from hsm.runtime.event_queue import EventQueue
+    from gotstate.runtime.event_queue import EventQueue
 
     eq = EventQueue(priority=True)
     # Mock event objects with priority attributes if needed
@@ -44,7 +44,7 @@ def test_event_queue_priority(mock_event):
 
 
 def test_event_queue_lock():
-    from hsm.runtime.event_queue import _EventQueueLock
+    from gotstate.runtime.event_queue import _EventQueueLock
 
     mock_lock = MagicMock()
     mock_lock.acquire = MagicMock()
@@ -56,7 +56,7 @@ def test_event_queue_lock():
 
 
 def test_event_queue_lock_exception():
-    from hsm.runtime.event_queue import _EventQueueLock
+    from gotstate.runtime.event_queue import _EventQueueLock
 
     mock_lock = MagicMock()
     mock_lock.acquire = MagicMock()
@@ -72,8 +72,8 @@ def test_event_queue_lock_exception():
 
 
 def test_priority_queue_wrapper():
-    from hsm.core.events import Event
-    from hsm.runtime.event_queue import _PriorityQueueWrapper
+    from gotstate.core.events import Event
+    from gotstate.runtime.event_queue import _PriorityQueueWrapper
 
     pq = _PriorityQueueWrapper()
     event1 = Event("Event1")
@@ -89,8 +89,8 @@ def test_priority_queue_wrapper():
 
 
 def test_priority_queue_wrapper_clear():
-    from hsm.core.events import Event
-    from hsm.runtime.event_queue import _PriorityQueueWrapper
+    from gotstate.core.events import Event
+    from gotstate.runtime.event_queue import _PriorityQueueWrapper
 
     pq = _PriorityQueueWrapper()
     pq.push(Event("Event1"))
@@ -100,21 +100,21 @@ def test_priority_queue_wrapper_clear():
 
 
 def test_event_queue_fifo_empty():
-    from hsm.runtime.event_queue import EventQueue
+    from gotstate.runtime.event_queue import EventQueue
 
     eq = EventQueue(priority=False)
     assert eq.dequeue() is None
 
 
 def test_event_queue_priority_empty():
-    from hsm.runtime.event_queue import EventQueue
+    from gotstate.runtime.event_queue import EventQueue
 
     eq = EventQueue(priority=True)
     assert eq.dequeue() is None
 
 
 def test_event_queue_multiple_events(mock_event):
-    from hsm.runtime.event_queue import EventQueue
+    from gotstate.runtime.event_queue import EventQueue
 
     eq = EventQueue(priority=False)
     eq.enqueue(mock_event)
@@ -126,7 +126,7 @@ def test_event_queue_multiple_events(mock_event):
 
 
 def test_event_queue_priority_multiple_events(mock_event):
-    from hsm.runtime.event_queue import EventQueue
+    from gotstate.runtime.event_queue import EventQueue
 
     eq = EventQueue(priority=True)
     eq.enqueue(mock_event)
@@ -138,7 +138,7 @@ def test_event_queue_priority_multiple_events(mock_event):
 
 
 def test_event_queue_clear_empty():
-    from hsm.runtime.event_queue import EventQueue
+    from gotstate.runtime.event_queue import EventQueue
 
     eq = EventQueue()
     eq.clear()  # Should not raise any errors

@@ -4,8 +4,8 @@
 
 import pytest
 
-from hsm.core.states import CompositeState, State
-from hsm.runtime.graph import StateGraph
+from gotstate.core.states import CompositeState, State
+from gotstate.runtime.graph import StateGraph
 
 
 def test_state_creation():

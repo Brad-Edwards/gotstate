@@ -5,17 +5,17 @@ import time
 
 import pytest
 
-from hsm.core.actions import BasicActions
-from hsm.core.errors import HSMError, StateNotFoundError, TransitionError, ValidationError
-from hsm.core.events import Event, TimeoutEvent
-from hsm.core.guards import BasicGuards
-from hsm.core.state_machine import CompositeStateMachine, StateMachine
-from hsm.core.states import CompositeState, State
-from hsm.core.transitions import Transition
-from hsm.runtime.async_support import AsyncEventQueue, AsyncStateMachine, _AsyncEventProcessingLoop
-from hsm.runtime.event_queue import EventQueue
-from hsm.runtime.executor import Executor
-from hsm.runtime.timers import TimeoutScheduler
+from gotstate.core.actions import BasicActions
+from gotstate.core.errors import HSMError, StateNotFoundError, TransitionError, ValidationError
+from gotstate.core.events import Event, TimeoutEvent
+from gotstate.core.guards import BasicGuards
+from gotstate.core.state_machine import CompositeStateMachine, StateMachine
+from gotstate.core.states import CompositeState, State
+from gotstate.core.transitions import Transition
+from gotstate.runtime.async_support import AsyncEventQueue, AsyncStateMachine, _AsyncEventProcessingLoop
+from gotstate.runtime.event_queue import EventQueue
+from gotstate.runtime.executor import Executor
+from gotstate.runtime.timers import TimeoutScheduler
 
 
 @pytest.fixture

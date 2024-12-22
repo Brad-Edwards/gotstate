@@ -4,7 +4,7 @@
 
 
 def test_basic_actions_execute():
-    from hsm.core.actions import BasicActions
+    from gotstate.core.actions import BasicActions
 
     action_called = False
 
@@ -18,7 +18,7 @@ def test_basic_actions_execute():
 
 
 def test_basic_guards_check_condition():
-    from hsm.core.guards import BasicGuards
+    from gotstate.core.guards import BasicGuards
 
     condition_called = False
 
@@ -33,7 +33,7 @@ def test_basic_guards_check_condition():
 
 
 def test_basic_guards_check_condition_false():
-    from hsm.core.guards import BasicGuards
+    from gotstate.core.guards import BasicGuards
 
     def condition_fn(arg=None):
         return arg == "test"
@@ -43,7 +43,7 @@ def test_basic_guards_check_condition_false():
 
 
 def test_basic_guards_check_condition_no_args():
-    from hsm.core.guards import BasicGuards
+    from gotstate.core.guards import BasicGuards
 
     def condition_fn():
         return True
@@ -53,7 +53,7 @@ def test_basic_guards_check_condition_no_args():
 
 
 def test_guard_adapter_init():
-    from hsm.core.guards import _GuardAdapter
+    from gotstate.core.guards import _GuardAdapter
 
     def guard_fn(event):
         return True
@@ -63,8 +63,8 @@ def test_guard_adapter_init():
 
 
 def test_guard_adapter_check():
-    from hsm.core.events import Event
-    from hsm.core.guards import _GuardAdapter
+    from gotstate.core.events import Event
+    from gotstate.core.guards import _GuardAdapter
 
     event_received = None
 
@@ -82,8 +82,8 @@ def test_guard_adapter_check():
 
 
 def test_guard_adapter_check_false():
-    from hsm.core.events import Event
-    from hsm.core.guards import _GuardAdapter
+    from gotstate.core.events import Event
+    from gotstate.core.guards import _GuardAdapter
 
     def guard_fn(event):
         return False

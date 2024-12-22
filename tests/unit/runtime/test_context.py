@@ -4,11 +4,11 @@ from unittest.mock import Mock, call
 
 import pytest
 
-from hsm.core.events import Event
-from hsm.core.states import CompositeState, State
-from hsm.core.transitions import Transition
-from hsm.runtime.context import RuntimeContext
-from hsm.runtime.graph import StateGraph
+from gotstate.core.events import Event
+from gotstate.core.states import CompositeState, State
+from gotstate.core.transitions import Transition
+from gotstate.runtime.context import RuntimeContext
+from gotstate.runtime.graph import StateGraph
 
 
 @pytest.fixture

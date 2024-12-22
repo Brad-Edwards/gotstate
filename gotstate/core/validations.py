@@ -6,13 +6,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hsm.core.errors import ValidationError
-from hsm.core.events import Event
-from hsm.core.states import CompositeState
-from hsm.core.transitions import Transition
+from gotstate.core.errors import ValidationError
+from gotstate.core.events import Event
+from gotstate.core.states import CompositeState
+from gotstate.core.transitions import Transition
 
 if TYPE_CHECKING:
-    from hsm.core.state_machine import StateMachine
+    from gotstate.core.state_machine import StateMachine
 
 
 class Validator:

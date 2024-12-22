@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Callable, List, Optional, Protocol
 
 if TYPE_CHECKING:
-    from hsm.core.states import State
+    from gotstate.core.states import State
 
 
 class HookProtocol(Protocol):

@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from hsm.core.events import Event
-from hsm.core.hooks import HookProtocol
-from hsm.core.states import CompositeState, State
-from hsm.core.transitions import Transition
-from hsm.core.validations import Validator
-from hsm.runtime.async_support import AsyncEventQueue, AsyncStateMachine
+from gotstate.core.events import Event
+from gotstate.core.hooks import HookProtocol
+from gotstate.core.states import CompositeState, State
+from gotstate.core.transitions import Transition
+from gotstate.core.validations import Validator
+from gotstate.runtime.async_support import AsyncEventQueue, AsyncStateMachine
 
 
 class AsyncTestHook:

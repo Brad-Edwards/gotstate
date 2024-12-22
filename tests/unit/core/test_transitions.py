@@ -6,7 +6,7 @@ import pytest
 
 
 def test_transition_init(dummy_state, dummy_guard, dummy_action):
-    from hsm.core.transitions import Transition
+    from gotstate.core.transitions import Transition
 
     t = Transition(
         source=dummy_state,
@@ -22,7 +22,7 @@ def test_transition_init(dummy_state, dummy_guard, dummy_action):
 
 @pytest.mark.asyncio
 async def test_transition_evaluate_guards(dummy_state, dummy_event):
-    from hsm.core.transitions import Transition
+    from gotstate.core.transitions import Transition
 
     def true_guard(e):
         return True
@@ -37,7 +37,7 @@ async def test_transition_evaluate_guards(dummy_state, dummy_event):
 
 @pytest.mark.asyncio
 async def test_transition_execute_actions(dummy_state, dummy_event):
-    from hsm.core.transitions import Transition
+    from gotstate.core.transitions import Transition
 
     action_called = False
 
@@ -53,7 +53,7 @@ async def test_transition_execute_actions(dummy_state, dummy_event):
 @pytest.mark.asyncio
 async def test_async_guard_evaluation(dummy_state, dummy_event):
     """Test evaluation of async guard functions."""
-    from hsm.core.transitions import Transition
+    from gotstate.core.transitions import Transition
 
     async def async_true_guard(e):
         return True
@@ -80,8 +80,8 @@ async def test_async_guard_evaluation(dummy_state, dummy_event):
 @pytest.mark.asyncio
 async def test_async_action_execution(dummy_state, dummy_event):
     """Test execution of async actions."""
-    from hsm.core.errors import TransitionError
-    from hsm.core.transitions import Transition
+    from gotstate.core.errors import TransitionError
+    from gotstate.core.transitions import Transition
 
     action_called = False
 
@@ -111,8 +111,8 @@ async def test_async_action_execution(dummy_state, dummy_event):
 @pytest.mark.asyncio
 async def test_action_error_handling(dummy_state, dummy_event):
     """Test error handling during action execution."""
-    from hsm.core.errors import TransitionError
-    from hsm.core.transitions import Transition
+    from gotstate.core.errors import TransitionError
+    from gotstate.core.transitions import Transition
 
     def failing_action(e):
         raise ValueError("Action failed")
@@ -133,8 +133,8 @@ async def test_action_error_handling(dummy_state, dummy_event):
 
 def test_transition_priority_sorting():
     """Test sorting transitions by priority."""
-    from hsm.core.states import State
-    from hsm.core.transitions import Transition, _TransitionPrioritySorter
+    from gotstate.core.states import State
+    from gotstate.core.transitions import Transition, _TransitionPrioritySorter
 
     state = State("test")
     t1 = Transition(state, state, priority=1)
@@ -149,8 +149,8 @@ def test_transition_priority_sorting():
 
 def test_transition_properties():
     """Test transition property access."""
-    from hsm.core.states import State
-    from hsm.core.transitions import Transition
+    from gotstate.core.states import State
+    from gotstate.core.transitions import Transition
 
     source = State("source")
     target = State("target")

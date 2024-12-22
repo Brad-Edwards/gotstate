@@ -21,7 +21,7 @@ def test_exceptions_instantiation(error_classes):
 
 
 def test_hsm_error_base():
-    from hsm.core.errors import HSMError
+    from gotstate.core.errors import HSMError
 
     error = HSMError("Base error")
     assert str(error) == "Base error"
@@ -29,7 +29,7 @@ def test_hsm_error_base():
 
 
 def test_error_inheritance():
-    from hsm.core.errors import HSMError, StateNotFoundError, TransitionError, ValidationError
+    from gotstate.core.errors import HSMError, StateNotFoundError, TransitionError, ValidationError
 
     # Test that each error is both its type and HSMError
     state_error = StateNotFoundError("state")
@@ -46,7 +46,7 @@ def test_error_inheritance():
 
 
 def test_error_messages():
-    from hsm.core.errors import HSMError, StateNotFoundError, TransitionError, ValidationError
+    from gotstate.core.errors import HSMError, StateNotFoundError, TransitionError, ValidationError
 
     # Test custom error messages
     assert str(HSMError("Custom base")) == "Custom base"
@@ -56,7 +56,7 @@ def test_error_messages():
 
 
 def test_error_empty_messages():
-    from hsm.core.errors import HSMError, StateNotFoundError, TransitionError, ValidationError
+    from gotstate.core.errors import HSMError, StateNotFoundError, TransitionError, ValidationError
 
     # Test empty error messages
     assert str(HSMError()) == ""

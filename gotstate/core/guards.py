@@ -4,7 +4,7 @@
 
 from typing import Callable
 
-from hsm.core.events import Event
+from gotstate.core.events import Event
 
 
 class BasicGuards:

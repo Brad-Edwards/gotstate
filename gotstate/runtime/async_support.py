@@ -7,13 +7,13 @@ from __future__ import annotations
 import asyncio
 from typing import List, Optional
 
-from hsm.core.errors import ValidationError
-from hsm.core.events import Event
-from hsm.core.hooks import HookProtocol
-from hsm.core.state_machine import StateMachine
-from hsm.core.states import CompositeState, State
-from hsm.core.transitions import Transition
-from hsm.core.validations import Validator
+from gotstate.core.errors import ValidationError
+from gotstate.core.events import Event
+from gotstate.core.hooks import HookProtocol
+from gotstate.core.state_machine import StateMachine
+from gotstate.core.states import CompositeState, State
+from gotstate.core.transitions import Transition
+from gotstate.core.validations import Validator
 
 
 class _AsyncLock:

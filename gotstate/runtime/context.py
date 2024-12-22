@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Optional
 
-from hsm.core.transitions import Transition
+from gotstate.core.transitions import Transition
 
 from ..core.events import Event
 from ..core.states import CompositeState, State
