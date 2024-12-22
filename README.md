@@ -22,14 +22,9 @@ A hierarchical finite state machine (HFSM) library for Python, focusing on relia
 
 ## Status
 
-**Version 1.0**
+**Version 1.0.X**
 
-Features:
-- Full test coverage
-- Type hints
-- Input validation
-- Error handling
-- API documentation
+Initial release!
 
 ## Design Philosophy
 
