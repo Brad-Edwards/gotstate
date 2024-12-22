@@ -39,7 +39,7 @@ class Event:
         """Optional dictionary of additional event data."""
         return self._metadata
 
-    def __lt__(self, other: "Event") -> bool:
+    def __lt__(self, other: object) -> bool:
         if not isinstance(other, Event):
             return NotImplemented
         # Higher priority numbers come first
@@ -51,7 +51,12 @@ class Event:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Event):
             return NotImplemented
-        return self.name == other.name and self.priority == other.priority and self._timestamp == other._timestamp
+        return (
+            isinstance(other, Event)
+            and self.name == other.name
+            and self.priority == other.priority
+            and self._timestamp == other._timestamp
+        )
 
 
 class TimeoutEvent(Event):
