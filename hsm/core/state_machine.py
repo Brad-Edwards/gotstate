@@ -3,11 +3,9 @@
 # Licensed under the MIT License - see LICENSE file for details
 
 import asyncio
-import time
-from typing import Callable, List, Optional, Set
+from typing import List, Optional, Set
 
 from hsm.core.events import Event
-from hsm.core.hooks import HookManager, HookProtocol
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition
 from hsm.core.validations import ValidationError, Validator
@@ -26,8 +24,16 @@ class _ErrorRecoveryStrategy:
 
 class StateMachine:
     """
-    A finite state machine implementation that uses StateGraph as the
-    sole source of truth for hierarchy, transitions, and history.
+    A hierarchical state machine implementation that manages states, transitions, and history.
+
+    Features:
+    - Hierarchical state nesting
+    - History state tracking
+    - Event-driven transitions
+    - Guard conditions
+    - Entry/exit actions
+    - Custom hooks for state changes
+    - Error recovery strategies
     """
 
     def __init__(
@@ -38,10 +44,15 @@ class StateMachine:
         error_recovery: Optional[_ErrorRecoveryStrategy] = None,
     ):
         """
-        :param initial_state: The state in which this machine begins.
-        :param validator: Optional validator for structure checks.
-        :param hooks: Optional list of hook objects implementing on_enter, on_exit, on_error, etc.
-        :param error_recovery: Optional error recovery strategy.
+        Initialize a new state machine.
+
+        Args:
+            initial_state: The starting state of the machine
+            validator: Optional validator to perform structural validation checks
+            hooks: Optional list of hook objects that can respond to state changes.
+                  Hooks can implement: on_enter(state), on_exit(state),
+                  on_transition(source, target), and on_error(error)
+            error_recovery: Optional strategy for handling runtime errors
         """
         self._graph = StateGraph()
         self._validator = validator or Validator()
@@ -81,10 +92,13 @@ class StateMachine:
 
     def add_state(self, state: State, parent: Optional[State] = None) -> None:
         """
-        Add a state to the underlying graph, optionally specifying a parent.
+        Add a state to the state machine.
 
-        :param state: The state to add.
-        :param parent: The parent state (usually a CompositeState).
+        Args:
+            state: The state to add
+            parent: Optional parent state for hierarchical nesting. If parent is a
+                   CompositeState with no initial state set, this state becomes its
+                   initial state.
         """
         self._graph.add_state(state, parent)
         # If parent is a CompositeState with no initial_state, set this new state
@@ -93,17 +107,18 @@ class StateMachine:
 
     def add_transition(self, transition: Transition) -> None:
         """
-        Add a transition to the graph.
-        The graph enforces that source/target states exist.
+        Add a transition between states.
+
+        Args:
+            transition: The transition to add. Must reference states that exist
+                      in the state machine.
         """
         self._graph.add_transition(transition)
 
     def get_transitions(self) -> Set[Transition]:
         """
         Return all transitions from the graph.
-        (In a minimal version, you'd store transitions in the StateGraph.)
         """
-        # For example, we might collect them from all source states:
         transitions = set()
         for st in self._graph.get_all_states():
             for tr in self._graph._transitions.get(st, set()):
@@ -119,11 +134,18 @@ class StateMachine:
         return self._graph.get_history_state(composite)
 
     def start(self) -> None:
-        """Start the state machine."""
+        """
+        Start the state machine.
+
+        This validates the machine's structure and enters the initial state,
+        triggering any relevant entry actions and hooks.
+
+        Raises:
+            ValidationError: If the state machine structure is invalid
+        """
         if self._started:
             return
 
-        # Validate the graph structure
         errors = self._graph.validate()
         if errors:
             raise ValidationError("\n".join(errors))
@@ -141,21 +163,23 @@ class StateMachine:
         # Enter ancestors first (they're already in outermost to innermost order)
         for ancestor in ancestors:
             self._notify_enter(ancestor)
-        # Then enter the current state
         self._notify_enter(self._current_state)
 
         self._started = True
 
     def stop(self) -> None:
-        """Stop the state machine."""
+        """
+        Stop the state machine.
+
+        This exits all active states (triggering exit actions), records history
+        states, and resets the current state to None.
+        """
         if not self._started:
             return
 
         if self._current_state:
-            # Record history if applicable
             composite_ancestors = self._graph.get_composite_ancestors(self._current_state)
             if composite_ancestors:
-                # Record history for each composite ancestor
                 for ancestor in composite_ancestors:
                     self._graph.record_history(ancestor, self._current_state)
 
@@ -171,8 +195,17 @@ class StateMachine:
 
     def process_event(self, event: Event) -> bool:
         """
-        Process an event, checking transitions from the current state via the graph.
-        Execute the highest-priority valid transition, if any.
+        Process an event through the state machine.
+
+        The machine evaluates all possible transitions from the current state
+        (and its parent states), checks their guards, and executes the
+        highest-priority valid transition if one exists.
+
+        Args:
+            event: The event to process
+
+        Returns:
+            bool: True if a transition was executed, False otherwise
         """
         if not self._started or not self._current_state:
             return False
@@ -189,7 +222,6 @@ class StateMachine:
             if not potential_transitions:
                 return False
 
-            # Sort transitions by priority
             potential_transitions.sort(key=lambda t: t.get_priority(), reverse=True)
 
             # Evaluate guards to find valid transitions
@@ -209,8 +241,6 @@ class StateMachine:
 
             # Pick the highest-priority transition
             transition = valid_transitions[0]
-
-            # Execute the transition
             self._execute_transition(transition, event)
 
             # If target is a composite state, enter its initial state
@@ -235,58 +265,73 @@ class StateMachine:
     def _execute_transition(self, transition: Transition, event: Event) -> None:
         """Execute a transition, notify exit/enter, handle errors."""
         try:
-            # First notify exit of current state and its ancestors up to source state
-            if self._current_state:
-                # Get the common ancestor between source and target states
-                source_ancestors = self._graph.get_composite_ancestors(self._current_state)
-                target_ancestors = self._graph.get_composite_ancestors(transition.target)
-                common_ancestor = None
-                for s in source_ancestors:
-                    if s in target_ancestors:
-                        common_ancestor = s
-                        break
-
-                # Exit only the current state if transitioning within the same composite
-                if common_ancestor and common_ancestor == source_ancestors[0]:
-                    self._notify_exit(self._current_state)
-                    if isinstance(self._current_state.parent, CompositeState):
-                        # Record history when exiting composite states
-                        self._graph.record_history(self._current_state.parent, self._current_state)
-                else:
-                    # Exit up to but not including the common ancestor
-                    current = self._current_state
-                    while current and current != common_ancestor:
-                        self._notify_exit(current)
-                        if isinstance(current.parent, CompositeState):
-                            # Record history when exiting composite states
-                            self._graph.record_history(current.parent, current)
-                        current = current.parent
+            # Handle exit from current state
+            self._handle_state_exit(transition)
 
             # Execute transition actions
-            for action in transition.actions:
-                action(event)
+            self._execute_transition_actions(transition, event)
 
-            # Update current state without notifications (they're handled here)
-            self._set_current_state(transition.target, notify=False)
+            # Update current state and notify hooks
+            self._update_state_and_notify(transition)
 
-            # Notify transition
-            for hook in self._hooks:
-                if hasattr(hook, "on_transition"):
-                    hook.on_transition(transition.source, transition.target)
-
-            # Notify enter of new state and its ancestors from common ancestor down
-            target_ancestors = self._graph.get_composite_ancestors(transition.target)
-            # Enter only ancestors below the common ancestor
-            for ancestor in target_ancestors:
-                if ancestor == common_ancestor:
-                    break
-                if ancestor not in source_ancestors:  # Only enter if not already active
-                    self._notify_enter(ancestor)
-            self._notify_enter(transition.target)
+            # Handle entry to new state
+            self._handle_state_entry(transition)
 
         except Exception as e:
             self._notify_error(e)
             raise
+
+    def _handle_state_exit(self, transition: Transition) -> None:
+        """Handle exiting current state and its ancestors up to common ancestor."""
+        if not self._current_state:
+            return
+
+        source_ancestors = self._graph.get_composite_ancestors(self._current_state)
+        target_ancestors = self._graph.get_composite_ancestors(transition.target)
+        common_ancestor = next((s for s in source_ancestors if s in target_ancestors), None)
+
+        if common_ancestor and common_ancestor == source_ancestors[0]:
+            # Exit only current state if transitioning within same composite
+            self._notify_exit(self._current_state)
+            self._record_history_if_composite(self._current_state)
+        else:
+            # Exit up to but not including the common ancestor
+            current = self._current_state
+            while current and current != common_ancestor:
+                self._notify_exit(current)
+                self._record_history_if_composite(current)
+                current = current.parent
+
+    def _record_history_if_composite(self, state: State) -> None:
+        """Record history state if parent is composite."""
+        if isinstance(state.parent, CompositeState):
+            self._graph.record_history(state.parent, state)
+
+    def _execute_transition_actions(self, transition: Transition, event: Event) -> None:
+        """Execute all actions associated with the transition."""
+        for action in transition.actions:
+            action(event)
+
+    def _update_state_and_notify(self, transition: Transition) -> None:
+        """Update current state and notify transition hooks."""
+        self._set_current_state(transition.target, notify=False)
+        for hook in self._hooks:
+            if hasattr(hook, "on_transition"):
+                hook.on_transition(transition.source, transition.target)
+
+    def _handle_state_entry(self, transition: Transition) -> None:
+        """Handle entering new state and its ancestors from common ancestor down."""
+        source_ancestors = self._graph.get_composite_ancestors(self._current_state)
+        target_ancestors = self._graph.get_composite_ancestors(transition.target)
+        common_ancestor = next((s for s in source_ancestors if s in target_ancestors), None)
+
+        # Enter only ancestors below the common ancestor
+        for ancestor in target_ancestors:
+            if ancestor == common_ancestor:
+                break
+            if ancestor not in source_ancestors:  # Only enter if not already active
+                self._notify_enter(ancestor)
+        self._notify_enter(transition.target)
 
     def _notify_enter(self, state: State) -> None:
         """Invoke on_enter hooks."""
@@ -309,7 +354,11 @@ class StateMachine:
                 hook.on_error(error)
 
     def reset(self) -> None:
-        """Reset the state machine to its initial state (clearing all history)."""
+        """
+        Reset the state machine to its initial state.
+
+        This clears all history states and restarts the machine if it was running.
+        """
         was_started = self._started
         if was_started:
             self.stop()
@@ -326,8 +375,11 @@ class StateMachine:
 
 class CompositeStateMachine(StateMachine):
     """
-    A hierarchical extension of StateMachine that can contain nested submachines.
-    Each submachine can be integrated into the same graph or kept separate.
+    An extended state machine that supports nested submachines.
+
+    This allows complex state machines to be built by composing smaller,
+    reusable state machines. Submachines can be integrated into the parent
+    machine's state graph or kept separate.
     """
 
     def __init__(
@@ -342,8 +394,18 @@ class CompositeStateMachine(StateMachine):
 
     def add_submachine(self, state: CompositeState, submachine: "StateMachine") -> None:
         """
-        Add a submachine's states under a parent composite state.
-        Submachine's states are all integrated into this machine's graph.
+        Add a submachine under a composite state.
+
+        This integrates all states and transitions from the submachine into
+        the parent machine's graph, with the given composite state as their
+        parent.
+
+        Args:
+            state: The composite state that will contain the submachine
+            submachine: The state machine to integrate
+
+        Raises:
+            ValueError: If the provided state is not a CompositeState
         """
         if not isinstance(state, CompositeState):
             raise ValueError(f"State {state.name} must be a composite state")
