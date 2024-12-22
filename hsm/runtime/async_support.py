@@ -392,12 +392,12 @@ class AsyncCompositeStateMachine(AsyncStateMachine):
         Add a submachine's states under a parent composite state.
         Submachine's states are all integrated into this machine's graph.
         """
-        if not isinstance(state, CompositeState):
-            raise ValueError(f"State {state.name} must be a composite state")
-
-        # First add the composite state if it's not already in the graph
+        # First verify the state exists in the graph
         if state not in self._graph._nodes:
-            self._graph.add_state(state)
+            raise ValueError(f"State '{state.name}' not found in state machine")
+
+        if not isinstance(state, CompositeState):
+            raise ValueError(f"State '{state.name}' must be a composite state")
 
         # Integrate submachine states into the same graph:
         for sub_state in submachine.get_states():
@@ -418,6 +418,58 @@ class AsyncCompositeStateMachine(AsyncStateMachine):
 
         self._submachines[state] = submachine
 
+    async def _get_all_valid_transitions(self, state: State, event: Event) -> List[Transition]:
+        """Get all valid transitions from a state and its ancestors."""
+        transitions = self._graph.get_valid_transitions(state, event)
+
+        # Check transitions from ancestors
+        current = state.parent
+        while current:
+            parent_transitions = self._graph.get_valid_transitions(current, event)
+            transitions.extend(parent_transitions)
+            current = current.parent
+
+        return transitions
+
+    async def _evaluate_guard(self, guard, event: Event) -> bool:
+        """Evaluate a single guard function."""
+        try:
+            if asyncio.iscoroutinefunction(guard):
+                return await guard(event)
+            return guard(event)
+        except Exception as e:
+            await self._notify_error_async(e)
+            return False
+
+    async def _evaluate_transition_guards(self, transition: Transition, event: Event) -> bool:
+        """Evaluate all guards for a transition."""
+        try:
+            for guard in transition.guards:
+                if not await self._evaluate_guard(guard, event):
+                    return False
+            return True
+        except Exception as e:
+            await self._notify_error_async(e)
+            return False
+
+    async def _find_valid_transition(self, transitions: List[Transition], event: Event) -> Optional[Transition]:
+        """Find the first valid transition from a prioritized list."""
+        # Sort transitions by priority
+        transitions.sort(key=lambda t: t.get_priority(), reverse=True)
+
+        for transition in transitions:
+            if await self._evaluate_transition_guards(transition, event):
+                return transition
+        return None
+
+    async def _handle_composite_target(self, transition: Transition, event: Event) -> None:
+        """Handle transition to composite state by entering its initial state."""
+        if isinstance(transition.target, CompositeState):
+            initial_state = self._graph.get_initial_state(transition.target)
+            if initial_state:
+                initial_transition = Transition(source=transition.target, target=initial_state, guards=[lambda e: True])
+                await self._execute_transition_async(initial_transition, event)
+
     async def process_event(self, event: Event) -> bool:
         """
         Process events with proper handling of submachine hierarchy and async locking.
@@ -426,60 +478,26 @@ class AsyncCompositeStateMachine(AsyncStateMachine):
         if not self._started or not self.current_state:
             return False
 
-        async with self._async_lock:  # Ensure thread-safe state access
+        async with self._async_lock:
             try:
-                # First try transitions from the current state
-                current_transitions = self._graph.get_valid_transitions(self.current_state, event)
-
-                # Then check transitions from ancestors
-                current = self.current_state.parent
-                while current:
-                    transitions = self._graph.get_valid_transitions(current, event)
-                    current_transitions.extend(transitions)
-                    current = current.parent
-
-                if not current_transitions:
+                # Get all possible transitions
+                transitions = await self._get_all_valid_transitions(self.current_state, event)
+                if not transitions:
                     return False
 
-                # Sort transitions by priority
-                current_transitions.sort(key=lambda t: t.get_priority(), reverse=True)
-
-                # Evaluate guards to find valid transitions
-                valid_transitions = []
-                for transition in current_transitions:
-                    # Check if all guards pass
-                    all_guards_pass = True
-                    for guard in transition.guards:
-                        if asyncio.iscoroutinefunction(guard):
-                            if not await guard(event):
-                                all_guards_pass = False
-                                break
-                        elif not guard(event):
-                            all_guards_pass = False
-                            break
-                    if all_guards_pass:
-                        valid_transitions.append(transition)
-                        break  # Take the first valid transition, respecting priority order
-
-                if not valid_transitions:
+                # Find first valid transition
+                valid_transition = await self._find_valid_transition(transitions, event)
+                if not valid_transition:
                     return False
 
-                # Execute the highest priority valid transition
-                transition = valid_transitions[0]
-                result = await self._execute_transition_async(transition, event)
+                # Execute the transition
+                result = await self._execute_transition_async(valid_transition, event)
 
-                # If target is a composite state, enter its initial state
-                if isinstance(transition.target, CompositeState):
-                    initial_state = self._graph.get_initial_state(transition.target)
-                    if initial_state:
-                        # Create and execute a transition to the initial state
-                        initial_transition = Transition(
-                            source=transition.target, target=initial_state, guards=[lambda e: True]
-                        )
-                        await self._execute_transition_async(initial_transition, event)
+                # Handle composite state target
+                await self._handle_composite_target(valid_transition, event)
 
                 return result if result is not None else True
 
             except Exception as error:
                 await self._notify_error_async(error)
-                raise
+                return False

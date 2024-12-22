@@ -303,3 +303,445 @@ def test_composite_state_children():
     assert child2 in children
     assert graph.get_parent(child1) == cs
     assert graph.get_parent(child2) == cs
+
+
+def test_start_already_started():
+    """Test starting an already started machine."""
+    state = State("test")
+    machine = StateMachine(state)
+    machine._set_current_state(state)
+    machine.start()
+    assert machine._started
+    # Second start should be a no-op
+    machine.start()
+    assert machine._started
+
+
+def test_stop_not_started():
+    """Test stopping a machine that wasn't started."""
+    state = State("test")
+    machine = StateMachine(state)
+    machine.stop()  # Should not raise
+    assert not machine._started
+
+
+def test_transition_with_no_current_state():
+    """Test transition attempt with no current state."""
+    state1 = State("state1")
+    state2 = State("state2")
+    machine = StateMachine(state1)
+    machine.add_state(state2)
+    machine.add_transition(Transition(state1, state2))
+
+    # Don't set current state or start machine
+    event = Event("test")
+    assert not machine.process_event(event)
+
+
+def test_composite_state_initial_transition():
+    """Test initial transition into composite state."""
+    root = CompositeState("root")
+    composite = CompositeState("composite")
+    leaf = State("leaf")
+
+    machine = StateMachine(root)
+    machine.add_state(composite, parent=root)
+    machine.add_state(leaf, parent=composite)
+
+    machine._graph.set_initial_state(root, composite)
+    machine._graph.set_initial_state(composite, leaf)
+
+    machine.start()
+    assert machine.current_state == leaf
+
+
+def test_error_in_state_hooks():
+    """Test error handling in state enter/exit hooks."""
+    state1 = State("state1")
+    state2 = State("state2")
+
+    def failing_enter():
+        raise ValueError("Enter failed")
+
+    state2.on_enter = failing_enter
+
+    machine = StateMachine(state1)
+    machine._set_current_state(state1)
+    machine.add_state(state2)
+    machine.add_transition(Transition(state1, state2))
+
+    machine.start()
+    with pytest.raises(ValueError, match="Enter failed"):
+        machine.process_event(Event("test"))
+
+    # Machine should remain in original state
+    assert machine.current_state == state1
+
+
+def test_async_hook_skipping():
+    """Test that async hooks are skipped in sync context."""
+    state = State("test")
+
+    async def async_enter(state):
+        pass  # This should be skipped
+
+    hook = Mock()
+    hook.on_enter = async_enter
+
+    machine = StateMachine(state, hooks=[hook])
+    machine._set_current_state(state)
+    machine.start()  # Should not raise
+
+
+def test_reset_not_started():
+    """Test reset on a machine that wasn't started."""
+    state = State("test")
+    machine = StateMachine(state)
+    machine.reset()  # Should not raise
+    assert not machine._started
+
+
+def test_composite_state_machine_validation():
+    """Test validation in composite state machine."""
+    root = CompositeState("root")
+    composite = CompositeState("composite")  # No initial state
+
+    machine = CompositeStateMachine(root)
+    machine.add_state(composite, parent=root)
+    machine._graph.set_initial_state(root, composite)
+
+    with pytest.raises(ValidationError, match="has no initial state"):
+        machine.start()
+
+
+def test_composite_state_machine_stop_no_current():
+    """Test stopping composite machine with no current state."""
+    root = CompositeState("root")
+    machine = CompositeStateMachine(root)
+    machine._started = True
+    machine.stop()  # Should not raise
+    assert not machine._started
+
+
+def test_start_with_history_state():
+    """Test starting machine with history state."""
+    root = CompositeState("root")
+    composite = CompositeState("composite")
+    state1 = State("state1")
+    state2 = State("state2")
+
+    machine = StateMachine(root)
+    machine.add_state(composite, parent=root)
+    machine.add_state(state1, parent=composite)
+    machine.add_state(state2, parent=composite)
+
+    machine._graph.set_initial_state(root, composite)
+    machine._graph.set_initial_state(composite, state1)
+
+    # Record history state
+    machine._graph.record_history(composite, state2)
+
+    machine.start()
+    # Should use history state instead of initial state
+    assert machine.current_state == state2
+
+
+def test_start_with_deep_history():
+    """Test starting machine with deep history states."""
+    root = CompositeState("root")
+    comp1 = CompositeState("comp1")
+    comp2 = CompositeState("comp2")
+    state1 = State("state1")
+    state2 = State("state2")
+
+    machine = StateMachine(root)
+    machine.add_state(comp1, parent=root)
+    machine.add_state(comp2, parent=comp1)
+    machine.add_state(state1, parent=comp2)
+    machine.add_state(state2, parent=comp2)
+
+    machine._graph.set_initial_state(root, comp1)
+    machine._graph.set_initial_state(comp1, comp2)
+    machine._graph.set_initial_state(comp2, state1)
+
+    # Start machine first to establish state
+    machine.start()
+    assert machine.current_state == state1
+
+    # Now transition to state2 and stop to record history
+    machine._set_current_state(state2)
+    machine.stop()
+
+    # Restart and check history state
+    machine.start()
+    assert machine.current_state == state2
+
+
+def test_start_validation_error():
+    """Test start with validation error."""
+    root = CompositeState("root")
+    state = State("state")
+
+    machine = StateMachine(root)
+    machine.add_state(state, parent=root)
+    # Don't set initial state for composite state
+
+    # First start to set up the machine
+    machine.start()
+    machine.stop()
+
+    # Now clear the initial state to trigger validation error
+    machine._graph._initial_states[root] = None
+
+    with pytest.raises(ValidationError, match="Composite state 'root' has no initial state"):
+        machine.start()
+
+
+def test_start_with_no_history_or_initial():
+    """Test starting machine when no history or initial state is found."""
+    root = State("root")  # Changed to non-composite state
+    machine = StateMachine(root)
+    # Clear any initial states
+    machine._graph._initial_states.clear()
+
+    with pytest.raises(ValidationError, match="StateMachine must have an initial state"):
+        machine.start()
+
+
+def test_start_with_resolve_active_state():
+    """Test starting machine using resolve_active_state."""
+    root = CompositeState("root")
+    comp = CompositeState("comp")
+    state = State("state")
+
+    machine = StateMachine(root)
+    machine.add_state(comp, parent=root)
+    machine.add_state(state, parent=comp)
+
+    machine._graph.set_initial_state(root, comp)
+    machine._graph.set_initial_state(comp, state)
+
+    # Mock resolve_active_state to return specific state
+    original_resolve = machine._graph.resolve_active_state
+    machine._graph.resolve_active_state = Mock(return_value=state)
+
+    machine.start()
+    assert machine.current_state == state
+
+    # Restore original method
+    machine._graph.resolve_active_state = original_resolve
+
+
+def test_start_history_resolution():
+    """Test history state resolution during start."""
+    root = CompositeState("root")
+    comp1 = CompositeState("comp1")
+    comp2 = CompositeState("comp2")
+    leaf1 = State("leaf1")
+    leaf2 = State("leaf2")
+
+    machine = StateMachine(root)
+    machine.add_state(comp1, parent=root)
+    machine.add_state(comp2, parent=comp1)
+    machine.add_state(leaf1, parent=comp2)
+    machine.add_state(leaf2, parent=comp2)
+
+    # Set up initial states
+    machine._graph.set_initial_state(root, comp1)
+    machine._graph.set_initial_state(comp1, comp2)
+    machine._graph.set_initial_state(comp2, leaf1)
+
+    # Start machine and transition to leaf2
+    machine.start()
+    machine._set_current_state(leaf2)
+
+    # Record history at different levels
+    machine._graph.record_history(comp2, leaf2)
+    machine._graph.record_history(comp1, comp2)
+
+    # Stop and restart to test history resolution
+    machine.stop()
+    machine.start()
+
+    assert machine.current_state == leaf2
+
+
+def test_composite_transition_with_initial_states():
+    """Test transitions into composite states with initial states."""
+    root = CompositeState("root")
+    comp1 = CompositeState("comp1")
+    comp2 = CompositeState("comp2")
+    leaf1 = State("leaf1")
+    leaf2 = State("leaf2")
+
+    machine = StateMachine(root)
+    machine.add_state(comp1, parent=root)
+    machine.add_state(comp2, parent=root)
+    machine.add_state(leaf1, parent=comp1)
+    machine.add_state(leaf2, parent=comp2)
+
+    machine._graph.set_initial_state(root, comp1)
+    machine._graph.set_initial_state(comp1, leaf1)
+    machine._graph.set_initial_state(comp2, leaf2)
+
+    # Add transition between leaf states instead of composite states
+    transition = Transition(source=leaf1, target=comp2)
+    machine.add_transition(transition)
+
+    machine.start()
+    assert machine.current_state == leaf1
+
+    # Transition should go to comp2's initial state
+    machine.process_event(Event("test"))
+    assert machine.current_state == leaf2
+
+
+def test_parent_state_guard_evaluation():
+    """Test guard evaluation in parent state transitions."""
+    root = CompositeState("root")
+    comp = CompositeState("comp")
+    leaf1 = State("leaf1")
+    leaf2 = State("leaf2")
+
+    machine = StateMachine(root)
+    machine.add_state(comp, parent=root)
+    machine.add_state(leaf1, parent=comp)
+    machine.add_state(leaf2, parent=root)  # Move leaf2 to root level
+
+    # Add transition from leaf1 to leaf2 with guard
+    def guard(event):
+        return event.name == "test"
+
+    transition = Transition(source=leaf1, target=leaf2, guards=[guard])
+    machine.add_transition(transition)
+
+    machine._graph.set_initial_state(root, comp)
+    machine._graph.set_initial_state(comp, leaf1)
+
+    machine.start()
+    assert machine.current_state == leaf1
+
+    # Test guard evaluation
+    assert not machine.process_event(Event("wrong"))
+    assert machine.process_event(Event("test"))
+    assert machine.current_state == leaf2
+
+
+def test_stop_with_history_recording():
+    """Test history recording during stop."""
+    root = CompositeState("root")
+    comp1 = CompositeState("comp1")
+    comp2 = CompositeState("comp2")
+    leaf = State("leaf")
+
+    machine = StateMachine(root)
+    machine.add_state(comp1, parent=root)
+    machine.add_state(comp2, parent=comp1)
+    machine.add_state(leaf, parent=comp2)
+
+    machine._graph.set_initial_state(root, comp1)
+    machine._graph.set_initial_state(comp1, comp2)
+    machine._graph.set_initial_state(comp2, leaf)
+
+    machine.start()
+    assert machine.current_state == leaf
+
+    # Stop should record history for all composite ancestors
+    machine.stop()
+
+    # Verify history was recorded - history is recorded as the leaf state for all ancestors
+    assert machine._graph.get_history_state(comp2) == leaf
+    assert machine._graph.get_history_state(comp1) == leaf
+    assert machine._graph.get_history_state(root) == leaf
+
+
+def test_state_machine_validation_errors():
+    """Test validation error handling in state machine."""
+    # Create composite with no children or initial state
+    composite = CompositeState("composite")
+    composite._children = set()
+
+    machine = StateMachine(composite)
+
+    errors = machine.validate()
+    assert len(errors) > 0
+    assert any("no children" in error.lower() for error in errors)
+
+
+def test_state_machine_hook_order():
+    """Test hook execution order during transitions."""
+    initial = State("initial")
+    target = State("target")
+
+    # Track execution order
+    order = []
+
+    class OrderTrackingHook:
+        def on_exit(self, state):
+            order.append(f"exit_{state.name}")
+
+        def on_enter(self, state):
+            order.append(f"enter_{state.name}")
+
+        def on_transition(self, source, target):
+            order.append(f"transition_{source.name}_to_{target.name}")
+
+    machine = StateMachine(initial, hooks=[OrderTrackingHook()])
+    machine.add_state(target)
+    machine.add_transition(Transition(initial, target))
+
+    machine.start()
+    machine.process_event(Event("test"))
+
+    # Verify correct order
+    expected = [
+        "enter_initial",  # From start()
+        "exit_initial",  # From transition
+        "transition_initial_to_target",
+        "enter_target",
+    ]
+    assert order == expected
+
+
+def test_state_machine_data_management():
+    """Test state data management."""
+    state = State("test")
+    machine = StateMachine(state)
+    machine._set_current_state(state)  # Need to set current state
+
+    # Set data through graph
+    machine._graph.set_state_data(state, "key", "value")
+    assert machine._graph.get_state_data(state)["key"] == "value"
+
+    # Test non-existent state
+    non_existent = State("non_existent")
+    with pytest.raises(KeyError):
+        machine._graph.set_state_data(non_existent, "key", "value")
+
+    with pytest.raises(AttributeError, match="State data cannot be accessed directly"):
+        machine._graph.get_state_data(non_existent)
+
+
+def test_state_machine_transition_error_handling():
+    """Test error handling during transitions."""
+    initial = State("initial")
+    target = State("target")
+
+    def failing_action(event):
+        raise ValueError("Action failed")
+
+    machine = StateMachine(initial)
+    machine._set_current_state(initial)  # Need to set current state
+    machine.add_state(target)
+    machine.add_transition(
+        Transition(
+            source=initial, target=target, actions=[failing_action]  # Use action instead of guard for error testing
+        )
+    )
+
+    machine.start()
+    with pytest.raises(ValueError, match="Action failed"):
+        machine.process_event(Event("test"))
+
+    # Machine should remain in initial state
+    assert machine.current_state == initial

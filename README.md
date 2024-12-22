@@ -95,7 +95,6 @@ Documentation is available in the `docs/` directory:
 - API Reference
 - Usage Guide
 - Examples
-- Plugin Development
 
 ## License
 
