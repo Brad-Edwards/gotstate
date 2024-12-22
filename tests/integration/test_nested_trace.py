@@ -6,6 +6,7 @@ from hsm.core.events import Event
 from hsm.core.state_machine import CompositeStateMachine
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition
+from hsm.core.validations import Validator
 
 
 class NestedTraceHook:
@@ -25,26 +26,26 @@ def test_nested_trace():
     We'll trace the sequence from start up to final transition.
     """
     hook = NestedTraceHook()
+    validator = Validator()
 
-    # Create the state hierarchy
     top = CompositeState("Top")
     sub = CompositeState("Sub")
     sub1 = State("Sub1")
     sub2 = State("Sub2")
 
-    # Create machine with hook
-    machine = CompositeStateMachine(top, hooks=[hook])
+    machine = CompositeStateMachine(top, hooks=[hook], validator=validator)
 
     # Build hierarchy - order matters for proper parent-child relationships
     machine.add_state(sub, parent=top)
     machine.add_state(sub1, parent=sub)
     machine.add_state(sub2, parent=sub)
 
+    validator.validate_state_machine(machine)
+
     # Set initial states through graph
     machine._graph.set_initial_state(top, sub)
     machine._graph.set_initial_state(sub, sub1)
 
-    # Add transition with guard
     machine.add_transition(Transition(sub1, sub2, guards=[lambda e: e.name == "toSub2"]))
 
     # Start machine - this should trigger entry of all states in hierarchy
@@ -54,12 +55,8 @@ def test_nested_trace():
     expected_start = ["ENTER:Top", "ENTER:Sub", "ENTER:Sub1"]
     assert hook.trace == expected_start, f"Trace mismatch at start: {hook.trace}"
 
-    # Trigger transition
     machine.process_event(Event("toSub2"))
-
-    # Verify transition sequence
     assert hook.trace[-2:] == ["EXIT:Sub1", "ENTER:Sub2"]
 
-    # Stop machine and verify exit sequence
     machine.stop()
     assert hook.trace[-3:] == ["EXIT:Sub2", "EXIT:Sub", "EXIT:Top"]

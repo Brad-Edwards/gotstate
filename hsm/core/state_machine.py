@@ -3,14 +3,17 @@
 # Licensed under the MIT License - see LICENSE file for details
 
 import asyncio
+import logging
 from threading import Lock
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Type
 
 from hsm.core.events import Event
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition
 from hsm.core.validations import ValidationError, Validator
 from hsm.runtime.graph import StateGraph
+
+logger = logging.getLogger(__name__)
 
 
 class _ErrorRecoveryStrategy:
@@ -77,10 +80,28 @@ class StateMachine:
 
             self._validator.validate_state_machine(self)
 
-            # Resolve initial or historical active state
-            initial_state = self._graph.get_initial_state(None)  # Get root initial state
-            if initial_state:
-                resolved_state = self._graph.resolve_active_state(initial_state)
+            # Get root state and try to find deepest history state
+            root_state = self._graph.get_initial_state(None)  # Get root initial state
+            if root_state:
+                # Try to find history state first
+                current = root_state
+                resolved_state = None
+                while current:
+                    hist = self._graph.get_history_state(current)
+                    if hist:
+                        resolved_state = hist
+                        break
+                    # If no history, use initial state
+                    initial = self._graph.get_initial_state(current)
+                    if initial:
+                        current = initial
+                    else:
+                        resolved_state = current
+                        break
+
+                if not resolved_state:
+                    resolved_state = self._graph.resolve_active_state(root_state)
+
                 self._set_current_state(resolved_state)
 
                 # Build path from root to resolved state
@@ -136,14 +157,12 @@ class StateMachine:
 
                     # Check if any guard explicitly matches the event
                     has_matching_guard = False
-                    for guard in transition.guards:
-                        try:
-                            if guard(event):
-                                has_matching_guard = True
-                                break
-                        except:
-                            # If guard evaluation fails, skip this guard
-                            continue
+                    try:
+                        if _evaluate_guards(transition.guards, event):
+                            has_matching_guard = True
+                    except GuardEvaluationError as e:
+                        logger.warning(f"Guard evaluation failed for transition {transition}: {e}")
+                        continue
 
                     if has_matching_guard:
                         valid_transitions.append(transition)
@@ -160,14 +179,12 @@ class StateMachine:
 
                             # Check guards for parent state transitions too
                             has_matching_guard = False
-                            for guard in transition.guards:
-                                try:
-                                    if guard(event):
-                                        has_matching_guard = True
-                                        break
-                                except:
-                                    # If guard evaluation fails, skip this guard
-                                    continue
+                            try:
+                                if _evaluate_guards(transition.guards, event):
+                                    has_matching_guard = True
+                            except GuardEvaluationError as e:
+                                logger.warning(f"Guard evaluation failed for transition {transition}: {e}")
+                                continue
 
                             if has_matching_guard:
                                 valid_transitions.append(transition)
@@ -375,13 +392,14 @@ class CompositeStateMachine(StateMachine):
 
     def __init__(
         self,
-        initial_state: State,
+        initial_state: CompositeState,
         validator: Optional[Validator] = None,
         hooks: Optional[List] = None,
         error_recovery: Optional[_ErrorRecoveryStrategy] = None,
     ):
         self._machine_lock = Lock()  # Single lock for all machine operations
         self._submachines = {}
+        self._composite_state = initial_state
         super().__init__(initial_state, validator, hooks, error_recovery)
 
     def add_submachine(self, state: CompositeState, submachine: "StateMachine") -> None:
@@ -420,27 +438,88 @@ class CompositeStateMachine(StateMachine):
                 self._graph.set_initial_state(state, mapped_initial)
 
     def start(self):
-        """Start the state machine and all submachines."""
-        # Try to acquire the lock with a timeout to prevent deadlock
-        if not self._machine_lock.acquire(timeout=2.0):
-            raise RuntimeError("Failed to acquire lock for machine start - possible deadlock")
+        """Start the state machine, entering states in hierarchical order."""
+        if self._started:
+            return
 
+        # Validate that all composite states have initial states
+        def validate_composite_initial(state):
+            if isinstance(state, CompositeState):
+                initial = self._graph.get_initial_state(state)
+                if initial is None:
+                    raise ValidationError(f"Composite state '{state.name}' has no initial state")
+                validate_composite_initial(initial)
+
+        # Start validation from root
+        validate_composite_initial(self._composite_state)
+
+        # Find the complete path from root to leaf by following history or initial states
+        path = []
+        current = self._composite_state
+
+        while current is not None:
+            path.append(current)
+            # First try to get history state
+            hist = self._graph.get_history_state(current)
+            if hist is not None:
+                current = hist
+                continue
+            # If no history, use initial state
+            next_state = self._graph.get_initial_state(current)
+            if next_state is None:
+                break
+            current = next_state
+
+        # Set the leaf state as current
+        if path:
+            self._graph.set_current_state(path[-1])
+
+        # Enter all states in root-to-leaf order
+        for state in path:
+            for hook in self._hooks:
+                if hasattr(hook, "on_enter"):
+                    hook.on_enter(state)
+
+        self._started = True
+
+    def stop(self):
+        """Stop the state machine, exiting states in reverse hierarchical order."""
+        if not self._started:
+            return
+
+        # Build path from current state back to root
+        path = []
+        current = self._graph.get_current_state()
+
+        while current is not None:
+            path.append(current)
+            current = self._graph._parent_map.get(current)
+
+        # Exit states in leaf-to-root order
+        for state in path:
+            for hook in self._hooks:
+                if hasattr(hook, "on_exit"):
+                    hook.on_exit(state)
+
+        self._started = False
+
+
+class GuardEvaluationError(Exception):
+    """Raised when a guard condition evaluation fails."""
+
+    pass
+
+
+def _evaluate_guards(guards: List[callable], event: Event) -> bool:
+    """Evaluate guard conditions with proper error handling."""
+    for guard in guards:
         try:
-            # If already started, just return
-            if self._started:
-                return
-
-            # First start the main machine
-            super().start()
-
-            # Then initialize all submachines in the proper order
-            for composite_state, submachine in self._submachines.items():
-                if not submachine._started:
-                    # Copy the initial state from submachine if needed
-                    submachine_initial = submachine._graph.get_initial_state(None)  # Get root initial state
-                    if submachine_initial and not self._graph.get_initial_state(composite_state):
-                        mapped_initial = self._graph._nodes[submachine_initial].state
-                        self._graph.set_initial_state(composite_state, mapped_initial)
-                    submachine._started = True
-        finally:
-            self._machine_lock.release()
+            if not guard(event):
+                return False
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.warning(f"Guard evaluation failed: {str(e)}")
+            raise GuardEvaluationError(f"Guard {guard.__name__} failed: {str(e)}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error in guard evaluation: {str(e)}")
+            raise GuardEvaluationError(f"Unexpected error in guard {guard.__name__}: {str(e)}") from e
+    return True
