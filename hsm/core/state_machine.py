@@ -205,7 +205,9 @@ class StateMachine:
                 if initial_state:
                     # Create and execute a transition to the initial state
                     initial_transition = Transition(
-                        source=transition.target, target=initial_state, guards=[lambda e: True]
+                        source=transition.target,
+                        target=initial_state,
+                        guards=[lambda e: True]
                     )
                     self._execute_transition(initial_transition, event)
 
@@ -354,16 +356,26 @@ class CompositeStateMachine(StateMachine):
             return False
 
         try:
-            # First try to process in the current submachine if we're in a composite state
-            if isinstance(self.current_state, CompositeState):
-                submachine = self._submachines.get(self.current_state)
-                if submachine and submachine.process_event(event):
-                    return True
+            # Get potential transitions from both current state and its parent states
+            potential_transitions = []
+            current = self._current_state
+            while current:
+                # First check transitions from the current state
+                transitions = self._graph.get_valid_transitions(current, event)
+                potential_transitions.extend(transitions)
 
-            # Get potential transitions from the graph
-            potential_transitions = self._graph.get_valid_transitions(self._current_state, event)
+                # If we're in a submachine state, also check transitions from its parent composite state
+                if current.parent in self._submachines:
+                    composite_transitions = self._graph.get_valid_transitions(current.parent, event)
+                    potential_transitions.extend(composite_transitions)
+
+                current = current.parent
+
             if not potential_transitions:
                 return False
+
+            # Sort transitions by priority
+            potential_transitions.sort(key=lambda t: t.get_priority(), reverse=True)
 
             # Evaluate guards to find valid transitions
             valid_transitions = []
@@ -383,10 +395,6 @@ class CompositeStateMachine(StateMachine):
             # Pick the highest-priority transition
             transition = valid_transitions[0]
 
-            # Record history for composite states before leaving them
-            if isinstance(self._current_state.parent, CompositeState):
-                self._graph.record_history(self._current_state.parent, self._current_state)
-
             # Execute the transition
             self._execute_transition(transition, event)
 
@@ -398,7 +406,9 @@ class CompositeStateMachine(StateMachine):
                     if initial_state:
                         # Create and execute a transition to the initial state
                         initial_transition = Transition(
-                            source=transition.target, target=initial_state, guards=[lambda e: True]
+                            source=transition.target,
+                            target=initial_state,
+                            guards=[lambda e: True]
                         )
                         self._execute_transition(initial_transition, event)
                 else:
@@ -406,7 +416,9 @@ class CompositeStateMachine(StateMachine):
                     if initial_state:
                         # Create and execute a transition to the initial state
                         initial_transition = Transition(
-                            source=transition.target, target=initial_state, guards=[lambda e: True]
+                            source=transition.target,
+                            target=initial_state,
+                            guards=[lambda e: True]
                         )
                         self._execute_transition(initial_transition, event)
 
