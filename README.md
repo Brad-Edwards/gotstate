@@ -1,11 +1,11 @@
-# gotstate-rs
+# gotstate
 
 [![Security](https://github.com/KeplerOps/gotstate/actions/workflows/security.yml/badge.svg)](https://github.com/KeplerOps/gotstate/actions/workflows/security.yml)
 [![Quality](https://github.com/KeplerOps/gotstate/actions/workflows/sonar.yml/badge.svg)](https://github.com/KeplerOps/gotstate/actions/workflows/sonar.yml)
 [![Tests](https://github.com/KeplerOps/gotstate/actions/workflows/test.yml/badge.svg)](https://github.com/KeplerOps/gotstate/actions/workflows/test.yml)
 [![Lint](https://github.com/KeplerOps/gotstate/actions/workflows/lint.yml/badge.svg)](https://github.com/KeplerOps/gotstate/actions/workflows/lint.yml)
 
-A production-ready hierarchical finite state machine (HFSM) library for Rust, focusing on reliability, safety, and ease of use.
+A hierarchical finite state machine (HFSM) library for Python, focusing on reliability and ease of use.
 
 ## Features
 
@@ -13,62 +13,98 @@ A production-ready hierarchical finite state machine (HFSM) library for Rust, fo
 - Type-safe state and event handling
 - Thread-safe event processing
 - Guard conditions and transition actions
-- State data management with proper lifecycle
+- State data management with lifecycle hooks
 - Timeout events
 - History states (both shallow and deep)
-- Comprehensive error handling
-- Activation hooks for monitoring and extending behavior
+- Error handling
+- Activation hooks for monitoring
+- Plugin system
 
 ## Status
 
-🚧 **Under Development** 🚧
+**Version 1.0**
 
-This crate is currently in active development. While the API is being stabilized, breaking changes may occur.
+Features:
+- Full test coverage
+- Type hints
+- Input validation
+- Error handling
+- API documentation
 
 ## Design Philosophy
 
-`gotstate-rs` is designed with the following principles:
+`gotstate` is designed with the following principles:
 
-- **Safety First**: Leverage Rust's type system to prevent runtime errors
-- **Clear Interfaces**: Intuitive API that guides users toward correct usage
-- **Production Ready**: Built for real-world applications with proper error handling
-- **Performance**: Minimal overhead while maintaining safety guarantees
-- **Flexibility**: Support for various use cases without compromising core functionality
+- **Safety**: Runtime validation and type checking
+- **Clarity**: Intuitive API design
+- **Reliability**: Built for real-world applications
+- **Performance**: Minimal overhead
+- **Flexibility**: Extensible through plugins
 
 ## Example
 
-```rust
-// Example code will be added once implementation begins
+```python
+from hsm.core import StateMachine, State, Event, Transition
+
+# Define states
+class Idle(State):
+    pass
+
+class Running(State):
+    pass
+
+# Define events
+class Start(Event):
+    pass
+
+class Stop(Event):
+    pass
+
+# Create state machine
+sm = StateMachine("example")
+idle = sm.add_state(Idle("idle"))
+running = sm.add_state(Running("running"))
+
+# Add transitions
+sm.add_transition(Transition(idle, running, Start))
+sm.add_transition(Transition(running, idle, Stop))
+
+# Initialize and use
+sm.initialize()
+assert sm.current_state == idle
+sm.handle_event(Start())
+assert sm.current_state == running
 ```
 
 ## Installation
 
-Add this to your `Cargo.toml`:
+Install using pip:
 
-```toml
-[dependencies]
-gotstate-rs = "0.1.0"  # Note: Not yet published
+```bash
+pip install gotstate
 ```
+
+## Requirements
+
+- Python 3.8 or higher
+- See `requirements.txt` for full dependencies
 
 ## Documentation
 
-Full documentation will be available on [docs.rs](https://docs.rs/gotstate-rs) once published.
+Documentation is available in the `docs/` directory:
+- API Reference
+- Usage Guide
+- Examples
+- Plugin Development
 
 ## License
 
-Licensed under either of:
+Licensed under the MIT License. See the LICENSE file for details.
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or [MIT](http://opensource.org/licenses/MIT))
+## Contributing
 
-at your option.
+Contributions are welcome! Please read our contributing guidelines in CONTRIBUTING.md.
 
-## Contribution
+## Security
 
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
-dual licensed as above, without any additional terms or conditions.
-
-## Safety
-
-This crate uses `#![forbid(unsafe_code)]` to ensure memory safety.
+This package follows Python security best practices.
