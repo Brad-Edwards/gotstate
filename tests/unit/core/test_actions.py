@@ -2,6 +2,7 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 
+
 def test_basic_actions_execute():
     from hsm.core.actions import BasicActions
 

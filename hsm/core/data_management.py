@@ -3,6 +3,7 @@
 # Licensed under the MIT License - see LICENSE file for details
 
 import threading
+
 from hsm.core.states import State
 
 

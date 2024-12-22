@@ -6,6 +6,7 @@ from typing import Callable
 
 from hsm.core.events import Event
 
+
 class BasicGuards:
     """
     Provides simple guard checks as static methods. More complex conditions can be

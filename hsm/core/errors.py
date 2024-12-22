@@ -2,6 +2,7 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 
+
 class HSMError(Exception):
     """
     Base exception class for errors within the hierarchical state machine library.

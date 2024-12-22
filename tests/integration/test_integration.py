@@ -360,10 +360,10 @@ def test_timeout_scheduler():
     """
     from unittest.mock import patch
 
-    with patch('time.time') as mock_time:
+    with patch("time.time") as mock_time:
         current_time = 1000.0  # Start at an arbitrary time
         mock_time.return_value = current_time
-        
+
         scheduler = TimeoutScheduler()
         event1 = TimeoutEvent("timeout1", deadline=current_time + 0.2)
         event2 = TimeoutEvent("timeout2", deadline=current_time + 1.0)
