@@ -2,6 +2,7 @@
 # Copyright (c) 2024 Brad Edwards
 # Licensed under the MIT License - see LICENSE file for details
 
+import time
 from typing import Any, Dict
 
 
@@ -21,6 +22,7 @@ class Event:
         self._name = name
         self._priority = priority
         self._metadata: Dict[str, Any] = {}
+        self._timestamp = time.time()
 
     @property
     def name(self) -> str:
@@ -36,6 +38,20 @@ class Event:
     def metadata(self) -> Dict[str, Any]:
         """Optional dictionary of additional event data."""
         return self._metadata
+
+    def __lt__(self, other: "Event") -> bool:
+        if not isinstance(other, Event):
+            return NotImplemented
+        # Higher priority numbers come first
+        if self.priority != other.priority:
+            return self.priority > other.priority
+        # For same priority, use timestamp (FIFO)
+        return self._timestamp < other._timestamp
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Event):
+            return NotImplemented
+        return self.name == other.name and self.priority == other.priority and self._timestamp == other._timestamp
 
 
 class TimeoutEvent(Event):

@@ -109,12 +109,12 @@ class _DefaultValidationRules:
         - Check that all states referenced in transitions are reachable.
         - Handle composite state hierarchies properly.
         """
-        if machine.current_state is None:
+        if machine._initial_state is None:
             raise ValidationError("StateMachine must have an initial state.")
 
         try:
-            transitions = machine._context.get_transitions()
-            all_states = machine._context.get_states()
+            transitions = machine.get_transitions()
+            all_states = machine.get_states()
 
             # If this is a mock in tests, skip further validation
             if getattr(machine, "_mock_return_value", None) is not None:
@@ -133,10 +133,12 @@ class _DefaultValidationRules:
 
             # Build reachability including composite state hierarchy
             reachable_states = set()
-            current = machine.current_state
+            current = machine._initial_state
 
             def add_state_and_children(state):
                 """Helper to add a state and all its children to reachable states"""
+                if state is None:
+                    return
                 reachable_states.add(state)
                 # For composite states, add all children and the state itself
                 if isinstance(state, CompositeState):
@@ -149,7 +151,7 @@ class _DefaultValidationRules:
                         reachable_states.add(state._initial_state)
                         add_state_and_children(state._initial_state)
 
-            # Add current state and its hierarchy
+            # Add initial state and its hierarchy
             add_state_and_children(current)
 
             # Add all parent states to reachable set
@@ -160,29 +162,26 @@ class _DefaultValidationRules:
                         add_state_and_children(child)
                 current = current.parent
 
-            # Keep expanding reachable states through transitions
-            while True:
-                new_reachable = set()
+            # Keep expanding reachable states through transitions until no new states are found
+            changed = True
+            while changed:
+                changed = False
                 for t in transitions:
-                    if t.source in reachable_states:
-                        new_reachable.add(t.target)
+                    if t.source in reachable_states and t.target not in reachable_states:
+                        changed = True
+                        reachable_states.add(t.target)
                         # Add target's ancestors and children
                         current = t.target
                         while current:
                             add_state_and_children(current)
                             current = current.parent
 
-                if not (new_reachable - reachable_states):
-                    break
-
-                reachable_states.update(new_reachable)
-
             # Check unreachable states
             unreachable = all_states - reachable_states
             if unreachable:
                 raise ValidationError(
                     f"States {[s.name for s in unreachable]} are not "
-                    f"reachable from initial state {machine.current_state.name}."
+                    f"reachable from initial state {machine._initial_state.name}."
                 )
 
         except Exception as e:
