@@ -198,8 +198,8 @@ class StateGraph:
         with self._graph_lock:
             return {node.state for node in self._nodes.values() if node.parent is None}
 
-    def validate(self) -> List[str]:
-        """Validate the graph structure."""
+    def _detect_cycles(self) -> List[str]:
+        """Detect cycles in the state hierarchy."""
         errors = []
         visited = set()
         path = []
@@ -227,7 +227,11 @@ class StateGraph:
         for root_node in [n for n in self._nodes.values() if n.parent is None]:
             detect_cycle(root_node.state)
 
-        # Validate composite states
+        return errors
+
+    def _validate_composite_states(self) -> List[str]:
+        """Validate composite states have children and initial states."""
+        errors = []
         for node in self._nodes.values():
             st = node.state
             if isinstance(st, CompositeState):
@@ -238,6 +242,17 @@ class StateGraph:
                 # If it has children but no initial state, pick one
                 if node.children and st not in self._initial_states:
                     errors.append(f"Composite state '{st.name}' has no initial state set")
+        return errors
+
+    def validate(self) -> List[str]:
+        """Validate the graph structure."""
+        errors = []
+
+        # Check for cycles in state hierarchy
+        errors.extend(self._detect_cycles())
+
+        # Validate composite states
+        errors.extend(self._validate_composite_states())
 
         return errors
 
@@ -293,77 +308,81 @@ class StateGraph:
         """Get the last active state for a composite state."""
         return self._history.get_last_state(composite)
 
+    def _create_new_state(self, state: State) -> State:
+        """Create a new state instance based on the original state."""
+        new_state = State(state.name) if isinstance(state, State) else CompositeState(state.name)
+
+        # Initialize state data and lock
+        if new_state not in self._state_data:
+            self._state_data[new_state] = {}
+            self._data_locks[new_state] = threading.Lock()
+
+        return new_state
+
+    def _add_state_to_graph(self, new_state: State, parent: State) -> None:
+        """Add a state to the graph with its parent relationship."""
+        new_node = _GraphNode(state=new_state)
+        self._nodes[new_state] = new_node
+        self._parent_map[new_state] = parent
+
+        if parent is not None:
+            parent_node = self._nodes[parent]
+            new_node.parent = parent_node
+            parent_node.children.add(new_node)
+
+    def _copy_state_data(self, source_state: State, target_state: State, source_graph: "StateGraph") -> None:
+        """Copy state data from source to target state."""
+        state_data = source_graph.get_state_data(source_state)
+        if state_data:
+            for key, value in state_data.items():
+                with self._data_locks[target_state]:
+                    self._state_data[target_state][key] = value
+
+    def _create_and_add_transition(self, transition: Transition, states_map: Dict[State, State]) -> None:
+        """Create and add a new transition using mapped states."""
+        new_transition = Transition(
+            source=states_map[transition.source],
+            target=states_map[transition.target],
+            guards=transition.guards,
+        )
+
+        source = states_map[transition.source]
+        if source not in self._transitions:
+            self._transitions[source] = set()
+        self._transitions[source].add(new_transition)
+        self._nodes[source].transitions.add(new_transition)
+
     def merge_submachine(self, parent: CompositeState, submachine_graph: "StateGraph") -> None:
         """
         Merge a submachine's graph into this graph under the given parent state.
         Preserves the initial state and transition relationships from the submachine.
         """
-        # Use a shorter timeout for the lock to prevent hanging
         if not self._graph_lock.acquire(timeout=2.0):
             raise RuntimeError("Failed to acquire graph lock for merge operation")
 
         try:
-            # First add all states from submachine to ensure they exist in our graph
-            states_map = {}  # Map from submachine states to our graph states
+            # Map from submachine states to our graph states
+            states_map = {parent: parent}
 
-            # Handle the parent state first since it's already in our graph
-            states_map[parent] = parent
-
-            # Then handle all other states
+            # Add all states except parent
             for state in submachine_graph.get_all_states():
                 if state == parent:
                     continue
 
-                # Create a new state instance to avoid sharing state between graphs
-                new_state = State(state.name) if isinstance(state, State) else CompositeState(state.name)
-
-                # Initialize state data and lock
-                if new_state not in self._state_data:
-                    self._state_data[new_state] = {}
-                    self._data_locks[new_state] = threading.Lock()
-
-                # Create and link the new node directly (without re-acquiring lock)
-                new_node = _GraphNode(state=new_state)
-                self._nodes[new_state] = new_node
-                self._parent_map[new_state] = parent
-
-                if parent is not None:
-                    parent_node = self._nodes[parent]
-                    new_node.parent = parent_node
-                    parent_node.children.add(new_node)
-
-                # Copy state data using graph methods
-                state_data = submachine_graph.get_state_data(state)
-                if state_data:
-                    for key, value in state_data.items():
-                        with self._data_locks[new_state]:
-                            self._state_data[new_state][key] = value
-
+                new_state = self._create_new_state(state)
+                self._add_state_to_graph(new_state, parent)
+                self._copy_state_data(state, new_state, submachine_graph)
                 states_map[state] = new_state
 
-            # Add all transitions from submachine, updating state references
+            # Add all transitions except those involving parent
             for source_state in submachine_graph._transitions:
                 for transition in submachine_graph._transitions[source_state]:
-                    # Skip transitions that involve the parent state
                     if transition.source == parent or transition.target == parent:
                         continue
+                    self._create_and_add_transition(transition, states_map)
 
-                    # Create a new transition with mapped states
-                    new_transition = Transition(
-                        source=states_map[transition.source],
-                        target=states_map[transition.target],
-                        guards=transition.guards,
-                    )
-
-                    # Add transition directly (without re-acquiring lock)
-                    source = states_map[transition.source]
-                    if source not in self._transitions:
-                        self._transitions[source] = set()
-                    self._transitions[source].add(new_transition)
-                    self._nodes[source].transitions.add(new_transition)
-
-            # Preserve initial state relationships from submachine
-            submachine_initial = submachine_graph.get_initial_state(None)  # Get root initial state
+            # Preserve initial state
+            submachine_initial = submachine_graph.get_initial_state(None)
             if submachine_initial and submachine_initial in states_map:
                 self.set_initial_state(parent, states_map[submachine_initial])
 

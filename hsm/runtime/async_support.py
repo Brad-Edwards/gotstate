@@ -10,7 +10,7 @@ from typing import List, Optional
 from hsm.core.errors import ValidationError
 from hsm.core.events import Event
 from hsm.core.hooks import HookProtocol
-from hsm.core.state_machine import StateMachine  # Removed _StateMachineContext import
+from hsm.core.state_machine import StateMachine
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition
 from hsm.core.validations import Validator
@@ -130,12 +130,10 @@ class AsyncStateMachine(StateMachine):
             else:
                 self._validator.validate_state_machine(self)
 
-            # Resolve initial or historical active state
-            initial_state = self._graph.get_initial_state(None)  # Get root initial state
+            initial_state = self._graph.get_initial_state(None)
             if initial_state:
                 resolved_state = self._graph.resolve_active_state(initial_state)
                 self._set_current_state(resolved_state)
-                # Now enter the state
                 await self._notify_enter_async(self.current_state)
 
             self._started = True
@@ -152,94 +150,118 @@ class AsyncStateMachine(StateMachine):
 
             self._started = False
 
+    async def _find_valid_transitions_from_state(self, state: State, event: Event) -> List[Transition]:
+        """Find valid transitions from a specific state for an event."""
+        valid_transitions = []
+        for transition in self._graph.get_valid_transitions(state, event):
+            if await transition.evaluate_guards(event):
+                valid_transitions.append(transition)
+        return valid_transitions
+
+    async def _find_valid_transitions_from_parents(self, state: State, event: Event) -> List[Transition]:
+        """Find valid transitions from all parent states for an event."""
+        valid_transitions = []
+        current = state.parent
+        while current and not valid_transitions:
+            transitions = await self._find_valid_transitions_from_state(current, event)
+            valid_transitions.extend(transitions)
+            current = current.parent
+        return valid_transitions
+
+    async def _get_highest_priority_transition(self, transitions: List[Transition]) -> Optional[Transition]:
+        """Get the highest priority transition from a list of transitions."""
+        if not transitions:
+            return None
+        return max(transitions, key=lambda t: t.get_priority())
+
     async def process_event(self, event: Event) -> bool:
         """Process an event asynchronously."""
         if not self._started:
             return False
 
         async with self._async_lock:
-            valid_transitions = []
-            if self.current_state:  # Only process transitions if we have a current state
-                # First try transitions from current state
-                for transition in self._graph.get_valid_transitions(self.current_state, event):
-                    if await transition.evaluate_guards(event):
-                        valid_transitions.append(transition)
-
-                # If no transitions found, try parent states
-                if not valid_transitions:
-                    current = self.current_state.parent
-                    while current and not valid_transitions:
-                        for transition in self._graph.get_valid_transitions(current, event):
-                            if await transition.evaluate_guards(event):
-                                valid_transitions.append(transition)
-                        current = current.parent
-
-            if not valid_transitions:
+            if not self.current_state:  # Only process transitions if we have a current state
                 return False
 
-            # Pick highest-priority transition
-            transition = max(valid_transitions, key=lambda t: t.get_priority())
+            # Find valid transitions from current state and parent states
+            valid_transitions = await self._find_valid_transitions_from_state(self.current_state, event)
+            if not valid_transitions:
+                valid_transitions = await self._find_valid_transitions_from_parents(self.current_state, event)
+
+            # Get highest priority transition and execute it
+            transition = await self._get_highest_priority_transition(valid_transitions)
+            if not transition:
+                return False
+
             result = await self._execute_transition_async(transition, event)
             # If result is False, transition failed but was handled
             return result if result is not None else True
+
+    async def _find_common_ancestor(self, current_state: State, target_state: State) -> Optional[State]:
+        """Find the common ancestor between source and target states."""
+        source_ancestors = []
+        current = current_state
+        while current:
+            source_ancestors.append(current)
+            current = current.parent
+
+        target_ancestors = []
+        current = target_state
+        while current:
+            target_ancestors.append(current)
+            current = current.parent
+
+        # Find common ancestor
+        for state in source_ancestors:
+            if state in target_ancestors:
+                return state
+        return None
+
+    async def _exit_to_ancestor(self, from_state: State, ancestor: Optional[State]) -> None:
+        """Exit states from current state up to (but not including) the common ancestor."""
+        current = from_state
+        while current and current != ancestor:
+            await self._notify_exit_async(current)
+            current = current.parent
+
+    async def _execute_transition_actions(self, transition: Transition, event: Event) -> None:
+        """Execute all actions associated with the transition."""
+        for action in transition.actions:
+            if asyncio.iscoroutinefunction(action):
+                await action(event)
+            else:
+                action(event)
+
+    async def _notify_transition(self, transition: Transition) -> None:
+        """Notify all hooks about the transition."""
+        for hook in self._hooks:
+            if hasattr(hook, "on_transition"):
+                if asyncio.iscoroutinefunction(hook.on_transition):
+                    await hook.on_transition(transition.source, transition.target)
+                else:
+                    hook.on_transition(transition.source, transition.target)
+
+    async def _enter_from_ancestor(self, target_state: State, ancestor: Optional[State]) -> None:
+        """Enter states from common ancestor down to target state."""
+        target_path = []
+        current = target_state
+        while current and current != ancestor:
+            target_path.append(current)
+            current = current.parent
+
+        for state in reversed(target_path):
+            await self._notify_enter_async(state)
 
     async def _execute_transition_async(self, transition: Transition, event: Event) -> None:
         """Execute a transition asynchronously."""
         previous_state = self.current_state
         try:
-            # Find the common ancestor between source and target states
-            source_ancestors = []
-            current = self.current_state
-            while current:
-                source_ancestors.append(current)
-                current = current.parent
-
-            target_ancestors = []
-            current = transition.target
-            while current:
-                target_ancestors.append(current)
-                current = current.parent
-
-            # Find common ancestor
-            common_ancestor = None
-            for state in source_ancestors:
-                if state in target_ancestors:
-                    common_ancestor = state
-                    break
-
-            # Exit up to common ancestor
-            current = self.current_state
-            while current and current != common_ancestor:
-                await self._notify_exit_async(current)
-                current = current.parent
-
-            # Execute transition actions
-            for action in transition.actions:
-                if asyncio.iscoroutinefunction(action):
-                    await action(event)
-                else:
-                    action(event)
-
-            # Update current state
+            common_ancestor = await self._find_common_ancestor(self.current_state, transition.target)
+            await self._exit_to_ancestor(self.current_state, common_ancestor)
+            await self._execute_transition_actions(transition, event)
             self._set_current_state(transition.target)
-
-            # Notify transition
-            for hook in self._hooks:
-                if hasattr(hook, "on_transition"):
-                    if asyncio.iscoroutinefunction(hook.on_transition):
-                        await hook.on_transition(transition.source, transition.target)
-                    else:
-                        hook.on_transition(transition.source, transition.target)
-
-            # Enter from common ancestor to target
-            target_path = []
-            current = transition.target
-            while current and current != common_ancestor:
-                target_path.append(current)
-                current = current.parent
-
-            for state in reversed(target_path):
-                await self._notify_enter_async(state)
+            await self._notify_transition(transition)
+            await self._enter_from_ancestor(transition.target, common_ancestor)
 
         except Exception as e:
             # Restore previous state if we failed during transition
@@ -300,7 +322,7 @@ class _AsyncEventProcessingLoop:
     async def start_loop(self) -> None:
         """Begin processing events asynchronously."""
         self._running = True
-        await self._machine.start()  # Ensure machine is started
+        await self._machine.start()
 
         while self._running:
             event = await self._queue.dequeue()
