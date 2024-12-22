@@ -356,24 +356,31 @@ async def test_async_event_queue_processing():
 def test_timeout_scheduler():
     """
     Verifies that the TimeoutScheduler spawns TimeoutEvents at the correct time.
+    Uses mocked time to ensure reliable testing.
     """
-    scheduler = TimeoutScheduler()
-    event1 = TimeoutEvent("timeout1", deadline=time.time() + 0.2)
-    event2 = TimeoutEvent("timeout2", deadline=time.time() + 1.0)
-    scheduler.schedule_timeout(event1)
-    scheduler.schedule_timeout(event2)
+    from unittest.mock import patch
 
-    # Sleep a bit, only event1 should have expired
-    time.sleep(0.3)
-    expired = scheduler.check_timeouts()
-    assert len(expired) == 1
-    assert expired[0].name == "timeout1"
+    with patch('time.time') as mock_time:
+        current_time = 1000.0  # Start at an arbitrary time
+        mock_time.return_value = current_time
+        
+        scheduler = TimeoutScheduler()
+        event1 = TimeoutEvent("timeout1", deadline=current_time + 0.2)
+        event2 = TimeoutEvent("timeout2", deadline=current_time + 1.0)
+        scheduler.schedule_timeout(event1)
+        scheduler.schedule_timeout(event2)
 
-    # Sleep again, now event2 should also expire
-    time.sleep(1.0)
-    expired = scheduler.check_timeouts()
-    assert len(expired) == 1
-    assert expired[0].name == "timeout2"
+        # Advance time past event1's deadline
+        mock_time.return_value = current_time + 0.3
+        expired = scheduler.check_timeouts()
+        assert len(expired) == 1, f"Expected 1 expired event, got {len(expired)}"
+        assert expired[0].name == "timeout1"
+
+        # Advance time past event2's deadline
+        mock_time.return_value = current_time + 1.1
+        expired = scheduler.check_timeouts()
+        assert len(expired) == 1, f"Expected 1 expired event, got {len(expired)}"
+        assert expired[0].name == "timeout2"
 
 
 def test_expected_vs_actual_hfsm_behavior():

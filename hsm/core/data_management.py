@@ -3,7 +3,7 @@
 # Licensed under the MIT License - see LICENSE file for details
 
 import threading
-from contextlib import contextmanager
+from hsm.core.states import State
 
 
 class _DataLockManager:
