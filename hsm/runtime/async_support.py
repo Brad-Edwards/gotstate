@@ -144,7 +144,11 @@ class AsyncStateMachine(StateMachine):
             return False
 
         async with self._async_lock:
-            valid_transitions = self._graph.get_valid_transitions(self._current_state, event)
+            valid_transitions = []
+            for transition in self._graph.get_valid_transitions(self._current_state, event):
+                if await transition.evaluate_guards(event):
+                    valid_transitions.append(transition)
+
             if not valid_transitions:
                 return False
 
@@ -175,9 +179,9 @@ class AsyncStateMachine(StateMachine):
             for hook in self._hooks:
                 if hasattr(hook, "on_transition"):
                     if asyncio.iscoroutinefunction(hook.on_transition):
-                        await hook.on_transition(previous_state, self._current_state)
+                        await hook.on_transition(transition.source, transition.target)
                     else:
-                        hook.on_transition(previous_state, self._current_state)
+                        hook.on_transition(transition.source, transition.target)
 
             # Notify enter
             await self._notify_enter_async(self._current_state)

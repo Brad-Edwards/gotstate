@@ -121,11 +121,11 @@ class StateGraph:
         self._nodes[transition.source].transitions.add(transition)
 
     def get_valid_transitions(self, state: State, event: Event) -> List[Transition]:
-        """Get all valid transitions from a state for an event."""
+        """Get all transitions from a state for an event."""
         if state not in self._transitions:
             return []
-        valid = [t for t in self._transitions[state] if t.evaluate_guards(event)]
-        return sorted(valid, key=lambda t: t.get_priority(), reverse=True)
+        # Return all transitions sorted by priority, let the state machine evaluate guards
+        return sorted(list(self._transitions[state]), key=lambda t: t.get_priority(), reverse=True)
 
     def get_ancestors(self, state: State) -> List[State]:
         """Get all ancestor states in order from immediate parent to root."""

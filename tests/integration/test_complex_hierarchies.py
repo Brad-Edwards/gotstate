@@ -1,257 +1,181 @@
-"""Integration tests for complex state hierarchies and error recovery scenarios."""
-
-import asyncio
-from typing import Dict, List, Optional
-from unittest.mock import AsyncMock, Mock
-
+# test_complex_hierarchy.py
 import pytest
 
-from hsm.core.events import Event, TimeoutEvent
-from hsm.core.hooks import HookProtocol
-from hsm.core.state_machine import CompositeStateMachine, StateMachine
+from hsm.core.errors import ValidationError
+from hsm.core.events import Event
+from hsm.core.state_machine import CompositeStateMachine
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition
-from hsm.core.validations import ValidationError, Validator
-from hsm.runtime.async_support import AsyncEventQueue, AsyncStateMachine
-
-
-class TestHook:
-    """Test hook for tracking state machine events."""
-
-    def __init__(self):
-        self.state_changes: List[tuple] = []
-        self.errors: List[Exception] = []
-        self.action_calls: List[str] = []
-
-    async def on_enter(self, state: State) -> None:
-        self.state_changes.append(("enter", state.name))
-
-    async def on_exit(self, state: State) -> None:
-        self.state_changes.append(("exit", state.name))
-
-    async def on_error(self, error: Exception) -> None:
-        self.errors.append(error)
-
-    async def on_action(self, action_name: str) -> None:
-        self.action_calls.append(action_name)
 
 
 @pytest.fixture
-def hook():
-    return TestHook()
+def complex_hfsm():
+    """
+    Builds this hierarchy (letters in parentheses are states):
 
+    Root (CompositeState)
+    ├─ SubA (CompositeState)
+    │   ├─ A1 (State) [initial of SubA]
+    │   └─ A2 (State)
+    └─ SubB (CompositeState)
+        ├─ B1 (State) [initial of SubB]
+        └─ B2 (CompositeState)
+            ├─ B2a (State) [initial of B2]
+            └─ B2b (State)
 
-def create_nested_state_machine(hook):
-    """Create a complex nested state machine for testing."""
-    # Create root composite state
+    Transitions:
+    1) A1 -> A2 on event("goA2")
+    2) A2 -> B1 on event("switch_to_B")    # crosses from SubA to SubB
+    3) B1 -> B2a on event("goB2a")
+    4) B2a -> B2b on event("goB2b")
+    5) B2b -> A1 on event("reset_to_A1")  # crosses from SubB to SubA
+
+    The Root's initial is SubA, and SubA's initial is A1, SubB's initial is B1,
+    and B2's initial is B2a.
+    """
+
+    # Create composites
     root = CompositeState("Root")
+    subA = CompositeState("SubA")
+    subB = CompositeState("SubB")
+    subB2 = CompositeState("B2")
 
-    # Create first level states
-    operational = CompositeState("Operational")
-    error = State("Error")
+    # Create leaf states
+    a1 = State("A1")
+    a2 = State("A2")
+    b1 = State("B1")
+    b2a = State("B2a")
+    b2b = State("B2b")
 
-    # Create second level states under Operational
-    processing = CompositeState("Processing")
-    idle = State("Idle")
+    # Set initial children
+    subA.initial_state = a1  # subA starts in A1
+    subB.initial_state = b1  # subB starts in B1
+    subB2.initial_state = b2a
 
-    # Create third level states under Processing
-    running = State("Running")
-    cleanup = State("Cleanup")
+    # Build the top-level composite
+    root.initial_state = subA
 
-    # Set initial states for composite states
-    processing.initial_state = running
-    operational.initial_state = idle
-    root.initial_state = operational
+    # Create machine
+    machine = CompositeStateMachine(root)
 
-    # Create state machine with root state
-    machine = CompositeStateMachine(initial_state=root, validator=Validator(), hooks=[hook])
+    # Add states into the hierarchy
+    machine.add_state(subA, parent=root)
+    machine.add_state(a1, parent=subA)
+    machine.add_state(a2, parent=subA)
 
-    # Add all states to the machine in hierarchical order
-    machine.add_state(root)
-    machine.add_state(operational, parent=root)
-    machine.add_state(error, parent=root)
-    machine.add_state(processing, parent=operational)
-    machine.add_state(idle, parent=operational)
-    machine.add_state(running, parent=processing)
-    machine.add_state(cleanup, parent=processing)
+    machine.add_state(subB, parent=root)
+    machine.add_state(b1, parent=subB)
+    machine.add_state(subB2, parent=subB)
+    machine.add_state(b2a, parent=subB2)
+    machine.add_state(b2b, parent=subB2)
 
-    # Build hierarchy (still needed for composite states)
-    processing.add_child_state(running)
-    processing.add_child_state(cleanup)
-    operational.add_child_state(processing)
-    operational.add_child_state(idle)
-    root.add_child_state(operational)
-    root.add_child_state(error)
-
-    # Add transitions for all events
-    machine.add_transition(Transition(source=idle, target=processing, guards=[lambda e: e.name == "begin"]))
-    machine.add_transition(Transition(source=running, target=cleanup, guards=[lambda e: e.name == "finish"]))
-    machine.add_transition(Transition(source=operational, target=error, guards=[lambda e: e.name == "error"]))
-    machine.add_transition(Transition(source=error, target=operational, guards=[lambda e: e.name == "recover"]))
-    machine.add_transition(Transition(source=running, target=cleanup, guards=[lambda e: e.name == "start"]))
+    # Add transitions
+    # (1) A1 -> A2
+    machine.add_transition(Transition(source=a1, target=a2, guards=[lambda e: e.name == "goA2"]))
+    # (2) A2 -> B1
+    machine.add_transition(Transition(source=a2, target=b1, guards=[lambda e: e.name == "switch_to_B"]))
+    # (3) B1 -> B2a
+    machine.add_transition(Transition(source=b1, target=b2a, guards=[lambda e: e.name == "goB2a"]))
+    # (4) B2a -> B2b
+    machine.add_transition(Transition(source=b2a, target=b2b, guards=[lambda e: e.name == "goB2b"]))
+    # (5) B2b -> A1
+    machine.add_transition(Transition(source=b2b, target=a1, guards=[lambda e: e.name == "reset_to_A1"]))
 
     return machine
 
 
-@pytest.mark.asyncio
-async def test_complex_state_hierarchy(hook):
-    """Test navigation through a complex state hierarchy."""
-    machine = create_nested_state_machine(hook)
-    await machine.start()
-
-    assert machine.current_state.name == "Root"
-    assert "Root" in [state for _, state in hook.state_changes]
-
-    # Navigate through the hierarchy
-    await machine.process_event(Event("begin"))
-    assert machine.current_state.name == "Processing"
-    assert "Processing" in [state for _, state in hook.state_changes]
-
-    await machine.process_event(Event("start"))
-    assert "Running" in [state for _, state in hook.state_changes]
-
-    await machine.process_event(Event("finish"))
-    assert "Cleanup" in [state for _, state in hook.state_changes]
+def test_complex_hfsm_initial_states(complex_hfsm):
+    """
+    Start the machine, ensure it resolves to Root->SubA->A1.
+    """
+    complex_hfsm.start()
+    assert complex_hfsm.current_state is not None
+    assert complex_hfsm.current_state.name == "A1", "Expected initial path: Root -> SubA -> A1"
 
 
-@pytest.mark.asyncio
-async def test_error_recovery_scenario(hook):
-    """Test error recovery in a complex state hierarchy."""
-    machine = create_nested_state_machine(hook)
-    await machine.start()
+def test_complex_hfsm_nested_transitions(complex_hfsm):
+    """
+    Verifies transitions from SubA -> SubB and deeper from B1 -> B2 -> ...
+    """
+    complex_hfsm.start()
+    # Currently in A1
+    complex_hfsm.process_event(Event("goA2"))
+    assert complex_hfsm.current_state.name == "A2"
 
-    # Simulate normal operation
-    await machine.process_event(Event("begin"))
-    await machine.process_event(Event("start"))
+    # Switch to B1
+    complex_hfsm.process_event(Event("switch_to_B"))
+    assert complex_hfsm.current_state.name == "B1"
 
-    # Simulate error
-    await machine.process_event(Event("error"))
-    assert machine.current_state.name == "Error"
-    assert "Error" in [state for _, state in hook.state_changes]
+    # Now go deeper in SubB2
+    complex_hfsm.process_event(Event("goB2a"))
+    assert complex_hfsm.current_state.name == "B2a"
 
-    # Test recovery
-    await machine.process_event(Event("recover"))
-    assert machine.current_state.name == "Operational"
-    assert "Operational" in [state for _, state in hook.state_changes]
+    # Move to B2b
+    complex_hfsm.process_event(Event("goB2b"))
+    assert complex_hfsm.current_state.name == "B2b"
 
-
-@pytest.mark.asyncio
-async def test_concurrent_event_processing(hook):
-    """Test concurrent event processing in nested state machines."""
-    machine = create_nested_state_machine(hook)
-    await machine.start()
-
-    # Create multiple concurrent events
-    events = [Event("begin"), Event("start"), Event("error"), Event("recover")]
-
-    # Process events concurrently
-    tasks = [asyncio.create_task(machine.process_event(event)) for event in events]
-
-    await asyncio.gather(*tasks)
-
-    # Verify state changes occurred in a valid order
-    state_sequence = [state for _, state in hook.state_changes]
-    assert "Root" in state_sequence
-    assert "Error" in state_sequence
-    assert "Operational" in state_sequence
+    # Then reset to A1
+    complex_hfsm.process_event(Event("reset_to_A1"))
+    assert complex_hfsm.current_state.name == "A1"
 
 
-@pytest.mark.asyncio
-async def test_shutdown_priority(hook):
-    """Test that shutdown events take priority over other transitions."""
-    machine = create_nested_state_machine(hook)
-    await machine.start()
+def test_complex_hfsm_history_capture(complex_hfsm):
+    """
+    Demonstrates how a hierarchical HFSM typically handles history:
+    If the library supports deep or shallow history, check that re-entry from
+    composite returns to the last-active sub-state. If not implemented,
+    this test will highlight it (and should fail or skip).
+    """
+    # Start in A1
+    complex_hfsm.start()
+    complex_hfsm.process_event(Event("goA2"))  # A1 -> A2
+    complex_hfsm.process_event(Event("switch_to_B"))  # A2 -> B1
+    assert complex_hfsm.current_state.name == "B1"
 
-    # Queue multiple events including shutdown
-    events = [Event("begin"), Event("error"), Event("shutdown")]  # Should take priority
+    # Stop the machine
+    complex_hfsm.stop()
 
-    for event in events:
-        await machine.process_event(event)
+    # Expect that SubA's history is A2
+    # If the library doesn't store history, the next start might revert to A1
+    # The specification says we do keep history in the StateGraph if configured,
+    # so let's see what actually happens:
+    hist = complex_hfsm.get_history_state(complex_hfsm._graph.get_composite_ancestors(complex_hfsm.current_state)[0])
+    # 'hist' should be None or 'A2' depending on how the code is storing history.
+    # If the library implements "record_history" on stop, subA's history was "A2".
+    # We'll do a minimal check:
+    # If it does not store history properly, we point that out.
+    if hist is None:
+        pytest.fail("No history was recorded for SubA. HFSM specs often require storing the last sub-state on exit.")
+    else:
+        assert hist.name == "A2", f"Expected SubA's history to be 'A2', got {hist.name}"
 
-    # Verify we reached shutdown state
-    assert machine.current_state.name == "Shutdown"
-    assert "Shutdown" in [state for _, state in hook.state_changes]
+    # Restart
+    complex_hfsm.start()
 
-
-@pytest.mark.asyncio
-async def test_nested_error_handling(hook):
-    """Test error handling at different levels of the state hierarchy."""
-    machine = create_nested_state_machine(hook)
-    await machine.start()
-
-    # Define error-causing action
-    async def failing_action(event: Event) -> None:
-        raise RuntimeError("Action failed")
-
-    # Add error-prone transition
-    machine.add_transition(
-        Transition(
-            source=machine.get_state("Idle"),
-            target=machine.get_state("Processing"),
-            guards=[lambda e: True],
-            actions=[failing_action],
-            priority=0,
+    # Because we are in SubB when we stopped, the parent's history might or might not be stored.
+    # This part depends on the implementation details. If the library doesn't fully
+    # support multi-level history, you might land back in SubA->A1 instead.
+    # The code is not guaranteed to handle multi-level history as-is.
+    # We'll see if the machine is in B1 or back in SubA->A1.
+    if complex_hfsm.current_state.name != "B1":
+        pytest.fail(
+            f"Expected the machine to restore to 'B1' via parent's history, but it is in {complex_hfsm.current_state.name}."
         )
-    )
-
-    # Attempt transition with failing action
-    await machine.process_event(Event("begin"))
-
-    # Verify error was caught and handled
-    assert len(hook.errors) == 1
-    assert isinstance(hook.errors[0], RuntimeError)
-    assert machine.current_state.name == "Error"
 
 
-@pytest.mark.asyncio
-async def test_state_reentry(hook):
-    """Test re-entering the same state through different paths."""
-    machine = create_nested_state_machine(hook)
-    await machine.start()
+def test_complex_hfsm_validation_errors():
+    """
+    Make sure a composite that has no valid initial state triggers a ValidationError.
+    """
+    root = CompositeState("Root")
+    subX = CompositeState("SubX")
+    # No initial_state set for SubX, and no child states.
 
-    # Navigate to processing
-    await machine.process_event(Event("begin"))
-    initial_processing_entry = len([state for _, state in hook.state_changes if state == "Processing"])
+    # If design strictly requires an initial sub-state for each composite,
+    # this should fail on machine.start() or on machine.validate().
+    machine = CompositeStateMachine(root)
+    machine.add_state(subX, parent=root)
+    root.initial_state = subX  # but subX itself is an empty composite
 
-    # Exit and re-enter processing
-    await machine.process_event(Event("complete"))
-    await machine.process_event(Event("begin"))
-
-    # Verify state was properly re-entered
-    processing_entries = len([state for _, state in hook.state_changes if state == "Processing"])
-    assert processing_entries == initial_processing_entry + 2  # +2 for exit and re-entry
-
-
-def test_composite_state_hierarchy():
-    """Test hierarchical state structure."""
-    # Create child states first
-    child1 = State("child1")
-    child2 = State("child2")
-
-    # Create root with child1 as initial state
-    root = CompositeState("root", initial_state=child1)
-
-    # Create machine with root as initial state
-    machine = StateMachine(root)
-
-    # Add states in correct order - parent first, then children
-    machine.add_state(child1, parent=root)
-    machine.add_state(child2, parent=root)
-
-    # Add transition after all states are added
-    transition = Transition(source=child1, target=child2)
-    machine.add_transition(transition)
-
-    # Verify hierarchy
-    assert child1.parent == root
-    assert child2.parent == root
-
-    machine.start()
-    # The current state should be child1 since it's the initial state of root
-    assert machine.current_state == child1
-    assert machine.current_state.parent == root
-
-    # Test transition
-    event = Event("test")
-    assert machine.process_event(event)
-    assert machine.current_state == child2
+    with pytest.raises(ValidationError):
+        machine.start()
