@@ -195,15 +195,25 @@ def test_hook_behavior():
     transition = Transition(source=state1, target=state2)
     machine.add_transition(transition)
 
+    # Start machine and verify initial state hook
     machine.start()
     hook.on_enter.assert_called_once_with(state1)
+    hook.on_exit.assert_not_called()  # Should not be called during start
 
+    # Process event and verify transition hooks
     event = Event("test")
     machine.process_event(event)
 
+    # Verify exit hook was called for state1
+    assert hook.on_exit.call_count == 1
     hook.on_exit.assert_called_once_with(state1)
+
+    # Verify enter hook was called for both states (initial and after transition)
     assert hook.on_enter.call_count == 2
     hook.on_enter.assert_has_calls([call(state1), call(state2)])
+
+    # Verify error hook was not called
+    hook.on_error.assert_not_called()
 
 
 def test_composite_state_machine():

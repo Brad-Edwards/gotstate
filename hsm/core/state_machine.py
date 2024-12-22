@@ -132,7 +132,12 @@ class StateMachine:
 
         # Resolve initial or historical active state
         resolved_state = self._graph.resolve_active_state(self._initial_state)
-        self._set_current_state(resolved_state, notify=True)
+        
+        # Set current state without notifications first
+        self._set_current_state(resolved_state, notify=False)
+        # Then only notify enter since we're starting up
+        self._notify_enter(self._current_state)
+        
         self._started = True
 
     def stop(self) -> None:
@@ -178,12 +183,19 @@ class StateMachine:
     def _execute_transition(self, transition: Transition, event: Event) -> None:
         """Execute a transition, notify exit/enter, handle errors."""
         try:
+            # First notify exit of current state
+            if self._current_state:
+                self._notify_exit(self._current_state)
+
             # Execute transition actions
             for action in transition.actions:
                 action(event)
 
-            # Update current state with notifications
-            self._set_current_state(transition.target, notify=True)
+            # Update current state without notifications (they're handled here)
+            self._set_current_state(transition.target, notify=False)
+
+            # Notify enter of new state
+            self._notify_enter(self._current_state)
 
         except Exception as e:
             self._notify_error(e)
