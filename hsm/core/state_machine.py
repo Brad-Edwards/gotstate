@@ -3,15 +3,17 @@
 # Licensed under the MIT License - see LICENSE file for details
 
 import asyncio
-import time
-from typing import Callable, List, Optional, Set
+import logging
+from threading import Lock
+from typing import List, Optional, Set, Type
 
 from hsm.core.events import Event
-from hsm.core.hooks import HookManager, HookProtocol
 from hsm.core.states import CompositeState, State
 from hsm.core.transitions import Transition
 from hsm.core.validations import ValidationError, Validator
 from hsm.runtime.graph import StateGraph
+
+logger = logging.getLogger(__name__)
 
 
 class _ErrorRecoveryStrategy:
@@ -26,8 +28,8 @@ class _ErrorRecoveryStrategy:
 
 class StateMachine:
     """
-    A finite state machine implementation that uses StateGraph as the
-    sole source of truth for hierarchy, transitions, and history.
+    Base state machine implementation that manages states and transitions.
+    Supports hierarchical state nesting and composite states.
     """
 
     def __init__(
@@ -38,72 +40,293 @@ class StateMachine:
         error_recovery: Optional[_ErrorRecoveryStrategy] = None,
     ):
         """
-        :param initial_state: The state in which this machine begins.
-        :param validator: Optional validator for structure checks.
-        :param hooks: Optional list of hook objects implementing on_enter, on_exit, on_error, etc.
-        :param error_recovery: Optional error recovery strategy.
+        Initialize a new state machine.
+
+        Args:
+            initial_state: The starting state of the machine
+            validator: Optional validator to perform structural validation checks
+            hooks: Optional list of hook objects that can respond to state changes.
+                  Hooks can implement: on_enter(state), on_exit(state),
+                  on_transition(source, target), and on_error(error)
+            error_recovery: Optional strategy for handling runtime errors
         """
         self._graph = StateGraph()
         self._validator = validator or Validator()
         self._hooks = hooks or []
         self._error_recovery = error_recovery
         self._started = False
+        self._transition_lock = Lock()
 
         # Add the initial state into the graph
         self._graph.add_state(initial_state)
-        self._initial_state = initial_state
-        self._current_state: Optional[State] = None
-        self._set_current_state(initial_state)
-
-        # If initial_state has a parent composite that doesn't have an initial, set it
-        if isinstance(initial_state.parent, CompositeState):
-            if not initial_state.parent._initial_state:
-                initial_state.parent._initial_state = initial_state
+        self._graph.set_initial_state(None, initial_state)  # Set as root initial state
+        self._graph.set_current_state(initial_state)  # Set initial state as current state
 
     @property
     def current_state(self) -> Optional[State]:
-        """Get the current active state."""
-        return self._current_state
+        """Get the current state of the state machine."""
+        return self._graph.get_current_state()
 
-    def _set_current_state(self, state: Optional[State], notify: bool = False) -> None:
+    def start(self) -> None:
+        """Start the state machine."""
+        with self._transition_lock:
+            if self._started:
+                return
+
+            # Validate before entering state
+            errors = self._graph.validate()
+            if errors:
+                raise ValidationError("\n".join(errors))
+
+            self._validator.validate_state_machine(self)
+
+            # Get root state and try to find deepest history state
+            root_state = self._graph.get_initial_state(None)  # Get root initial state
+            if root_state:
+                # Try to find history state first
+                current = root_state
+                resolved_state = None
+                while current:
+                    hist = self._graph.get_history_state(current)
+                    if hist:
+                        resolved_state = hist
+                        break
+                    # If no history, use initial state
+                    initial = self._graph.get_initial_state(current)
+                    if initial:
+                        current = initial
+                    else:
+                        resolved_state = current
+                        break
+
+                if not resolved_state:
+                    resolved_state = self._graph.resolve_active_state(root_state)
+
+                self._set_current_state(resolved_state)
+
+                # Build path from root to resolved state
+                state_path = []
+                current = resolved_state
+                while current:
+                    state_path.append(current)
+                    current = current.parent
+
+                # Enter states from outermost to innermost
+                for state in reversed(state_path):
+                    self._notify_enter(state)
+
+            self._started = True
+
+    def stop(self) -> None:
+        """Stop the state machine."""
+        with self._transition_lock:
+            if not self._started:
+                return
+
+            if self._graph.get_current_state():
+                # Record history for all composite ancestors before stopping
+                for composite in self._graph.get_composite_ancestors(self._graph.get_current_state()):
+                    self._graph.record_history(composite, self._graph.get_current_state())
+                self._notify_exit(self._graph.get_current_state())
+                self._set_current_state(None)
+
+            self._started = False
+
+    def process_event(self, event: Event) -> bool:
         """
-        Internal method to update current state.
-        :param state: The new state to set
-        :param notify: Whether to notify hooks about state change
+        Process an event by finding and executing a valid transition.
+
+        Args:
+            event: The event to process
+
+        Returns:
+            True if event was handled, False otherwise
         """
-        if notify and self._current_state:
-            self._notify_exit(self._current_state)
+        if not self._started:
+            return False
 
-        self._current_state = state
+        with self._transition_lock:
+            valid_transitions = []
+            if self.current_state:  # Only process transitions if we have a current state
+                # First try transitions from current state
+                for transition in self._graph.get_valid_transitions(self.current_state, event):
+                    # If there are no guards, the transition is always valid
+                    if not transition.guards:
+                        valid_transitions.append(transition)
+                        continue
 
-        if notify and state:
-            self._notify_enter(state)
+                    # Check if any guard explicitly matches the event
+                    has_matching_guard = False
+                    try:
+                        if _evaluate_guards(transition.guards, event):
+                            has_matching_guard = True
+                    except GuardEvaluationError as e:
+                        logger.warning(f"Guard evaluation failed for transition {transition}: {e}")
+                        continue
+
+                    if has_matching_guard:
+                        valid_transitions.append(transition)
+
+                # If no transitions found, try parent states
+                if not valid_transitions:
+                    current = self.current_state.parent
+                    while current and not valid_transitions:
+                        for transition in self._graph.get_valid_transitions(current, event):
+                            # If there are no guards, the transition is always valid
+                            if not transition.guards:
+                                valid_transitions.append(transition)
+                                continue
+
+                            # Check guards for parent state transitions too
+                            has_matching_guard = False
+                            try:
+                                if _evaluate_guards(transition.guards, event):
+                                    has_matching_guard = True
+                            except GuardEvaluationError as e:
+                                logger.warning(f"Guard evaluation failed for transition {transition}: {e}")
+                                continue
+
+                            if has_matching_guard:
+                                valid_transitions.append(transition)
+                        current = current.parent
+
+            if not valid_transitions:
+                return False
+
+            # Pick highest-priority transition
+            transition = max(valid_transitions, key=lambda t: t.get_priority())
+            result = self._execute_transition(transition, event)
+
+            # If result is None or False, the transition was not handled or failed
+            if result is None or result is False:
+                return False
+
+            # If result is True, the transition was successful
+            return True
+
+    def _execute_transition(self, transition: Transition, event: Event) -> Optional[bool]:
+        """
+        Execute a transition between states.
+
+        Args:
+            transition: The transition to execute
+            event: The triggering event
+
+        Returns:
+            True if successful, False if failed but handled, None if not handled
+
+        Raises:
+            Exception: If an error occurs during transition and no error recovery is provided
+        """
+        previous_state = self._graph.get_current_state()
+        try:
+            # Find the common ancestor between source and target states
+            source_ancestors = []
+            current = previous_state
+            while current:
+                source_ancestors.append(current)
+                current = current.parent
+
+            target_ancestors = []
+            current = transition.target
+            while current:
+                target_ancestors.append(current)
+                current = current.parent
+
+            # Find common ancestor
+            common_ancestor = None
+            for state in source_ancestors:
+                if state in target_ancestors:
+                    common_ancestor = state
+                    break
+
+            # Exit up to common ancestor
+            current = previous_state
+            while current and current != common_ancestor:
+                self._notify_exit(current)
+                current = current.parent
+
+            # Execute transition actions
+            for action in transition.actions:
+                action(event)
+
+            # Update current state without notifications (we'll handle them)
+            self._graph.set_current_state(transition.target)
+
+            # Record history for all composite ancestors
+            for composite in self._graph.get_composite_ancestors(transition.target):
+                self._graph.record_history(composite, transition.target)
+
+            # Notify transition
+            for hook in self._hooks:
+                if hasattr(hook, "on_transition"):
+                    hook.on_transition(transition.source, transition.target)
+
+            # Enter from common ancestor to target, including parent states
+            target_path = []
+            current = transition.target
+            while current and current != common_ancestor:
+                target_path.append(current)
+                current = current.parent
+
+            # Enter states from outermost to innermost
+            for state in reversed(target_path):
+                self._notify_enter(state)
+
+            # Handle composite state initial transitions after entering all states
+            for state in reversed(target_path):
+                if isinstance(state, CompositeState) and state not in source_ancestors:
+                    initial_state = self._graph.get_initial_state(state)
+                    if initial_state:
+                        # Create and execute a transition to the initial state
+                        initial_transition = Transition(source=state, target=initial_state, guards=[lambda e: True])
+                        self._execute_transition(initial_transition, event)
+
+            return True
+
+        except Exception as e:
+            # Restore previous state if we failed during transition
+            self._graph.set_current_state(previous_state)
+            self._notify_error(e)
+            if self._error_recovery:
+                self._error_recovery.recover(e, self)
+                return False
+            # Re-raise the exception if no error recovery is provided
+            raise
+
+    def _set_current_state(self, state: Optional[State]) -> None:
+        """Set the current state."""
+        self._graph.set_current_state(state)
 
     def add_state(self, state: State, parent: Optional[State] = None) -> None:
         """
-        Add a state to the underlying graph, optionally specifying a parent.
+        Add a state to the state machine.
 
-        :param state: The state to add.
-        :param parent: The parent state (usually a CompositeState).
+        Args:
+            state: The state to add
+            parent: Optional parent state for hierarchical nesting. If parent is a
+                   CompositeState with no initial state set, this state becomes its
+                   initial state.
         """
         self._graph.add_state(state, parent)
         # If parent is a CompositeState with no initial_state, set this new state
-        if isinstance(parent, CompositeState) and not parent._initial_state:
-            parent._initial_state = state
+        if isinstance(parent, CompositeState) and not self._graph.get_initial_state(parent):
+            self._graph.set_initial_state(parent, state)
 
     def add_transition(self, transition: Transition) -> None:
         """
-        Add a transition to the graph.
-        The graph enforces that source/target states exist.
+        Add a transition between states.
+
+        Args:
+            transition: The transition to add. Must reference states that exist
+                      in the state machine.
         """
         self._graph.add_transition(transition)
 
     def get_transitions(self) -> Set[Transition]:
         """
         Return all transitions from the graph.
-        (In a minimal version, you'd store transitions in the StateGraph.)
         """
-        # For example, we might collect them from all source states:
         transitions = set()
         for st in self._graph.get_all_states():
             for tr in self._graph._transitions.get(st, set()):
@@ -117,176 +340,6 @@ class StateMachine:
     def get_history_state(self, composite: CompositeState) -> Optional[State]:
         """Retrieve a recorded history state from the graph."""
         return self._graph.get_history_state(composite)
-
-    def start(self) -> None:
-        """Start the state machine."""
-        if self._started:
-            return
-
-        # Validate the graph structure
-        errors = self._graph.validate()
-        if errors:
-            raise ValidationError("\n".join(errors))
-
-        self._validator.validate_state_machine(self)
-
-        # Resolve initial or historical active state
-        resolved_state = self._graph.resolve_active_state(self._initial_state)
-
-        # Set current state without notifications first
-        self._set_current_state(resolved_state, notify=False)
-
-        # Get all ancestors of the current state and notify enter from outermost to innermost
-        ancestors = self._graph.get_composite_ancestors(self._current_state)
-        # Enter ancestors first (they're already in outermost to innermost order)
-        for ancestor in ancestors:
-            self._notify_enter(ancestor)
-        # Then enter the current state
-        self._notify_enter(self._current_state)
-
-        self._started = True
-
-    def stop(self) -> None:
-        """Stop the state machine."""
-        if not self._started:
-            return
-
-        if self._current_state:
-            # Record history if applicable
-            composite_ancestors = self._graph.get_composite_ancestors(self._current_state)
-            if composite_ancestors:
-                # Record history for each composite ancestor
-                for ancestor in composite_ancestors:
-                    self._graph.record_history(ancestor, self._current_state)
-
-            # Exit from innermost to outermost
-            current = self._current_state
-            self._notify_exit(current)
-            for ancestor in reversed(composite_ancestors):
-                self._notify_exit(ancestor)
-
-            self._set_current_state(None, notify=False)
-
-        self._started = False
-
-    def process_event(self, event: Event) -> bool:
-        """
-        Process an event, checking transitions from the current state via the graph.
-        Execute the highest-priority valid transition, if any.
-        """
-        if not self._started or not self._current_state:
-            return False
-
-        try:
-            # Get potential transitions from both current state and its parent states
-            potential_transitions = []
-            current = self._current_state
-            while current:
-                transitions = self._graph.get_valid_transitions(current, event)
-                potential_transitions.extend(transitions)
-                current = current.parent
-
-            if not potential_transitions:
-                return False
-
-            # Sort transitions by priority
-            potential_transitions.sort(key=lambda t: t.get_priority(), reverse=True)
-
-            # Evaluate guards to find valid transitions
-            valid_transitions = []
-            for transition in potential_transitions:
-                # Check if all guards pass
-                all_guards_pass = True
-                for guard in transition.guards:
-                    if not guard(event):
-                        all_guards_pass = False
-                        break
-                if all_guards_pass:
-                    valid_transitions.append(transition)
-
-            if not valid_transitions:
-                return False
-
-            # Pick the highest-priority transition
-            transition = valid_transitions[0]
-
-            # Execute the transition
-            self._execute_transition(transition, event)
-
-            # If target is a composite state, enter its initial state
-            if isinstance(transition.target, CompositeState):
-                initial_state = transition.target._initial_state
-                if initial_state:
-                    # Create and execute a transition to the initial state
-                    initial_transition = Transition(
-                        source=transition.target, target=initial_state, guards=[lambda e: True]
-                    )
-                    self._execute_transition(initial_transition, event)
-
-            return True
-
-        except Exception as error:
-            if self._error_recovery:
-                self._error_recovery.recover(error, self)
-            else:
-                raise
-            return False
-
-    def _execute_transition(self, transition: Transition, event: Event) -> None:
-        """Execute a transition, notify exit/enter, handle errors."""
-        try:
-            # First notify exit of current state and its ancestors up to source state
-            if self._current_state:
-                # Get the common ancestor between source and target states
-                source_ancestors = self._graph.get_composite_ancestors(self._current_state)
-                target_ancestors = self._graph.get_composite_ancestors(transition.target)
-                common_ancestor = None
-                for s in source_ancestors:
-                    if s in target_ancestors:
-                        common_ancestor = s
-                        break
-
-                # Exit only the current state if transitioning within the same composite
-                if common_ancestor and common_ancestor == source_ancestors[0]:
-                    self._notify_exit(self._current_state)
-                    if isinstance(self._current_state.parent, CompositeState):
-                        # Record history when exiting composite states
-                        self._graph.record_history(self._current_state.parent, self._current_state)
-                else:
-                    # Exit up to but not including the common ancestor
-                    current = self._current_state
-                    while current and current != common_ancestor:
-                        self._notify_exit(current)
-                        if isinstance(current.parent, CompositeState):
-                            # Record history when exiting composite states
-                            self._graph.record_history(current.parent, current)
-                        current = current.parent
-
-            # Execute transition actions
-            for action in transition.actions:
-                action(event)
-
-            # Update current state without notifications (they're handled here)
-            self._set_current_state(transition.target, notify=False)
-
-            # Notify transition
-            for hook in self._hooks:
-                if hasattr(hook, "on_transition"):
-                    hook.on_transition(transition.source, transition.target)
-
-            # Notify enter of new state and its ancestors from common ancestor down
-            target_ancestors = self._graph.get_composite_ancestors(transition.target)
-            # Enter only ancestors below the common ancestor
-            for ancestor in target_ancestors:
-                if ancestor == common_ancestor:
-                    break
-                if ancestor not in source_ancestors:  # Only enter if not already active
-                    self._notify_enter(ancestor)
-            self._notify_enter(transition.target)
-
-        except Exception as e:
-            self._notify_error(e)
-            raise
 
     def _notify_enter(self, state: State) -> None:
         """Invoke on_enter hooks."""
@@ -309,13 +362,17 @@ class StateMachine:
                 hook.on_error(error)
 
     def reset(self) -> None:
-        """Reset the state machine to its initial state (clearing all history)."""
+        """
+        Reset the state machine to its initial state.
+
+        This clears all history states and restarts the machine if it was running.
+        """
         was_started = self._started
         if was_started:
             self.stop()
         self._graph.clear_history()
         # Restore current state to initial state before restarting
-        self._set_current_state(self._initial_state)
+        self._set_current_state(self._graph.get_initial_state(None))
         if was_started:
             self.start()
 
@@ -326,127 +383,143 @@ class StateMachine:
 
 class CompositeStateMachine(StateMachine):
     """
-    A hierarchical extension of StateMachine that can contain nested submachines.
-    Each submachine can be integrated into the same graph or kept separate.
+    An extended state machine that supports nested submachines.
+
+    This allows complex state machines to be built by composing smaller,
+    reusable state machines. Submachines can be integrated into the parent
+    machine's state graph or kept separate.
     """
 
     def __init__(
         self,
-        initial_state: State,
+        initial_state: CompositeState,
         validator: Optional[Validator] = None,
         hooks: Optional[List] = None,
         error_recovery: Optional[_ErrorRecoveryStrategy] = None,
     ):
-        super().__init__(initial_state, validator, hooks, error_recovery)
+        self._machine_lock = Lock()  # Single lock for all machine operations
         self._submachines = {}
+        self._composite_state = initial_state
+        super().__init__(initial_state, validator, hooks, error_recovery)
 
     def add_submachine(self, state: CompositeState, submachine: "StateMachine") -> None:
         """
-        Add a submachine's states under a parent composite state.
-        Submachine's states are all integrated into this machine's graph.
+        Add a submachine under a composite state.
+
+        This integrates all states and transitions from the submachine into
+        the parent machine's graph, with the given composite state as their
+        parent.
+
+        Args:
+            state: The composite state that will contain the submachine
+            submachine: The state machine to integrate
+
+        Raises:
+            ValueError: If the provided state is not in the machine or not a composite state
         """
-        if not isinstance(state, CompositeState):
-            raise ValueError(f"State {state.name} must be a composite state")
+        with self._machine_lock:
+            # First add the composite state if it's not already in the graph
+            if state not in self._graph._nodes:
+                self._graph.add_state(state)
 
-        # First add the composite state if it's not already in the graph
-        if state not in self._graph._nodes:
-            self._graph.add_state(state)
+            if not isinstance(state, CompositeState):
+                raise ValueError(f"State {state.name} must be a composite state")
 
-        # Integrate submachine states into the same graph:
-        for sub_state in submachine.get_states():
-            # Add each state with the composite state as parent
-            self._graph.add_state(sub_state, parent=state)
+            # Merge the submachine's graph into our graph
+            self._graph.merge_submachine(state, submachine._graph)
 
-        # Integrate transitions
-        for t in submachine.get_transitions():
-            self._graph.add_transition(t)
+            # Store reference to submachine
+            self._submachines[state] = submachine
 
-        # Set the composite state's initial state to the submachine's initial state
-        if submachine._initial_state:
-            state._initial_state = submachine._initial_state
-            # Add a transition from the composite state to its initial state
-            self._graph.add_transition(
-                Transition(source=state, target=submachine._initial_state, guards=[lambda e: True])
-            )
+            # Set initial state if not already set
+            submachine_initial = submachine._graph.get_initial_state(None)  # Get root initial state
+            if submachine_initial and not self._graph.get_initial_state(state):
+                mapped_initial = self._graph._nodes[submachine_initial].state
+                self._graph.set_initial_state(state, mapped_initial)
 
-        self._submachines[state] = submachine
+    def start(self):
+        """Start the state machine, entering states in hierarchical order."""
+        if self._started:
+            return
 
-    def process_event(self, event: Event) -> bool:
-        """
-        Try to process event in the current submachine if the current state is composite.
-        Otherwise, process normally in this machine.
-        """
-        if not self._started or not self._current_state:
-            return False
+        # Validate that all composite states have initial states
+        def validate_composite_initial(state):
+            if isinstance(state, CompositeState):
+                initial = self._graph.get_initial_state(state)
+                if initial is None:
+                    raise ValidationError(f"Composite state '{state.name}' has no initial state")
+                validate_composite_initial(initial)
 
+        # Start validation from root
+        validate_composite_initial(self._composite_state)
+
+        # Find the complete path from root to leaf by following history or initial states
+        path = []
+        current = self._composite_state
+
+        while current is not None:
+            path.append(current)
+            # First try to get history state
+            hist = self._graph.get_history_state(current)
+            if hist is not None:
+                current = hist
+                continue
+            # If no history, use initial state
+            next_state = self._graph.get_initial_state(current)
+            if next_state is None:
+                break
+            current = next_state
+
+        # Set the leaf state as current
+        if path:
+            self._graph.set_current_state(path[-1])
+
+        # Enter all states in root-to-leaf order
+        for state in path:
+            for hook in self._hooks:
+                if hasattr(hook, "on_enter"):
+                    hook.on_enter(state)
+
+        self._started = True
+
+    def stop(self):
+        """Stop the state machine, exiting states in reverse hierarchical order."""
+        if not self._started:
+            return
+
+        # Build path from current state back to root
+        path = []
+        current = self._graph.get_current_state()
+
+        while current is not None:
+            path.append(current)
+            current = self._graph._parent_map.get(current)
+
+        # Exit states in leaf-to-root order
+        for state in path:
+            for hook in self._hooks:
+                if hasattr(hook, "on_exit"):
+                    hook.on_exit(state)
+
+        self._started = False
+
+
+class GuardEvaluationError(Exception):
+    """Raised when a guard condition evaluation fails."""
+
+    pass
+
+
+def _evaluate_guards(guards: List[callable], event: Event) -> bool:
+    """Evaluate guard conditions with proper error handling."""
+    for guard in guards:
         try:
-            # Get potential transitions from both current state and its parent states
-            potential_transitions = []
-            current = self._current_state
-            while current:
-                # First check transitions from the current state
-                transitions = self._graph.get_valid_transitions(current, event)
-                potential_transitions.extend(transitions)
-
-                # If we're in a submachine state, also check transitions from its parent composite state
-                if current.parent in self._submachines:
-                    composite_transitions = self._graph.get_valid_transitions(current.parent, event)
-                    potential_transitions.extend(composite_transitions)
-
-                current = current.parent
-
-            if not potential_transitions:
+            if not guard(event):
                 return False
-
-            # Sort transitions by priority
-            potential_transitions.sort(key=lambda t: t.get_priority(), reverse=True)
-
-            # Evaluate guards to find valid transitions
-            valid_transitions = []
-            for transition in potential_transitions:
-                # Check if all guards pass
-                all_guards_pass = True
-                for guard in transition.guards:
-                    if not guard(event):
-                        all_guards_pass = False
-                        break
-                if all_guards_pass:
-                    valid_transitions.append(transition)
-
-            if not valid_transitions:
-                return False
-
-            # Pick the highest-priority transition
-            transition = valid_transitions[0]
-
-            # Execute the transition
-            self._execute_transition(transition, event)
-
-            # If target is a composite state, enter its initial state or submachine's initial state
-            if isinstance(transition.target, CompositeState):
-                submachine = self._submachines.get(transition.target)
-                if submachine:
-                    initial_state = submachine._initial_state
-                    if initial_state:
-                        # Create and execute a transition to the initial state
-                        initial_transition = Transition(
-                            source=transition.target, target=initial_state, guards=[lambda e: True]
-                        )
-                        self._execute_transition(initial_transition, event)
-                else:
-                    initial_state = transition.target._initial_state
-                    if initial_state:
-                        # Create and execute a transition to the initial state
-                        initial_transition = Transition(
-                            source=transition.target, target=initial_state, guards=[lambda e: True]
-                        )
-                        self._execute_transition(initial_transition, event)
-
-            return True
-
-        except Exception as error:
-            if self._error_recovery:
-                self._error_recovery.recover(error, self)
-            else:
-                raise
-            return False
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.warning(f"Guard evaluation failed: {str(e)}")
+            raise GuardEvaluationError(f"Guard {guard.__name__} failed: {str(e)}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error in guard evaluation: {str(e)}")
+            raise GuardEvaluationError(f"Unexpected error in guard {guard.__name__}: {str(e)}") from e
+    return True

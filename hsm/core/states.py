@@ -4,26 +4,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from hsm.core.base import StateBase
-from hsm.core.errors import TransitionError, ValidationError
-from hsm.core.events import Event
-from hsm.core.transitions import Transition
-
-if TYPE_CHECKING:
-    from hsm.core.hooks import Hook
-    from hsm.core.validations import Validator
 
 
 class State(StateBase):
     """
     Represents a state in the state machine. Manages state-specific behavior
-    including entry/exit actions and local data.
-
-    This version does NOT store parent references or child references directly,
-    assuming that the 'graph.py' infrastructure handles hierarchy.
+    including entry/exit actions. All relationships and data are managed through StateGraph.
     """
 
     def __init__(
@@ -32,22 +21,34 @@ class State(StateBase):
         entry_actions: List[Callable[[], None]] = None,
         exit_actions: List[Callable[[], None]] = None,
     ) -> None:
+        """Initialize a state with name and optional actions."""
+        self.name = name
+        self.entry_actions = entry_actions or []
+        self.exit_actions = exit_actions or []
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, State):
+            return NotImplemented
+        return self.name == other.name
+
+    def __hash__(self) -> int:
+        return hash(self.name)
+
+    @property
+    def data(self) -> Dict[str, Any]:
         """
-        Initialize a state with its name and optional actions.
-
-        :param name: Name identifying this state within its parent scope.
-        :param entry_actions: Actions executed upon entering this state.
-        :param exit_actions: Actions executed upon exiting this state.
+        Access state data through StateGraph. This property exists for compatibility
+        but will raise an error if accessed before the state is added to a graph.
         """
-        super().__init__(name=name, entry_actions=entry_actions or [], exit_actions=exit_actions or [])
-        self.data: Dict[str, Any] = {}
+        raise AttributeError(
+            "State data cannot be accessed directly. Use StateGraph's get_state_data/set_state_data methods"
+        )
 
 
-class CompositeState(StateBase):
+class CompositeState(State):
     """
-    A composite state that can contain other states. This version does NOT
-    store children or track them directly, leaving that to the StateGraph.
-    If you wish to store them here, see the commented approach below.
+    A state that can contain other states. All hierarchy management is handled
+    through StateGraph.
     """
 
     def __init__(
@@ -56,28 +57,11 @@ class CompositeState(StateBase):
         entry_actions: List[Callable[[], None]] = None,
         exit_actions: List[Callable[[], None]] = None,
     ) -> None:
-        """
-        Initialize a composite state.
-
-        :param name: Name identifying this state.
-        :param entry_actions: Actions executed upon entering this state.
-        :param exit_actions: Actions executed upon exiting this state.
-        """
-        super().__init__(name=name, entry_actions=entry_actions or [], exit_actions=exit_actions or [])
-        # Initialize the children set that will be managed by the graph
-        self._children = set()
-        # We'll keep an _initial_state reference if desired, but typically that's also in the graph.
-        self._initial_state: Optional[State] = None
+        super().__init__(name, entry_actions, exit_actions)
 
     @property
     def initial_state(self) -> Optional[State]:
-        """Optional: get the initial state. If you're using StateGraph, use set_initial_state there."""
-        return self._initial_state
-
-    @initial_state.setter
-    def initial_state(self, state: Optional[State]) -> None:
-        """
-        Optional: set the initial state. In a graph-based design, you'd call
-        `StateGraph.set_initial_state(self, state)` instead.
-        """
-        self._initial_state = state
+        """Get the initial state through the graph."""
+        if hasattr(self, "_graph"):
+            return self._graph.get_initial_state(self)
+        return None

@@ -7,7 +7,7 @@ from hsm.core.events import Event
 
 class MyCustomGuard:
     """
-    A user-defined guard that evaluates a custom condition when checked.
+    A custom guard that takes a condition function and evaluates it against events.
     """
 
     def __init__(self, condition_fn: callable) -> None:
@@ -18,7 +18,12 @@ class MyCustomGuard:
 
     def check(self, event: Event) -> bool:
         """
-        Check the guard condition with the given event.
-        Returns True if the condition is met, False otherwise.
+        Check if the guard condition is satisfied.
+
+        Args:
+            event: The event to check against
+
+        Returns:
+            bool: True if condition is satisfied, False otherwise
         """
         return self.condition_fn(event)

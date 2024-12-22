@@ -22,7 +22,7 @@ class RuntimeContext:
 
     def __init__(self, graph: StateGraph, initial_state: State):
         self._graph = graph
-        self._initial_state = initial_state
+        self._graph.set_initial_state(None, initial_state)  # Set as root initial state
         self._current_state = None
         # Initialize with the resolved initial state
         self._set_current_state(initial_state)

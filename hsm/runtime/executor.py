@@ -36,6 +36,28 @@ class Executor:
         with self._lock:
             self._running = False
 
+    def _ensure_machine_started(self) -> None:
+        """Ensure the state machine is started before processing events."""
+        if not self.machine._started:
+            self.machine.start()
+
+    def _process_event(self, event: Event) -> None:
+        """Process a single event and verify state transition."""
+        # Verify current state before processing
+        self.machine.current_state
+        self.machine.process_event(event)
+        # Give a small time for state transition to complete
+        time.sleep(0.01)
+
+    def _handle_event_processing_error(self, error: Exception) -> None:
+        """Handle any errors that occur during event processing."""
+        print(f"Error processing event: {error}")
+
+    def _should_continue_running(self) -> bool:
+        """Check if the executor should continue running."""
+        with self._lock:
+            return self._running
+
     def run(self) -> None:
         """
         Start the blocking loop that continuously processes events until stopped.
@@ -47,26 +69,16 @@ class Executor:
             self._running = True
 
         # Ensure machine is started
-        if not self.machine._started:
-            self.machine.start()
+        self._ensure_machine_started()
 
-        while True:
-            with self._lock:
-                if not self._running:
-                    break
-
+        while self._should_continue_running():
             try:
                 event = self.event_queue.dequeue()
                 if event is not None:
-                    # Process the event and verify state transition
-                    self.machine.current_state
-                    self.machine.process_event(event)
-                    # Give a small time for state transition to complete
-                    time.sleep(0.01)
+                    self._process_event(event)
                 else:
                     # No event available, sleep briefly
                     time.sleep(0.01)
             except Exception as e:
-                # Log error but continue processing
-                print(f"Error processing event: {e}")
+                self._handle_event_processing_error(e)
                 continue

@@ -14,12 +14,15 @@ from hsm.core.transitions import Transition
 class TraceHookConcurrent:
     def __init__(self):
         self.trace = []
+        self._trace_lock = threading.Lock()
 
     def on_enter(self, state):
-        self.trace.append(f"ENTER:{state.name}")
+        with self._trace_lock:
+            self.trace.append(f"ENTER:{state.name}")
 
     def on_exit(self, state):
-        self.trace.append(f"EXIT:{state.name}")
+        with self._trace_lock:
+            self.trace.append(f"EXIT:{state.name}")
 
 
 def test_concurrent_tracing():
