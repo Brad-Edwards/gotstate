@@ -9,8 +9,8 @@ from typing import List, Optional
 
 from hsm.core.errors import ValidationError
 from hsm.core.events import Event
-from hsm.core.hooks import HookManager, HookProtocol
-from hsm.core.state_machine import StateMachine, _StateMachineContext
+from hsm.core.hooks import HookProtocol
+from hsm.core.state_machine import StateMachine  # Removed _StateMachineContext import
 from hsm.core.states import State
 from hsm.core.transitions import Transition
 from hsm.core.validations import Validator
@@ -19,7 +19,7 @@ from hsm.core.validations import Validator
 class _AsyncLock:
     """
     Internal async-compatible lock abstraction, providing awaitable acquisition
-    methods.
+    methods. Only keep if actually needed; otherwise, you can remove.
     """
 
     def __init__(self) -> None:
@@ -41,21 +41,18 @@ class AsyncEventQueue:
         """
         Initialize async event queue.
 
-        Args:
-            priority: If True, enables priority-based event processing.
-                     If False, uses standard FIFO ordering.
+        :param priority: If True, enables priority-based event processing.
+                         If False, uses standard FIFO ordering.
         """
         self.priority_mode = priority
         self._queue = asyncio.PriorityQueue() if priority else asyncio.Queue()
         self._running = True
-        self._counter = 0  # Add counter for FIFO ordering within same priority
+        self._counter = 0
 
     async def enqueue(self, event: Event) -> None:
         """Add an event to the queue."""
         if self.priority_mode:
-            # Lower number = higher priority for PriorityQueue
-            # We negate priority so higher numbers have higher priority
-            # Add counter to maintain FIFO order within same priority
+            # Negate event.priority so higher event.priority => higher priority => dequeued sooner
             await self._queue.put((-event.priority, self._counter, event))
             self._counter += 1
         else:
@@ -64,20 +61,16 @@ class AsyncEventQueue:
     async def dequeue(self) -> Optional[Event]:
         """
         Remove and return the next event from the queue.
-        Returns None if queue is empty after timeout or queue is stopped.
+        Returns None if queue is empty after timeout or if the queue is stopped.
         """
+        if not self._running:
+            return None
+
         try:
-            if not self._running:
-                return None
-
-            # Use a timeout to prevent indefinite blocking
             item = await asyncio.wait_for(self._queue.get(), timeout=0.1)
-
-            # If using priority queue, extract actual event from tuple
             if self.priority_mode:
-                return item[2]  # Return the actual event
+                return item[2]  # Return the Event from the tuple
             return item
-
         except asyncio.TimeoutError:
             return None
 
@@ -106,8 +99,8 @@ class AsyncStateMachine(StateMachine):
 
     def __init__(self, initial_state: State, validator: Optional[Validator] = None, hooks: Optional[List] = None):
         super().__init__(initial_state, validator, hooks)
-        self._event_queue = AsyncEventQueue()
         self._async_lock = asyncio.Lock()
+        self._current_action: Optional[asyncio.Task] = None
 
     async def start(self) -> None:
         """Start the state machine with async validation."""
@@ -115,14 +108,13 @@ class AsyncStateMachine(StateMachine):
             if self._started:
                 return
 
-            # Reuse parent's resolution logic
-            self._current_state = self._resolve_state_for_start()
+            self._current_state = self._graph.resolve_active_state(self._initial_state)
 
-            # Validate using parent's validation but handle async
             errors = self._graph.validate()
             if errors:
                 raise ValidationError("\n".join(errors))
 
+            # Validator may be async or sync
             if asyncio.iscoroutinefunction(self._validator.validate_state_machine):
                 await self._validator.validate_state_machine(self)
             else:
@@ -133,56 +125,90 @@ class AsyncStateMachine(StateMachine):
 
     async def stop(self) -> None:
         """Stop the state machine asynchronously."""
-        if not self._started:
-            return
-        if self._current_state:
-            await self._notify_exit_async(self._current_state)
-        self._current_state = None
-        self._started = False
+        async with self._async_lock:
+            if not self._started:
+                return
+
+            if self._current_state:
+                await self._notify_exit_async(self._current_state)
+
+            self._current_state = None
+            self._started = False
 
     async def process_event(self, event: Event) -> bool:
-        """Process an event asynchronously."""
-        async with self._async_lock:
-            # Reuse parent's validation and transition selection
-            if not self._started or not self._current_state:
-                return False
+        """Process an event asynchronously with proper cancellation support."""
+        if not self._started or not self._current_state:
+            return False
 
-            valid_transitions = self._graph.get_valid_transitions(self._current_state, event)
-            if not valid_transitions:
-                return False
+        try:
+            async with self._async_lock:
+                valid_transitions = self._graph.get_valid_transitions(self._current_state, event)
+                if not valid_transitions:
+                    return False
 
-            transition = max(valid_transitions, key=lambda t: t.get_priority())
-            await self._execute_transition_async(transition, event)
-            return True
+                transition = max(valid_transitions, key=lambda t: t.get_priority())
+                return await self._execute_transition_async(transition, event)
 
-    async def _execute_transition_async(self, transition: Transition, event: Event) -> None:
-        """Execute transition actions asynchronously while reusing parent's logic."""
+        except asyncio.CancelledError:
+            # If we get cancelled while holding the lock, ensure cleanup
+            if self._current_action and not self._current_action.done():
+                self._current_action.cancel()
+                try:
+                    await asyncio.shield(self._current_action)
+                except (asyncio.CancelledError, Exception):
+                    pass
+            raise
+
+    async def _execute_transition_async(self, transition: Transition, event: Event) -> bool:
+        """Execute transition actions with proper cancellation support."""
+        previous_state = self._current_state
         try:
             await self._notify_exit_async(self._current_state)
 
-            # Execute actions with async support
+            # Execute actions (some might be async)
             for action in transition.actions:
-                try:
-                    if asyncio.iscoroutinefunction(action):
-                        await action(event)
-                    else:
+                if asyncio.iscoroutinefunction(action):
+                    try:
+                        self._current_action = asyncio.create_task(action(event))
+                        await self._current_action
+                    except asyncio.CancelledError:
+                        await self._rollback_transition(previous_state)
+                        raise
+                    except Exception as e:
+                        await self._rollback_transition(previous_state)
+                        await self._notify_error_async(e)
+                        return False
+                    finally:
+                        self._current_action = None
+                else:
+                    try:
                         action(event)
-                except Exception as e:
-                    await self._notify_error_async(e)
-                    return
+                    except Exception as e:
+                        await self._rollback_transition(previous_state)
+                        await self._notify_error_async(e)
+                        return False
 
-            # Reuse parent's state update logic
+            # Update state
             self._current_state = transition.target
             await self._notify_enter_async(self._current_state)
+            return True
 
+        except asyncio.CancelledError:
+            await self._rollback_transition(previous_state)
+            raise
         except Exception as e:
+            await self._rollback_transition(previous_state)
             await self._notify_error_async(e)
+            return False
+
+    async def _rollback_transition(self, previous_state: State) -> None:
+        """Roll back to previous state during cancellation or error."""
+        self._current_state = previous_state
+        await self._notify_enter_async(previous_state)
 
     async def _notify_enter_async(self, state: State) -> None:
         """Notify state entry asynchronously."""
-        # Call state's own enter method first
         state.on_enter()
-        # Then notify hooks
         for hook in self._hooks:
             if hasattr(hook, "on_enter"):
                 hook_method = hook.on_enter
@@ -193,7 +219,6 @@ class AsyncStateMachine(StateMachine):
 
     async def _notify_exit_async(self, state: State) -> None:
         """Notify hooks of state exit asynchronously."""
-        # No try/except here - let errors propagate up
         state.on_exit()
         for hook in self._hooks:
             if hasattr(hook, "on_exit"):
@@ -221,74 +246,57 @@ class _AsyncEventProcessingLoop:
     """
 
     def __init__(self, machine: AsyncStateMachine, event_queue: AsyncEventQueue) -> None:
-        """
-        Store references for async iteration.
-        """
         self._machine = machine
         self._queue = event_queue
         self._running = False
 
     async def start_loop(self) -> None:
-        """
-        Begin processing events asynchronously.
-        """
+        """Begin processing events asynchronously."""
         self._running = True
-        await self._machine.start()  # Ensure machine started
+        await self._machine.start()  # Ensure machine is started
 
         while self._running:
             event = await self._queue.dequeue()
             if event:
                 await self._machine.process_event(event)
             else:
-                # If no event, we can await a small sleep or wait again
                 await asyncio.sleep(0.01)
 
     async def stop_loop(self) -> None:
-        """
-        Stop processing events, allowing async tasks to conclude gracefully.
-        """
+        """Stop processing events, letting async tasks conclude gracefully."""
         self._running = False
         await self._machine.stop()
 
 
 def create_nested_state_machine(hook) -> AsyncStateMachine:
     """Create a nested state machine for testing."""
-    # Create states
     root = State("Root")
     processing = State("Processing")
     error = State("Error")
     operational = State("Operational")
     shutdown = State("Shutdown")
 
-    # Create machine with root state
     machine = AsyncStateMachine(initial_state=root, hooks=[hook])
 
-    # Add all states first
     machine.add_state(processing)
     machine.add_state(error)
     machine.add_state(operational)
     machine.add_state(shutdown)
 
-    # Add transitions after all states are in place
     machine.add_transition(Transition(source=root, target=processing, guards=[lambda e: e.name == "begin"]))
-
     machine.add_transition(Transition(source=processing, target=operational, guards=[lambda e: e.name == "complete"]))
-
     machine.add_transition(Transition(source=operational, target=processing, guards=[lambda e: e.name == "begin"]))
-
-    # Error handling transitions
     machine.add_transition(Transition(source=processing, target=error, guards=[lambda e: e.name == "error"]))
-
     machine.add_transition(Transition(source=error, target=operational, guards=[lambda e: e.name == "recover"]))
 
-    # Shutdown transition from any state
-    for state in [root, processing, error, operational]:
+    # High-priority shutdown from any state
+    for st in [root, processing, error, operational]:
         machine.add_transition(
             Transition(
-                source=state,
+                source=st,
                 target=shutdown,
                 guards=[lambda e: e.name == "shutdown"],
-                priority=10,  # Higher priority for shutdown
+                priority=10,
             )
         )
 

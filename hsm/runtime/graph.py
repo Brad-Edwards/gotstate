@@ -47,46 +47,42 @@ class StateGraph:
 
     def __init__(self) -> None:
         self._nodes: Dict[State, _GraphNode] = {}
+        # Use a set for transitions so we can do .add(transition)
         self._transitions: Dict[State, Set[Transition]] = {}
         self._history: Dict[CompositeState, _StateHistoryRecord] = {}
         self._history_lock = threading.Lock()
+        self._parent_map: Dict[State, Optional[State]] = {}
 
     def add_state(self, state: State, parent: Optional[State] = None) -> None:
-        """Add a state to the graph with optional parent."""
-        # Create new node if state doesn't exist
-        if state not in self._nodes:
-            self._nodes[state] = _GraphNode(state=state)
-            self._transitions[state] = set()
+        """Add a state with optional parent."""
+        if state in self._nodes:
+            return  # Already added
 
-        node = self._nodes[state]
+        # Create a new _GraphNode with no parent (yet)
+        new_node = _GraphNode(state=state)
+        self._nodes[state] = new_node
+        self._parent_map[state] = parent
 
-        # Handle parent relationship
-        if parent:
-            if parent not in self._nodes:
-                self.add_state(parent)
-
-            parent_node = self._nodes[parent]
-
-            # Check for cycles before updating relationships
+        # If there's a parent, link them in the _GraphNode structure
+        if parent is not None:
             if self._would_create_cycle(state, parent):
-                raise ValueError(f"Adding state {state.name} as child of {parent.name} would create a cycle")
+                raise ValueError(f"Adding state {state.name} to parent {parent.name} would create a cycle")
+            parent_node = self._nodes[parent]
+            new_node.parent = parent_node
+            parent_node.children.add(new_node)
 
-            # Update parent-child relationships
-            if node.parent:
-                # Remove from old parent's children
-                node.parent.children.remove(node)
-
-            parent_node.children.add(node)
-            node.parent = parent_node
-            state.parent = parent
+            # If parent is a CompositeState, also update parent's ._children
+            if isinstance(parent, CompositeState):
+                parent._children.add(state)
+                state.parent = parent
 
     def _would_create_cycle(self, state: State, new_parent: State) -> bool:
         """Check if adding state under new_parent would create a cycle."""
-        current = self._nodes[new_parent]
-        while current.parent:
-            if current.parent.state == state:
+        current = self._parent_map.get(new_parent)
+        while current:
+            if current == state:
                 return True
-            current = current.parent
+            current = self._parent_map.get(current)
         return False
 
     def add_transition(self, transition: Transition) -> None:
@@ -96,6 +92,10 @@ class StateGraph:
         if transition.target not in self._nodes:
             raise ValueError(f"Target state {transition.target.name} not in graph")
 
+        # Initialize if needed
+        if transition.source not in self._transitions:
+            self._transitions[transition.source] = set()
+
         self._transitions[transition.source].add(transition)
         self._nodes[transition.source].transitions.add(transition)
 
@@ -103,11 +103,8 @@ class StateGraph:
         """Get all valid transitions from a state for an event."""
         if state not in self._transitions:
             return []
-        return sorted(
-            [t for t in self._transitions[state] if t.evaluate_guards(event)],
-            key=lambda t: t.get_priority(),
-            reverse=True,
-        )
+        valid = [t for t in self._transitions[state] if t.evaluate_guards(event)]
+        return sorted(valid, key=lambda t: t.get_priority(), reverse=True)
 
     def get_ancestors(self, state: State) -> List[State]:
         """Get all ancestor states in order from immediate parent to root."""
@@ -115,21 +112,23 @@ class StateGraph:
             return []
 
         ancestors = []
-        current = self._nodes[state]
-        while current.parent:
-            current = current.parent
-            ancestors.append(current.state)
+        current = self._parent_map.get(state)
+        while current:
+            ancestors.append(current)
+            current = self._parent_map.get(current)
         return ancestors
 
     def get_children(self, state: State) -> Set[State]:
         """Get immediate child states of a state."""
-        if state not in self._nodes:
+        node = self._nodes.get(state)
+        if not node:
             return set()
-        return {node.state for node in self._nodes[state].children}
+        # Return the underlying .state from each child node
+        return {child_node.state for child_node in node.children}
 
     def get_root_states(self) -> Set[State]:
         """Get all states that have no parent."""
-        return {node.state for node in self._nodes.values() if not node.parent}
+        return {node.state for node in self._nodes.values() if node.parent is None}
 
     def validate(self) -> List[str]:
         """Validate the graph structure."""
@@ -137,73 +136,73 @@ class StateGraph:
         visited = set()
         path = []
 
-        def detect_cycle(state: State) -> None:
-            if state in path:
-                cycle_start = path.index(state)
-                cycle_path = [s.name for s in path[cycle_start:]] + [state.name]
+        def detect_cycle(st: State) -> None:
+            if st in path:
+                cycle_start = path.index(st)
+                cycle_path = [s.name for s in path[cycle_start:]] + [st.name]
                 errors.append(f"Cycle detected in state hierarchy: {' -> '.join(cycle_path)}")
                 return
 
-            if state in visited:
+            if st in visited:
                 return
 
-            visited.add(state)
-            path.append(state)
+            visited.add(st)
+            path.append(st)
 
-            node = self._nodes[state]
-            for child_node in node.children:
+            # Recurse on children
+            for child_node in self._nodes[st].children:
                 detect_cycle(child_node.state)
 
             path.pop()
 
         # Start cycle detection from root states
-        root_states = [state for state in self._nodes.keys() if not self._nodes[state].parent]
-
-        # If no root states found and graph is not empty, there must be a cycle
-        if not root_states and self._nodes:
-            errors.append("No root states found - graph contains cycles")
-            # Start from any state to find the cycle
-            detect_cycle(next(iter(self._nodes.keys())))
-        else:
-            for state in root_states:
-                detect_cycle(state)
+        for root_node in [n for n in self._nodes.values() if n.parent is None]:
+            detect_cycle(root_node.state)
 
         # Validate composite states
         for node in self._nodes.values():
-            state = node.state
-            if isinstance(state, CompositeState):
+            st = node.state
+            if isinstance(st, CompositeState):
+                # If it's a composite with no children, that's possibly an error
                 if not node.children:
-                    errors.append(f"Composite state '{state.name}' has no children")
-                if not state._initial_state and node.children:
+                    errors.append(f"Composite state '{st.name}' has no children")
+
+                # If it has children but no _initial_state, pick one
+                if node.children and not st._initial_state:
                     first_child = next(iter(node.children)).state
-                    state._initial_state = first_child
+                    st._initial_state = first_child
 
         return errors
 
     def record_history(self, composite_state: CompositeState, active_state: State) -> None:
-        """Thread-safe history recording"""
+        """Thread-safe history recording."""
         with self._history_lock:
             self._history[composite_state] = _StateHistoryRecord(
                 timestamp=time.time(), state=active_state, composite_state=composite_state
             )
 
     def resolve_active_state(self, state: State) -> State:
-        """Resolve the actual active state considering history and hierarchy"""
+        """Resolve active state using cached history."""
         if isinstance(state, CompositeState):
-            # Check history first
-            history_state = self._history.get(state)
-            if history_state:
-                return history_state.state
-            # Fall back to initial state
+            with self._history_lock:
+                record = self._history.get(state)
+                if record:
+                    return record.state
             return state._initial_state or state
         return state
 
     def get_composite_ancestors(self, state: State) -> List[CompositeState]:
-        """Get only composite state ancestors"""
-        return [s for s in self.get_ancestors(state) if isinstance(s, CompositeState)]
+        """Get composite state ancestors efficiently."""
+        ancestors = []
+        current = self._parent_map.get(state)
+        while current:
+            if isinstance(current, CompositeState):
+                ancestors.append(current)
+            current = self._parent_map.get(current)
+        return ancestors
 
     def clear_history(self) -> None:
-        """Clear all history records"""
+        """Clear all history records."""
         with self._history_lock:
             self._history.clear()
 
@@ -214,3 +213,7 @@ class StateGraph:
         if state not in self._nodes:
             raise ValueError(f"State {state.name} not in graph")
         composite._initial_state = state
+
+    def get_all_states(self) -> Set[State]:
+        """Get all states in the graph efficiently."""
+        return set(self._nodes.keys())

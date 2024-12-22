@@ -17,7 +17,8 @@ async def test_async_state_machine_init(dummy_state, validator):
     from hsm.runtime.async_support import AsyncStateMachine
 
     asm = AsyncStateMachine(initial_state=dummy_state, validator=validator)
-    assert asm.current_state == dummy_state
+    assert asm._initial_state == dummy_state
+    assert asm.current_state is None
 
 
 @pytest.mark.asyncio
@@ -191,7 +192,7 @@ async def test_async_state_machine_process_event_when_stopped(dummy_state, mock_
     asm = AsyncStateMachine(initial_state=dummy_state)
     # Don't start the machine
     await asm.process_event(mock_event)  # Should do nothing
-    assert asm.current_state == dummy_state
+    assert asm.current_state is None
 
 
 @pytest.mark.asyncio

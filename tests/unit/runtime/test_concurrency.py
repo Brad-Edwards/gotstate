@@ -4,6 +4,8 @@
 
 from unittest.mock import MagicMock
 
+from hsm.runtime.concurrency import with_lock
+
 
 def test_lock_factory():
     from hsm.runtime.concurrency import _LockFactory
@@ -18,7 +20,7 @@ def test_lock_context_manager():
     from hsm.runtime.concurrency import _LockContextManager
 
     lock = MagicMock()
-    with _LockContextManager(lock):
+    with with_lock(lock):
         lock.acquire.assert_called_once()
     lock.release.assert_called_once()
 

@@ -113,8 +113,8 @@ class _DefaultValidationRules:
             raise ValidationError("StateMachine must have an initial state.")
 
         try:
-            transitions = machine._context.get_transitions()
-            all_states = machine._context.get_states()
+            transitions = machine.get_transitions()
+            all_states = machine.get_states()
 
             # If this is a mock in tests, skip further validation
             if getattr(machine, "_mock_return_value", None) is not None:

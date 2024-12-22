@@ -1,35 +1,27 @@
-"""Runtime context management for state machines."""
+"""
+Runtime context management for state machines, relying on StateGraph for history.
+"""
 
 import threading
 import time
-from dataclasses import dataclass
-from typing import Dict, Optional, Set
+from typing import Optional
 
 from ..core.events import Event
 from ..core.states import CompositeState, State
+from .concurrency import with_lock
 from .graph import StateGraph
-
-
-@dataclass
-class _StateHistoryRecord:
-    """Immutable record of historical state information."""
-
-    timestamp: float
-    state: State
-    composite_state: CompositeState
 
 
 class RuntimeContext:
     """
     Manages the runtime state of a state machine.
-    Handles current state tracking, history, and thread-safe transitions.
+    Handles current state tracking and thread-safe transitions.
+    History is stored in the StateGraph to avoid duplication.
     """
 
     def __init__(self, graph: StateGraph, initial_state: State) -> None:
         self._graph = graph
         self._current_state = initial_state
-        self._history: Dict[CompositeState, _StateHistoryRecord] = {}
-        self._history_lock = threading.Lock()
         self._transition_lock = threading.Lock()
 
     def get_current_state(self) -> State:
@@ -37,23 +29,13 @@ class RuntimeContext:
         return self._current_state
 
     def process_event(self, event: Event) -> bool:
-        """
-        Process an event in the current context.
-        Returns True if a transition was taken.
-        """
-        with self._transition_lock:
-            # Get valid transitions from the graph
+        with with_lock(self._transition_lock):
             valid_transitions = self._graph.get_valid_transitions(self._current_state, event)
             if not valid_transitions:
                 return False
 
-            # Take highest priority transition
             transition = max(valid_transitions, key=lambda t: t.get_priority())
 
-            # Record history before exit
-            self._record_history(self._current_state)
-
-            # Execute transition
             self._current_state.on_exit()
             transition.execute_actions(event)
             self._current_state = transition.target
@@ -61,18 +43,15 @@ class RuntimeContext:
 
             return True
 
-    def _record_history(self, state: State) -> None:
-        """Record state history for composite states."""
-        with self._history_lock:
-            # Find all ancestor composite states
-            ancestors = self._graph.get_ancestors(state)
-            for ancestor in ancestors:
-                if isinstance(ancestor, CompositeState):
-                    self._history[ancestor] = _StateHistoryRecord(
-                        timestamp=time.time(), state=state, composite_state=ancestor
-                    )
+    def _record_history_in_graph(self, state: State) -> None:
+        """Use the graph to store history for each composite ancestor."""
+        # For each composite ancestor, call graph.record_history()
+        ancestors = self._graph.get_composite_ancestors(state)
+        for ancestor in ancestors:
+            self._graph.record_history(ancestor, state)
 
     def get_history_state(self, composite_state: CompositeState) -> Optional[State]:
-        """Get the last active state for a composite state."""
-        record = self._history.get(composite_state)
-        return record.state if record else None
+        """
+        Get the last active state for a composite state from the graph.
+        """
+        return self._graph.get_history_state(composite_state)
