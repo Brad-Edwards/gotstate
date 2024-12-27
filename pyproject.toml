@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gotstate"
-version = "1.0.2"
+version = "1.0.3"
 description = "A hierarchical finite state machine library"
 readme = "README.md"
 authors = [
@@ -30,10 +30,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/hsm"
-Repository = "https://github.com/yourusername/hsm"
-Documentation = "https://github.com/yourusername/hsm#readme"
-Changelog = "https://github.com/yourusername/hsm/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Brad-Edwards/gotstate"
+Repository = "https://github.com/Brad-Edwards/gotstate"
+Documentation = "https://github.com/Brad-Edwards/gotstate#readme"
+Changelog = "https://github.com/Brad-Edwards/gotstate/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["."]
