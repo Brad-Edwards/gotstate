@@ -45,3 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.3] - 2024-12-22
 ### Changed
 - Updated project URLs in package metadata
+
+## [1.0.4] - 2025-01-26
+### Fixed
+- Updated package configuration to use gotstate instead of hsm
