@@ -37,7 +37,7 @@ Changelog = "https://github.com/Brad-Edwards/gotstate/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["hsm*"]
+include = ["gotstate*"]
 exclude = ["tests*"]
 
 [tool.black]
@@ -73,14 +73,14 @@ skip = [
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q -v --cov=hsm --cov-report=term-missing:skip-covered --cov-report=html --cov-report=xml"
+addopts = "-ra -q -v --cov=gotstate --cov-report=term-missing:skip-covered --cov-report=html --cov-report=xml"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 
 [tool.coverage.run]
-source = ["hsm"]
+source = ["gotstate"]
 branch = true
 omit = [
     "tests/*",
@@ -121,4 +121,4 @@ output = "coverage-reports/coverage.xml"
 [tool.bandit]
 exclude_dirs = ["tests/**"]
 skips = ["B101"]  # Skip assert warnings globally
-targets = ["hsm"]
+targets = ["gotstate"]

@@ -59,5 +59,8 @@ scratch
 starforge.yml
 prompt_endings
 
+
 # lintit
 lintit.sh
+
+notes/
