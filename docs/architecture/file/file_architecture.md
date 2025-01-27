@@ -2,6 +2,8 @@
 
 ## Module Structure
 
+> For detailed visual representations of the architecture, including module dependencies, security boundaries, data flow, and extension points, see [diagrams.md](diagrams.md).
+
 ```
 gotstate/
 ├── core/
@@ -31,6 +33,8 @@ gotstate/
 ```
 
 ## Cross-Module Contracts
+
+> The interactions between modules follow specific data flow patterns as illustrated in the sequence diagram in [diagrams.md](diagrams.md#data-flow).
 
 ### Core Module Contracts
 
@@ -142,9 +146,11 @@ gotstate/
 
 - Defines extension interfaces
 - Manages extension lifecycle
-- Provides customization points
+- Provides customization points (see [Extension Points Diagram](diagrams.md#extension-points))
 - Coordinates with sandbox.py for isolation
 - Integrates with all modules for extension
+- Manages extension point access control
+- Enforces extension boundaries
 
 2. sandbox.py
 
@@ -163,6 +169,9 @@ gotstate/
 - Resource usage monitoring
 - Extension sandboxing
 - Type system safety
+- Security boundaries between core components and extensions (see [Security Boundaries Diagram](diagrams.md#security-boundaries))
+- Validated data flow paths through the system
+- Strict isolation of extension execution
 
 2. Error Handling
 
@@ -223,6 +232,8 @@ gotstate/
 - Chain of Responsibility for validation
 
 ## Module Dependencies
+
+> The following dependency graph shows the high-level relationships between modules. For a more detailed interactive view, see the [Module Dependencies Diagram](diagrams.md#module-dependencies).
 
 ```mermaid
 graph TB

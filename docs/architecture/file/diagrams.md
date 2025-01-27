@@ -1,6 +1,10 @@
 # File Level Architecture Diagrams
 
+This document provides visual representations of the architecture described in [file_architecture.md](file_architecture.md). These diagrams should be read in conjunction with the detailed module contracts and cross-cutting concerns described in the main architecture document.
+
 ## Module Dependencies
+
+> This diagram visualizes the module contracts and dependencies described in detail in the [Cross-Module Contracts](file_architecture.md#cross-module-contracts) section.
 
 ```mermaid
 graph TB
@@ -73,6 +77,8 @@ graph TB
 
 ## Security Boundaries
 
+> This diagram illustrates the security aspects described in the [Cross-Cutting Concerns](file_architecture.md#cross-cutting-concerns) section, with particular focus on the security subsection.
+
 ```mermaid
 graph TB
     subgraph security[Security Boundary]
@@ -126,6 +132,8 @@ graph TB
 
 ## Data Flow
 
+> This sequence diagram shows the runtime behavior of the system, illustrating how the [Module Contracts](file_architecture.md#cross-module-contracts) interact during typical operations.
+
 ```mermaid
 sequenceDiagram
     participant Client
@@ -151,6 +159,8 @@ sequenceDiagram
 ```
 
 ## Extension Points
+
+> This diagram provides a visual representation of the extension system described in the [Extensions Module Contracts](file_architecture.md#extensions-module-contracts) section.
 
 ```mermaid
 graph TB
