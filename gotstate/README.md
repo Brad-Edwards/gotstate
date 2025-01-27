@@ -10,6 +10,8 @@ The gotstate package provides a Python implementation of UML-compliant Hierarchi
 - Parallel region handling
 - History state tracking
 - Runtime validation
+- Configuration management
+- Storage backend abstraction
 
 ## Interactions
 
@@ -18,7 +20,8 @@ The package interacts with:
 - Client code through its public API
 - Python type system for static/runtime type checking
 - Operating system for concurrency primitives
-- Storage systems for persistence
+- Storage systems through pluggable backends
+- Configuration providers for environment setup
 - Logging system for diagnostics
 
 ## Cross-cutting Concerns

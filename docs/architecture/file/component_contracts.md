@@ -119,10 +119,24 @@ This document defines the high-level contracts between major components at the f
   - validator.py for validation
   - machine.py for state access
   - types.py for type conversion
+  - storage.py for persistence operations
 - Boundaries:
   - Owns serialization format
-  - Controls persistence
+  - Delegates persistence operations
   - Manages versioning
+
+### storage.py
+
+- Provides storage backend abstraction
+- Manages storage operations
+- Coordinates with:
+  - serializer.py for data persistence
+  - validator.py for format validation
+  - machine.py for state access
+- Boundaries:
+  - Owns storage operations
+  - Controls backend access
+  - Manages storage lifecycle
 
 ### validator.py
 

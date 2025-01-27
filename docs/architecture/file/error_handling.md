@@ -104,11 +104,18 @@ This document defines standard error handling patterns across all components at 
 1. serializer.py
 
 - Format errors -> validator.py
-- I/O errors -> machine.py
+- Storage errors -> storage.py
 - Type errors -> types.py
 - Version errors -> validator.py
 
-2. validator.py
+2. storage.py
+
+- Backend errors -> monitor.py
+- Format errors -> validator.py
+- Access errors -> machine.py
+- Resource errors -> monitor.py
+
+3. validator.py
 
 - Schema errors -> machine.py
 - Type errors -> types.py

@@ -41,9 +41,75 @@ Package-level configuration with security and validation:
         'max_memory': '1GB',     # Memory usage limit
         'max_threads': 4,        # Thread pool size
         'max_states': 1000       # State cache size
+    },
+    'storage': {
+        'backend': 'file',       # Storage backend type
+        'path': './data',        # Backend-specific config
+        'format': 'json',        # Serialization format
+        'compression': False     # Enable compression
+    },
+    'runtime': {
+        'executor': 'thread',    # Execution model
+        'scheduler': 'default',  # Scheduler implementation
+        'monitor': 'basic'       # Monitoring level
     }
 }
 ```
+
+### Configuration Providers
+
+The package supports multiple configuration sources:
+
+1. Environment Variables
+
+```bash
+GOTSTATE_STORAGE_BACKEND=file
+GOTSTATE_STORAGE_PATH=./data
+GOTSTATE_RUNTIME_EXECUTOR=thread
+```
+
+2. Configuration File
+
+```yaml
+storage:
+  backend: file
+  path: ./data
+runtime:
+  executor: thread
+```
+
+3. Programmatic Configuration
+
+```python
+config = Config()
+config.storage.backend = 'file'
+config.storage.path = './data'
+```
+
+### Runtime Configuration
+
+The package supports runtime reconfiguration of certain components:
+
+1. Modifiable Settings
+
+- Storage backend configuration
+- Runtime execution parameters
+- Monitoring settings
+- Resource limits
+
+2. Configuration Validation
+
+- Schema validation
+- Dependency checking
+- Security validation
+- Resource validation
+
+3. Configuration Application
+
+- Atomic updates
+- Rollback support
+- State preservation
+- Event notification
 
 ### Version Management
 

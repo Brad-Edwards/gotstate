@@ -94,6 +94,28 @@ sequenceDiagram
 
 ## Persistence Operations
 
+### Storage Protocol
+
+```mermaid
+sequenceDiagram
+    participant Serializer
+    participant Storage
+    participant Validator
+    participant Machine
+
+    Serializer->>Storage: store_state
+    Storage->>Validator: validate_format
+    Validator-->>Storage: format_valid
+    Storage->>Storage: persist_data
+    Storage-->>Serializer: storage_complete
+
+    Serializer->>Storage: load_state
+    Storage->>Storage: retrieve_data
+    Storage->>Validator: validate_loaded
+    Validator-->>Storage: data_valid
+    Storage-->>Serializer: loaded_state
+```
+
 ### Serialization Protocol
 
 ```mermaid
@@ -102,6 +124,7 @@ sequenceDiagram
     participant Validator
     participant Machine
     participant Types
+    participant Storage
 
     Serializer->>Machine: get_machine_state
     Machine-->>Serializer: current_state
@@ -109,7 +132,30 @@ sequenceDiagram
     Types-->>Serializer: converted_data
     Serializer->>Validator: validate_format
     Validator-->>Serializer: format_valid
-    Serializer->>Serializer: serialize_data
+    Serializer->>Storage: store_state
+    Storage-->>Serializer: storage_complete
+```
+
+### Storage Backend Protocol
+
+```mermaid
+sequenceDiagram
+    participant Storage
+    participant Backend
+    participant Monitor
+
+    Storage->>Backend: initialize_backend
+    Backend->>Monitor: register_backend
+    Monitor-->>Backend: backend_registered
+    Backend-->>Storage: backend_ready
+
+    Storage->>Backend: write_data
+    Backend->>Monitor: log_operation
+    Backend-->>Storage: write_complete
+
+    Storage->>Backend: read_data
+    Backend->>Monitor: log_operation
+    Backend-->>Storage: read_complete
 ```
 
 ### Validation Protocol
