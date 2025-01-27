@@ -64,3 +64,6 @@ prompt_endings
 lintit.sh
 
 notes/
+combined_docs/
+.vscode/
+.mypy_cache/
