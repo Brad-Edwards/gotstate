@@ -1,0 +1,1296 @@
+=== DIRECTORY TREE (INCLUDED ONLY) ===
+gotstate/
+    tests/
+        unit/
+    gotstate/
+        runtime/
+        core/
+        types/
+        extensions/
+        persistence/
+
+=== PACKED FILES ===
+
+--- START OF FILE: /home/atomik/src/gotstate/tests/__init__.py ---
+
+--- END OF FILE: /home/atomik/src/gotstate/tests/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/tests/unit/__init__.py ---
+
+--- END OF FILE: /home/atomik/src/gotstate/tests/unit/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/__init__.py ---
+"""gotstate: UML-compliant Hierarchical Finite State Machine (HFSM) implementation
+
+This package provides a robust implementation of hierarchical state machines following
+UML state machine semantics.
+
+Responsibilities:
+    - State machine definition and execution
+    - Event processing and transition management
+    - Hierarchical state composition 
+    - Parallel region handling
+    - History state tracking
+    - Runtime validation
+
+Interactions:
+    - Client code through public API
+    - Python type system for static/runtime type checking
+    - Operating system for concurrency primitives
+    - Storage systems for persistence
+    - Logging system for diagnostics
+
+Cross-cutting Concerns:
+    Thread Safety:
+        - All public APIs are thread-safe
+        - Internal state protected by appropriate locks
+        - Documented thread safety guarantees per component
+
+    Error Handling:
+        - Structured error hierarchy
+        - Consistent error reporting
+        - Clean error recovery paths
+
+    Logging:
+        - Structured logging format
+        - Configurable verbosity levels
+        - Performance impact minimized
+
+    Performance:
+        - O(1) state lookup where possible
+        - Bounded memory usage
+        - Predictable latency
+
+    Security:
+        - Input validation on all public APIs
+        - Safe serialization/deserialization
+        - Protected internal state
+"""
+
+__version__ = "0.1.0"
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/runtime/__init__.py ---
+"""
+Runtime package for execution and monitoring.
+
+Architecture:
+- Manages event execution and run-to-completion
+- Handles time and change event scheduling
+- Provides monitoring and metrics
+- Coordinates with core components
+- Maintains execution guarantees
+
+Design Patterns:
+- State Pattern for execution
+- Publisher/Subscriber for monitoring
+- Factory Pattern for creation
+- Builder Pattern for configuration
+- Singleton Pattern for schedulers
+
+Security:
+- Execution isolation
+- Resource monitoring
+- Timer management
+- Event validation
+- Extension boundaries
+
+Cross-cutting:
+- Error handling with recovery
+- Performance optimization
+- Execution metrics
+- Thread safety
+"""
+
+from .executor import Executor
+from .scheduler import Scheduler
+from .monitor import Monitor
+
+__all__ = ["Executor", "Scheduler", "Monitor"]
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/runtime/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/runtime/monitor.py ---
+"""
+State machine monitoring and metrics management.
+
+Architecture:
+- Provides introspection capabilities
+- Emits state machine events
+- Tracks execution metrics
+- Coordinates with all modules
+- Maintains monitoring boundaries
+
+Design Patterns:
+- Observer Pattern: State monitoring
+- Publisher/Subscriber: Event emission
+- Strategy Pattern: Metric collection
+- Decorator Pattern: Monitoring hooks
+- Chain of Responsibility: Event filtering
+
+Responsibilities:
+1. State Introspection
+   - Current state access
+   - Active transitions
+   - Event status
+   - Machine configuration
+   - Runtime metrics
+
+2. Event Emission
+   - State changes
+   - Transition events
+   - Event handling
+   - Error conditions
+   - Resource usage
+
+3. Metric Collection
+   - Execution timing
+   - Resource usage
+   - Event statistics
+   - Error rates
+   - Performance data
+
+4. Monitoring Control
+   - Filter configuration
+   - Metric selection
+   - Event filtering
+   - Resource limits
+   - Data retention
+
+Security:
+- Data protection
+- Access control
+- Resource limits
+- Event filtering
+
+Cross-cutting:
+- Error handling
+- Performance impact
+- Resource usage
+- Thread safety
+
+Dependencies:
+- machine.py: Machine monitoring
+- executor.py: Execution metrics
+- scheduler.py: Timer metrics
+- event.py: Event monitoring
+"""
+
+
+class Monitor:
+    """Monitor class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/runtime/monitor.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/runtime/scheduler.py ---
+"""
+Time and change event scheduling management.
+
+Architecture:
+- Manages time and change events
+- Maintains timer consistency
+- Coordinates with Event for queuing
+- Integrates with Executor for processing
+- Handles timer interruptions
+
+Design Patterns:
+- Singleton Pattern: Timer management
+- Observer Pattern: Time events
+- Command Pattern: Scheduled actions
+- Strategy Pattern: Scheduling policies
+- Chain of Responsibility: Event handling
+
+Responsibilities:
+1. Time Events
+   - Relative time events
+   - Absolute time events
+   - Timer management
+   - Timer cancellation
+   - Timer interruption
+
+2. Change Events
+   - Change detection
+   - State condition evaluation
+   - Change event triggers
+   - Condition monitoring
+   - Event generation
+
+3. Timer Management
+   - Timer creation
+   - Timer cancellation
+   - Timer interruption
+   - Timer state preservation
+   - Timer recovery
+
+4. Event Coordination
+   - Event queuing
+   - Priority handling
+   - Order preservation
+   - Timer synchronization
+   - Resource management
+
+Security:
+- Timer isolation
+- Resource limits
+- Event validation
+- State protection
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Timer metrics
+- Thread safety
+
+Dependencies:
+- event.py: Event processing
+- executor.py: Event execution
+- monitor.py: Timer monitoring
+- machine.py: Machine context
+"""
+
+
+class Scheduler:
+    """Scheduler class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/runtime/scheduler.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/runtime/executor.py ---
+"""
+Event execution and run-to-completion management.
+
+Architecture:
+- Enforces run-to-completion semantics
+- Manages transition execution
+- Handles concurrent operations
+- Coordinates with Event for processing
+- Integrates with Monitor for metrics
+
+Design Patterns:
+- State Pattern: Execution states
+- Command Pattern: Execution units
+- Observer Pattern: Execution events
+- Strategy Pattern: Execution policies
+- Chain of Responsibility: Event processing
+
+Responsibilities:
+1. Run-to-Completion
+   - Event processing semantics
+   - Event queuing
+   - Transition atomicity
+   - Order preservation
+   - Re-entrancy handling
+
+2. Transition Execution
+   - Guard evaluation
+   - Action execution
+   - State changes
+   - Error recovery
+   - Resource cleanup
+
+3. Concurrency
+   - Parallel execution
+   - Synchronization
+   - Resource management
+   - Deadlock prevention
+   - Race condition handling
+
+4. Error Management
+   - Execution failures
+   - Partial completion
+   - State recovery
+   - Resource cleanup
+   - Error propagation
+
+Security:
+- Execution isolation
+- Resource boundaries
+- Action sandboxing
+- State protection
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Execution metrics
+- Thread safety
+
+Dependencies:
+- event.py: Event processing
+- transition.py: Transition handling
+- monitor.py: Execution monitoring
+- machine.py: Machine context
+"""
+
+
+class Executor:
+    """Executor class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/runtime/executor.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/core/state.py ---
+"""
+State class and hierarchy management.
+
+Architecture:
+- Implements hierarchical state structure using Composite pattern
+- Manages state data with isolation guarantees
+- Enforces state invariants and validation
+- Coordinates with Region for parallel state execution
+- Preserves history state information
+
+Design Patterns:
+- Composite Pattern: Hierarchical state structure
+- Observer Pattern: State change notifications
+- Memento Pattern: History state preservation
+- Builder Pattern: State configuration
+- Visitor Pattern: State traversal
+
+Responsibilities:
+1. State Hierarchy
+   - Parent/child relationships
+   - Composite state management
+   - Submachine state handling
+   - State redefinition support
+
+2. State Data
+   - Data isolation between states
+   - Parent state data inheritance
+   - Parallel region data management
+   - History state data preservation
+
+3. State Behavior
+   - Entry/exit actions
+   - Do-activity execution
+   - Internal transitions
+   - State invariants
+
+4. State Configuration
+   - Initial/final states
+   - History state types
+   - Entry/exit points
+   - Choice/junction pseudostates
+
+Security:
+- State data isolation
+- Action execution boundaries
+- Resource usage monitoring
+- Validation at state boundaries
+
+Cross-cutting:
+- Error handling for state operations
+- Performance optimization for traversal
+- Monitoring of state changes
+- Thread safety for parallel regions
+
+Dependencies:
+- region.py: Parallel region coordination
+- transition.py: State change management
+- event.py: Event processing integration
+- machine.py: State machine context
+"""
+
+
+class State:
+    """State class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/core/state.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/core/__init__.py ---
+"""
+Core package providing the fundamental HFSM functionality.
+
+Architecture:
+- Implements hierarchical state machine core components
+- Manages state hierarchy, transitions, events, and regions
+- Coordinates between components through machine orchestration
+
+Design Patterns:
+- Composite Pattern for state hierarchy
+- Observer Pattern for state changes
+- Command Pattern for transitions
+- Strategy Pattern for event processing
+- Mediator Pattern for coordination
+
+Security:
+- Input validation at module boundaries
+- State data isolation
+- Resource usage monitoring
+- Type system safety checks
+
+Cross-cutting:
+- Error handling with consistent propagation
+- Performance optimization for state operations
+- Monitoring hooks for metrics
+- Testing boundaries for validation
+"""
+
+from .state import State
+from .transition import Transition
+from .event import Event
+from .region import Region
+from .machine import StateMachine
+
+__all__ = ["State", "Transition", "Event", "Region", "StateMachine"]
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/core/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/core/region.py ---
+"""
+Parallel region and concurrency management.
+
+Architecture:
+- Implements parallel region execution
+- Manages region synchronization
+- Handles cross-region transitions
+- Coordinates with State for hierarchy
+- Integrates with Executor for concurrency
+
+Design Patterns:
+- Composite Pattern: Region hierarchy
+- Observer Pattern: Region events
+- Mediator Pattern: Region coordination
+- State Pattern: Region lifecycle
+- Strategy Pattern: Execution policies
+
+Responsibilities:
+1. Parallel Execution
+   - True parallel regions
+   - State consistency
+   - Cross-region transitions
+   - Join/fork pseudostates
+   - Event ordering
+
+2. Region Synchronization
+   - State consistency
+   - Event processing
+   - Synchronization points
+   - Race condition prevention
+   - Resource coordination
+
+3. Region Lifecycle
+   - Initialization sequence
+   - Termination order
+   - History restoration
+   - Cross-region coordination
+   - Data consistency
+
+4. Event Management
+   - Event ordering
+   - Event propagation
+   - Priority handling
+   - Scope boundaries
+   - Processing rules
+
+Security:
+- Region isolation
+- Resource boundaries
+- State protection
+- Event validation
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Region metrics
+- Thread safety
+
+Dependencies:
+- state.py: State hierarchy
+- event.py: Event processing
+- executor.py: Parallel execution
+- machine.py: Machine context
+"""
+
+
+class Region:
+    """Region class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/core/region.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/core/machine.py ---
+"""
+State machine orchestration and lifecycle management.
+
+Architecture:
+- Orchestrates state machine components
+- Manages machine lifecycle and configuration
+- Coordinates core component interactions
+- Integrates with Monitor for introspection
+- Handles dynamic modifications
+
+Design Patterns:
+- Facade Pattern: Component coordination
+- Builder Pattern: Machine configuration
+- Observer Pattern: State notifications
+- Mediator Pattern: Component interaction
+- Strategy Pattern: Machine policies
+
+Responsibilities:
+1. Machine Lifecycle
+   - Initialization
+   - Configuration
+   - Dynamic modification
+   - Version management
+   - Termination
+
+2. Component Coordination
+   - State management
+   - Transition handling
+   - Event processing
+   - Region execution
+   - Resource control
+
+3. Machine Configuration
+   - Validation rules
+   - Security policies
+   - Resource limits
+   - Extension settings
+   - Monitoring options
+
+4. Dynamic Modifications
+   - Runtime changes
+   - Semantic consistency
+   - State preservation
+   - Version compatibility
+   - Modification atomicity
+
+Security:
+- Configuration validation
+- Component isolation
+- Resource management
+- Extension control
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Machine metrics
+- Thread safety
+
+Dependencies:
+- state.py: State management
+- transition.py: Transition handling
+- event.py: Event processing
+- region.py: Region coordination
+- monitor.py: Machine monitoring
+"""
+
+
+class StateMachine:
+    """StateMachine class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/core/machine.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/core/transition.py ---
+"""
+Transition types and behavior management.
+
+Architecture:
+- Implements transition type hierarchy and behavior
+- Manages transition execution and actions
+- Resolves transition conflicts
+- Coordinates with State for state changes
+- Integrates with Event for triggers
+
+Design Patterns:
+- Command Pattern: Transition execution
+- Strategy Pattern: Transition types
+- Chain of Responsibility: Guard evaluation
+- Observer Pattern: Transition notifications
+- Template Method: Transition execution steps
+
+Responsibilities:
+1. Transition Types
+   - External transitions
+   - Internal transitions
+   - Local transitions
+   - Compound transitions
+   - Protocol transitions
+
+2. Transition Behavior
+   - Guard conditions
+   - Actions execution
+   - Source/target validation
+   - Completion transitions
+   - Time/change triggers
+
+3. Semantic Resolution
+   - Conflict resolution
+   - Priority handling
+   - Simultaneous transitions
+   - Cross-region coordination
+   - Execution ordering
+
+4. Error Handling
+   - Partial completion
+   - Guard evaluation errors
+   - Action execution failures
+   - State consistency
+   - Resource cleanup
+
+Security:
+- Action execution isolation
+- Guard evaluation boundaries
+- Resource usage control
+- State change validation
+
+Cross-cutting:
+- Error propagation
+- Performance monitoring
+- Transition metrics
+- Thread safety
+
+Dependencies:
+- state.py: State change coordination
+- event.py: Event trigger integration
+- region.py: Cross-region transitions
+- machine.py: Machine context
+"""
+
+
+class Transition:
+    """Transition class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/core/transition.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/core/event.py ---
+"""
+Event processing and queue management.
+
+Architecture:
+- Implements event processing and queue management
+- Handles event patterns and ordering
+- Maintains event processing semantics
+- Coordinates with Executor for processing
+- Integrates with Scheduler for time events
+
+Design Patterns:
+- Observer Pattern: Event notifications
+- Command Pattern: Event execution
+- Strategy Pattern: Processing patterns
+- Queue Pattern: Event queuing
+- Chain of Responsibility: Event handling
+
+Responsibilities:
+1. Event Processing
+   - Synchronous processing
+   - Asynchronous processing
+   - Event deferral
+   - Priority handling
+   - Completion events
+
+2. Event Queue
+   - Queue management
+   - Event ordering
+   - Event cancellation
+   - Timeout handling
+   - Event filtering
+
+3. Processing Patterns
+   - Single consumption
+   - Broadcast events
+   - Conditional events
+   - Event scoping
+   - Priority rules
+
+4. Run-to-Completion
+   - RTC semantics
+   - Queue during transitions
+   - Order preservation
+   - Re-entrant processing
+   - Timeout handling
+
+Security:
+- Event validation
+- Queue protection
+- Resource monitoring
+- Processing boundaries
+
+Cross-cutting:
+- Error handling
+- Performance optimization
+- Event metrics
+- Thread safety
+
+Dependencies:
+- transition.py: Event triggers
+- executor.py: Event execution
+- scheduler.py: Time events
+- machine.py: Machine context
+"""
+
+
+class Event:
+    """Event class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/core/event.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/types/base.py ---
+"""
+Core type system definitions and management.
+
+Architecture:
+- Defines core type system
+- Specifies type compatibility
+- Manages type safety
+- Coordinates with validation
+- Integrates with extensions
+
+Design Patterns:
+- Factory Pattern: Type creation
+- Strategy Pattern: Type operations
+- Visitor Pattern: Type traversal
+- Observer Pattern: Type changes
+- Template Method: Type behavior
+
+Responsibilities:
+1. Type System
+   - Core types
+   - Type hierarchy
+   - Type relationships
+   - Type constraints
+   - Type operations
+
+2. Type Safety
+   - Type checking
+   - Type conversion
+   - Type validation
+   - Error handling
+   - Safety guarantees
+
+3. Type Management
+   - Type registration
+   - Type lookup
+   - Type caching
+   - Type versioning
+   - Type metadata
+
+4. Type Integration
+   - Extension support
+   - Validation hooks
+   - Conversion bridges
+   - Serialization
+   - Type evolution
+
+Security:
+- Type validation
+- Operation safety
+- Resource limits
+- Access control
+
+Cross-cutting:
+- Error handling
+- Performance optimization
+- Type metrics
+- Thread safety
+
+Dependencies:
+- extensions.py: Type extensions
+- validator.py: Type validation
+- serializer.py: Type serialization
+- monitor.py: Type monitoring
+"""
+
+
+class BaseType:
+    """BaseType class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/types/base.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/types/extensions.py ---
+"""
+Type system extension management.
+
+Architecture:
+- Provides type extension points
+- Manages type conversions
+- Maintains type consistency
+- Coordinates with base types
+- Integrates with sandbox
+
+Design Patterns:
+- Plugin Pattern: Type extensions
+- Adapter Pattern: Type conversion
+- Decorator Pattern: Type wrapping
+- Strategy Pattern: Extension behavior
+- Chain of Responsibility: Type handling
+
+Responsibilities:
+1. Extension Management
+   - Extension registration
+   - Extension lifecycle
+   - Extension validation
+   - Extension isolation
+   - Resource control
+
+2. Type Conversion
+   - Conversion rules
+   - Type mapping
+   - Data transformation
+   - Validation hooks
+   - Error handling
+
+3. Type Integration
+   - Base type coordination
+   - Extension composition
+   - Type compatibility
+   - Version management
+   - Extension interfaces
+
+4. Extension Safety
+   - Type validation
+   - Resource limits
+   - Isolation boundaries
+   - Error containment
+   - Security checks
+
+Security:
+- Extension isolation
+- Type safety
+- Resource control
+- Access validation
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Extension metrics
+- Thread safety
+
+Dependencies:
+- base.py: Core types
+- sandbox.py: Extension isolation
+- validator.py: Type validation
+- monitor.py: Extension monitoring
+"""
+
+
+class TypeExtension:
+    """TypeExtension class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/types/extensions.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/types/__init__.py ---
+"""
+Types package for type system integration.
+
+Architecture:
+- Defines core type system
+- Manages type extensions
+- Maintains type safety
+- Coordinates with validation
+- Ensures type consistency
+
+Design Patterns:
+- Factory Pattern: Type creation
+- Strategy Pattern: Type handling
+- Adapter Pattern: Type conversion
+- Visitor Pattern: Type validation
+- Composite Pattern: Type composition
+
+Security:
+- Type validation
+- Conversion safety
+- Extension isolation
+- Resource protection
+- Access control
+
+Cross-cutting:
+- Error handling
+- Performance optimization
+- Type metrics
+- Thread safety
+"""
+
+from .base import BaseType
+from .extensions import TypeExtension
+
+__all__ = ["BaseType", "TypeExtension"]
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/types/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/extensions/__init__.py ---
+"""
+Extensions package for extension mechanisms.
+
+Architecture:
+- Defines extension interfaces
+- Manages extension lifecycle
+- Provides extension points
+- Coordinates with sandbox
+- Maintains extension boundaries
+
+Design Patterns:
+- Plugin Pattern: Extension loading
+- Strategy Pattern: Extension behavior
+- Observer Pattern: Extension events
+- Proxy Pattern: Extension isolation
+- Chain of Responsibility: Extension handling
+
+Security:
+- Extension isolation
+- Resource control
+- Access validation
+- Sandbox enforcement
+- Security boundaries
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Extension metrics
+- Thread safety
+"""
+
+from .hooks import ExtensionHooks
+from .sandbox import ExtensionSandbox
+
+__all__ = ["ExtensionHooks", "ExtensionSandbox"]
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/extensions/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/extensions/sandbox.py ---
+"""
+Extension isolation and security management.
+
+Architecture:
+- Implements extension isolation
+- Enforces resource boundaries
+- Manages extension security
+- Coordinates with hooks
+- Maintains extension guarantees
+
+Design Patterns:
+- Proxy Pattern: Extension isolation
+- Strategy Pattern: Security policies
+- Observer Pattern: Resource monitoring
+- Decorator Pattern: Security wrapping
+- Chain of Responsibility: Security checks
+
+Responsibilities:
+1. Extension Isolation
+   - Resource boundaries
+   - Memory limits
+   - CPU constraints
+   - I/O restrictions
+   - Network control
+
+2. Security Management
+   - Access control
+   - Permission checking
+   - Resource validation
+   - Operation monitoring
+   - Threat prevention
+
+3. Resource Control
+   - Usage monitoring
+   - Limit enforcement
+   - Resource cleanup
+   - Leak prevention
+   - Performance tracking
+
+4. Extension Safety
+   - State protection
+   - Data isolation
+   - Error containment
+   - Recovery handling
+   - Security boundaries
+
+Security:
+- Sandbox enforcement
+- Resource isolation
+- Access control
+- Threat mitigation
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Security metrics
+- Thread safety
+
+Dependencies:
+- hooks.py: Extension lifecycle
+- monitor.py: Resource tracking
+- validator.py: Security validation
+- machine.py: State protection
+"""
+
+
+class ExtensionSandbox:
+    """ExtensionSandbox class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/extensions/sandbox.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/extensions/hooks.py ---
+"""
+Extension interface and lifecycle management.
+
+Architecture:
+- Defines extension interfaces
+- Manages extension lifecycle
+- Provides customization points
+- Coordinates with sandbox
+- Integrates with modules
+
+Design Patterns:
+- Plugin Pattern: Extension points
+- Observer Pattern: Extension events
+- Template Method: Hook methods
+- Strategy Pattern: Extension behavior
+- Chain of Responsibility: Hook chaining
+
+Responsibilities:
+1. Extension Interfaces
+   - Hook definitions
+   - Extension points
+   - Interface contracts
+   - Version support
+   - API stability
+
+2. Lifecycle Management
+   - Extension loading
+   - Initialization
+   - Activation
+   - Deactivation
+   - Cleanup
+
+3. Customization Points
+   - State behavior
+   - Event processing
+   - Persistence
+   - Monitoring
+   - Type system
+
+4. Integration
+   - Module coordination
+   - Event propagation
+   - Resource sharing
+   - Error handling
+   - State access
+
+Security:
+- Interface validation
+- Resource control
+- Access boundaries
+- Extension isolation
+- Security checks
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Extension metrics
+- Thread safety
+
+Dependencies:
+- sandbox.py: Extension isolation
+- machine.py: State machine access
+- monitor.py: Extension monitoring
+- validator.py: Interface validation
+"""
+
+
+class ExtensionHooks:
+    """ExtensionHooks class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/extensions/hooks.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/persistence/__init__.py ---
+"""
+Persistence package for storage and validation.
+
+Architecture:
+- Manages state machine persistence
+- Handles definition validation
+- Maintains version compatibility
+- Coordinates with core components
+- Ensures data integrity
+
+Design Patterns:
+- Strategy Pattern for storage
+- Builder Pattern for loading
+- Visitor Pattern for validation
+- Chain of Responsibility for rules
+- Observer Pattern for changes
+
+Security:
+- Data validation
+- Format verification
+- Version checking
+- Resource protection
+- Access control
+
+Cross-cutting:
+- Error handling
+- Performance optimization
+- Storage metrics
+- Thread safety
+"""
+
+from .serializer import Serializer
+from .validator import Validator
+
+__all__ = ["Serializer", "Validator"]
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/persistence/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/persistence/serializer.py ---
+"""
+State machine serialization and persistence management.
+
+Architecture:
+- Handles state machine persistence
+- Preserves runtime state
+- Maintains version compatibility
+- Coordinates with Validator
+- Integrates with Types
+
+Design Patterns:
+- Strategy Pattern: Storage formats
+- Builder Pattern: State loading
+- Memento Pattern: State capture
+- Adapter Pattern: Format conversion
+- Factory Pattern: Format handlers
+
+Responsibilities:
+1. State Persistence
+   - Machine definition
+   - Runtime state
+   - History states
+   - Version information
+   - Extension data
+
+2. Format Management
+   - Format validation
+   - Version compatibility
+   - Schema evolution
+   - Data migration
+   - Format conversion
+
+3. State Recovery
+   - State restoration
+   - History recovery
+   - Version migration
+   - Error recovery
+   - Partial loading
+
+4. Version Control
+   - Version tracking
+   - Compatibility checks
+   - Breaking changes
+   - Migration paths
+   - Version metadata
+
+Security:
+- Data validation
+- Format verification
+- Resource limits
+- Access control
+
+Cross-cutting:
+- Error handling
+- Performance optimization
+- Storage metrics
+- Thread safety
+
+Dependencies:
+- validator.py: Format validation
+- machine.py: State access
+- types.py: Type serialization
+- monitor.py: Operation tracking
+"""
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/persistence/serializer.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/persistence/validator.py ---
+"""
+State machine definition validation management.
+
+Architecture:
+- Validates state machine definitions
+- Ensures semantic consistency
+- Verifies transition rules
+- Coordinates with all modules
+- Maintains validation boundaries
+
+Design Patterns:
+- Visitor Pattern: Structure validation
+- Chain of Responsibility: Rule checking
+- Strategy Pattern: Validation rules
+- Observer Pattern: Validation events
+- Composite Pattern: Rule composition
+
+Responsibilities:
+1. Definition Validation
+   - State hierarchy
+   - Transition rules
+   - Event definitions
+   - Region structure
+   - Extension configs
+
+2. Semantic Validation
+   - UML compliance
+   - State consistency
+   - Transition validity
+   - Event handling
+   - Region coordination
+
+3. Rule Management
+   - Rule definition
+   - Rule composition
+   - Rule priorities
+   - Rule dependencies
+   - Rule execution
+
+4. Error Handling
+   - Error detection
+   - Error reporting
+   - Error context
+   - Recovery options
+   - Validation status
+
+Security:
+- Input validation
+- Rule isolation
+- Resource limits
+- Access control
+
+Cross-cutting:
+- Error handling
+- Performance optimization
+- Validation metrics
+- Thread safety
+
+Dependencies:
+- serializer.py: Format validation
+- machine.py: Structure access
+- types.py: Type validation
+- monitor.py: Validation tracking
+"""
+
+
+class Validator:
+    """Validator class implementation will be defined at the Class level."""
+
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/persistence/validator.py ---
