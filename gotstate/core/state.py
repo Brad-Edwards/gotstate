@@ -59,30 +59,24 @@ Dependencies:
 - machine.py: State machine context
 """
 
-from typing import Optional, Dict, List, Set, Any, Callable
-from dataclasses import dataclass
+from typing import Optional, List, Dict, Set, Any, cast, TYPE_CHECKING, Callable, Union
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from weakref import ref, ReferenceType
+from gotstate.core.event import Event, EventKind
+from gotstate.core.types import (
+    StateType,
+    StateData,
+    GuardFunction,
+    EffectFunction
+)
 
-
-class StateType(Enum):
-    """Defines the different types of states in the hierarchical state machine.
-    
-    Used to distinguish between regular states, pseudostates, and special state types
-    for proper behavioral implementation and validation.
-    """
-    SIMPLE = auto()          # Leaf state with no substates
-    COMPOSITE = auto()       # State containing substates
-    SUBMACHINE = auto()      # Reference to another state machine
-    INITIAL = auto()         # Initial pseudostate
-    FINAL = auto()          # Final state
-    CHOICE = auto()         # Dynamic conditional branching
-    JUNCTION = auto()       # Static conditional branching
-    SHALLOW_HISTORY = auto() # Remembers only direct substate
-    DEEP_HISTORY = auto()    # Remembers full substate configuration
-    ENTRY_POINT = auto()    # Named entry point
-    EXIT_POINT = auto()     # Named exit point
-    TERMINATE = auto()      # Terminates entire state machine
+if TYPE_CHECKING:
+    from gotstate.core.transition import Transition
+    from gotstate.core.region import Region
+else:
+    # Forward reference for runtime
+    Region = 'Region'  # type: ignore
 
 
 class State:
@@ -148,6 +142,27 @@ class State:
         if parent is not None:
             self.set_parent(parent)
             
+    def __hash__(self) -> int:
+        """Get hash value for the state.
+        
+        Returns:
+            Hash value based on state ID
+        """
+        return hash(self._id)
+        
+    def __eq__(self, other: object) -> bool:
+        """Check if two states are equal.
+        
+        Args:
+            other: Object to compare with
+            
+        Returns:
+            True if states have same ID, False otherwise
+        """
+        if not isinstance(other, State):
+            return NotImplemented
+        return self._id == other._id
+        
     @property
     def id(self) -> str:
         """Get the state ID."""
@@ -256,42 +271,31 @@ class State:
         """
         return True  # Base states can have children by default
 
+    @property
+    def path(self) -> List[str]:
+        """Get the path from root to this state.
+        
+        Returns:
+            List of state IDs from root to this state
+        """
+        path = []
+        current = self
+        while current is not None:
+            path.insert(0, current.id)
+            parent = current.parent
+            if isinstance(parent, ReferenceType):
+                parent = parent()
+            current = parent
+        return path
+
 
 class CompositeState(State):
-    """Represents a composite state that can contain other states.
+    """A state that contains one or more regions with substates.
     
-    CompositeState extends the base State class to implement the Composite pattern,
-    managing a collection of child states and their relationships.
-    
-    Class Invariants:
-    1. Must maintain valid parent-child relationships
-    2. Must have at most one initial state per region
-    3. Must properly manage parallel regions
-    4. Must maintain history state consistency
-    5. Must enforce state naming uniqueness within scope
-    
-    Design Patterns:
-    - Composite: Manages child state hierarchy
-    - Factory: Creates appropriate state types
-    - Observer: Notifies of child state changes
-    
-    Data Structures:
-    - Dictionary of child states by name
-    - List of parallel regions
-    - Map of history states
-    - Set of active substates
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe child state access
-    2. Atomic region activation/deactivation
-    3. Synchronized history state updates
-    4. Safe concurrent region execution
-    
-    Performance Characteristics:
-    1. O(1) child state lookup
-    2. O(r) region synchronization where r is region count
-    3. O(h) history state management where h is history count
+    Composite states provide hierarchical nesting and parallel execution through regions.
+    Each region represents an independent thread of execution within the composite state.
     """
+    
     def __init__(
         self,
         state_id: str,
@@ -320,21 +324,21 @@ class CompositeState(State):
             exit_action=exit_action,
             do_activity=do_activity
         )
-        self._regions: Dict[str, 'Region'] = {}
-        
+        self._regions: List['Region'] = []
+    
     @property
-    def regions(self) -> Dict[str, 'Region']:
-        """Get a copy of the regions dictionary."""
-        return self._regions.copy()
+    def regions(self) -> List['Region']:
+        """Get the list of regions contained in this composite state."""
+        return self._regions
         
     def add_region(self, region_id: str) -> 'Region':
-        """Add a new region to the composite state.
+        """Add a new region to this composite state.
         
         Args:
             region_id: Unique identifier for the region
             
         Returns:
-            The newly created region
+            The newly created Region object
             
         Raises:
             ValueError: If region_id is invalid or already exists
@@ -342,35 +346,45 @@ class CompositeState(State):
         if not region_id or not isinstance(region_id, str):
             raise ValueError("Region ID must be a non-empty string")
             
-        if region_id in self._regions:
-            raise ValueError(f"Region '{region_id}' already exists")
-            
         # Import here to avoid circular dependency
-        from .region import Region
+        from gotstate.core.region import Region
         
         region = Region(region_id=region_id, parent_state=self)
-        self._regions[region_id] = region
+        self._regions.append(region)
         return region
         
-    def remove_region(self, region_id: str) -> None:
-        """Remove a region from the composite state.
+    def remove_region(self, region: 'Region') -> None:
+        """Remove a region from this composite state.
         
         Args:
-            region_id: Identifier of the region to remove
+            region: The Region object to remove
         """
-        if region_id in self._regions:
-            region = self._regions.pop(region_id)
-            region.deactivate()
-            
+        if region in self._regions:
+            region.parent = None
+            self._regions.remove(region)
+
+    @property
+    def active_states(self) -> Set[State]:
+        """Get all active states in this composite state and its regions."""
+        active = {self}
+        # Add active states from regions
+        for region in self._regions:
+            active.update(region.active_states)
+        # Add active direct child states
+        for child in self._children.values():
+            if child.is_active:
+                active.add(child)
+        return active
+
     def activate(self) -> None:
         """Activate the composite state and all its regions."""
         super().activate()
-        for region in self._regions.values():
+        for region in self._regions:
             region.activate()
             
     def deactivate(self) -> None:
         """Deactivate the composite state and all its regions."""
-        for region in self._regions.values():
+        for region in self._regions:
             region.deactivate()
         super().deactivate()
         
@@ -385,13 +399,13 @@ class CompositeState(State):
         self.activate()
         
         # Enter regions after state is active
-        for region in self._regions.values():
+        for region in self._regions:
             region.enter()
             
     def exit(self) -> None:
         """Exit the composite state, exiting regions before exit action."""
         # Exit regions before state becomes inactive
-        for region in self._regions.values():
+        for region in self._regions:
             region.exit()
             
         if self._do_activity is not None:
@@ -404,32 +418,12 @@ class CompositeState(State):
 
 
 class PseudoState(State):
-    """Base class for all pseudostates in the state machine.
+    """Base class for all pseudostates.
     
-    PseudoState provides common functionality for special states that control
-    execution flow but don't represent actual system states.
-    
-    Class Invariants:
-    1. Must have valid connections according to type
-    2. Must not contain substates
-    3. Must follow UML pseudostate semantics
-    4. Must maintain transition consistency
-    
-    Design Patterns:
-    - Template Method: Defines pseudostate behavior
-    - Strategy: Implements type-specific logic
-    - Chain of Responsibility: Handles transition routing
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe transition execution
-    2. Atomic decision point evaluation
-    3. Safe concurrent access to guard conditions
-    
-    Performance Characteristics:
-    1. O(1) type checking
-    2. O(t) transition evaluation where t is transition count
-    3. O(g) guard condition evaluation where g is guard count
+    PseudoState provides common functionality for transient states
+    that facilitate complex state transitions.
     """
+    
     # Set of valid pseudostate types
     VALID_TYPES = {
         StateType.INITIAL,
@@ -438,8 +432,7 @@ class PseudoState(State):
         StateType.SHALLOW_HISTORY,
         StateType.DEEP_HISTORY,
         StateType.ENTRY_POINT,
-        StateType.EXIT_POINT,
-        StateType.TERMINATE
+        StateType.EXIT_POINT
     }
     
     def __init__(
@@ -454,17 +447,14 @@ class PseudoState(State):
         Args:
             state_id: Unique identifier for the state
             state_type: Type of pseudostate
-            parent: Parent state (required for pseudostates)
+            parent: Optional parent state
             data: Optional state data dictionary
             
         Raises:
-            ValueError: If any parameters are invalid
+            ValueError: If state_type is not a valid pseudostate type
         """
         if state_type not in self.VALID_TYPES:
             raise ValueError(f"Invalid pseudostate type. Must be one of: {self.VALID_TYPES}")
-            
-        if parent is None:
-            raise ValueError("Pseudostates must have a parent state")
             
         super().__init__(
             state_id=state_id,
@@ -622,7 +612,62 @@ class ConnectionPointState(PseudoState):
     2. O(p) path validation where p is path length
     3. O(t) transition routing where t is transition count
     """
-    pass
+    
+    # Set of valid connection point types
+    VALID_TYPES = {
+        StateType.ENTRY_POINT,
+        StateType.EXIT_POINT
+    }
+    
+    def __init__(
+        self,
+        state_id: str,
+        state_type: StateType,
+        parent: Optional['State'] = None,
+        data: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Initialize a ConnectionPointState instance.
+        
+        Args:
+            state_id: Unique identifier for the state
+            state_type: Type of connection point (entry or exit)
+            parent: Parent composite state
+            data: Optional state data dictionary
+            
+        Raises:
+            ValueError: If any parameters are invalid
+        """
+        if state_type not in self.VALID_TYPES:
+            raise ValueError(f"Invalid connection point type. Must be one of: {self.VALID_TYPES}")
+            
+        if parent is None or parent.type != StateType.COMPOSITE:
+            raise ValueError("Connection points must belong to a composite state")
+            
+        super().__init__(
+            state_id=state_id,
+            state_type=state_type,
+            parent=parent,
+            data=data
+        )
+        
+    def validate_transition(self, transition: 'Transition') -> bool:
+        """Validate a transition through this connection point.
+        
+        Args:
+            transition: The transition to validate
+            
+        Returns:
+            True if transition is valid, False otherwise
+        """
+        # Entry points can only be targets
+        if self.type == StateType.ENTRY_POINT:
+            return transition.target is self
+            
+        # Exit points can only be sources
+        if self.type == StateType.EXIT_POINT:
+            return transition.source is self
+            
+        return False
 
 
 class ChoiceState(PseudoState):
@@ -656,7 +701,78 @@ class ChoiceState(PseudoState):
     2. O(log g) guard prioritization
     3. O(d) decision tree traversal where d is tree depth
     """
-    pass
+    
+    def __init__(
+        self,
+        state_id: str,
+        parent: Optional['State'] = None,
+        data: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Initialize a ChoiceState instance.
+        
+        Args:
+            state_id: Unique identifier for the state
+            parent: Optional parent state
+            data: Optional state data dictionary
+        """
+        super().__init__(
+            state_id=state_id,
+            state_type=StateType.CHOICE,
+            parent=parent,
+            data=data
+        )
+        self._default_transition: Optional['Transition'] = None
+        self._outgoing_transitions: List['Transition'] = []
+        
+    @property
+    def default_transition(self) -> Optional['Transition']:
+        """Get the default transition."""
+        return self._default_transition
+        
+    def set_default_transition(self, transition: 'Transition') -> None:
+        """Set the default transition.
+        
+        Args:
+            transition: The transition to use as default
+            
+        Raises:
+            ValueError: If transition source is not this state
+        """
+        if transition.source is not self:
+            raise ValueError("Default transition must originate from this choice state")
+            
+        self._default_transition = transition
+        
+    def add_outgoing_transition(self, transition: 'Transition') -> None:
+        """Add an outgoing transition.
+        
+        Args:
+            transition: The transition to add
+            
+        Raises:
+            ValueError: If transition source is not this state
+        """
+        if transition.source is not self:
+            raise ValueError("Outgoing transition must originate from this choice state")
+            
+        self._outgoing_transitions.append(transition)
+        
+    def select_transition(self, event_data: Dict[str, Any]) -> Optional['Transition']:
+        """Select a transition based on guard conditions.
+        
+        Args:
+            event_data: Event data for guard evaluation
+            
+        Returns:
+            Selected transition or default if no guards are satisfied
+        """
+        # Evaluate guards in order
+        for transition in self._outgoing_transitions:
+            if transition.evaluate_guard():
+                return transition
+                
+        # Return default transition if no guards are satisfied
+        return self._default_transition
 
 
 class JunctionState(PseudoState):
@@ -686,4 +802,75 @@ class JunctionState(PseudoState):
     2. O(g) guard checking where g is guard count
     3. O(1) default transition access
     """
-    pass
+    
+    def __init__(
+        self,
+        state_id: str,
+        parent: Optional['State'] = None,
+        data: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Initialize a JunctionState instance.
+        
+        Args:
+            state_id: Unique identifier for the state
+            parent: Parent state
+            data: Optional state data dictionary
+        """
+        super().__init__(
+            state_id=state_id,
+            state_type=StateType.JUNCTION,
+            parent=parent,
+            data=data
+        )
+        self._default_transition: Optional['Transition'] = None
+        self._outgoing_transitions: List['Transition'] = []
+        
+    @property
+    def default_transition(self) -> Optional['Transition']:
+        """Get the default transition."""
+        return self._default_transition
+        
+    def set_default_transition(self, transition: 'Transition') -> None:
+        """Set the default transition.
+        
+        Args:
+            transition: The transition to use as default
+            
+        Raises:
+            ValueError: If transition source is not this state
+        """
+        if transition.source is not self:
+            raise ValueError("Default transition must originate from this junction state")
+            
+        self._default_transition = transition
+        
+    def add_outgoing_transition(self, transition: 'Transition') -> None:
+        """Add an outgoing transition.
+        
+        Args:
+            transition: The transition to add
+            
+        Raises:
+            ValueError: If transition source is not this state
+        """
+        if transition.source is not self:
+            raise ValueError("Outgoing transition must originate from this junction state")
+            
+        self._outgoing_transitions.append(transition)
+        
+    def select_transition(self, event_data: Dict[str, Any]) -> Optional['Transition']:
+        """Select a transition based on static conditions.
+        
+        Args:
+            event_data: Event data for condition evaluation
+            
+        Returns:
+            Selected transition or default if no conditions are met
+        """
+        # Evaluate conditions in order (static evaluation)
+        for transition in self._outgoing_transitions:
+            if transition.evaluate_guard():
+                return transition
+                
+        # Return default transition if no conditions are met
+        return self._default_transition

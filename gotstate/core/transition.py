@@ -63,34 +63,27 @@ Dependencies:
 - machine.py: Machine context
 """
 
-from typing import Optional, List, Callable, Any, Dict, Union
+from typing import Optional, List, Callable, Any, Dict, Union, cast, TYPE_CHECKING
 from enum import Enum, auto
 from dataclasses import dataclass
 from functools import reduce
 from operator import and_, or_
+from weakref import ReferenceType
+from gotstate.core.event import Event, EventKind, EventPriority
+from gotstate.core.types import (
+    StateType,
+    TransitionKind,
+    TransitionPriority,
+    GuardFunction,
+    EffectFunction,
+    StateData
+)
 
-
-class TransitionKind(Enum):
-    """Defines the different types of transitions in the state machine.
-    
-    Used to determine the execution semantics and state exit/entry behavior
-    for each transition type.
-    """
-    EXTERNAL = auto()  # Exits source state(s), enters target state(s)
-    INTERNAL = auto()  # No state exit/entry, source must equal target
-    LOCAL = auto()     # Minimizes state exit/entry within composite state
-    COMPOUND = auto()  # Multiple segments with intermediate pseudostates
-
-
-class TransitionPriority(Enum):
-    """Defines priority levels for transition conflict resolution.
-    
-    Used to determine which transition takes precedence when multiple
-    transitions are enabled simultaneously.
-    """
-    HIGH = auto()    # Takes precedence over lower priorities
-    NORMAL = auto()  # Default priority level
-    LOW = auto()     # Yields to higher priority transitions
+if TYPE_CHECKING:
+    from gotstate.core.state import State, ChoiceState, CompositeState, Region
+else:
+    # Forward references for runtime
+    from gotstate.core.state import State, CompositeState
 
 
 class GuardCondition:
@@ -442,33 +435,42 @@ class Transition:
 
 
 class ExternalTransition(Transition):
-    """Represents an external transition that exits source state(s).
+    """External transition that exits source state and enters target state."""
     
-    ExternalTransition implements the full exit/entry state behavior,
-    following UML state machine semantics.
-    
-    Class Invariants:
-    1. Must exit source state(s)
-    2. Must enter target state(s)
-    3. Must execute actions in correct order
-    4. Must maintain state consistency
-    
-    Design Patterns:
-    - Template Method: Defines execution sequence
-    - Command: Encapsulates state changes
-    - Observer: Notifies of state changes
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe state changes
-    2. Atomic execution sequence
-    3. Safe concurrent access
-    
-    Performance Characteristics:
-    1. O(h) state exit/entry where h is hierarchy depth
-    2. O(a) action execution where a is action count
-    3. O(r) region synchronization where r is region count
-    """
-    pass
+    def execute(self) -> bool:
+        """Execute the external transition.
+        
+        Returns:
+            True if transition executed successfully, False otherwise
+        """
+        # Check guard condition
+        if not self.evaluate_guard():
+            return False
+            
+        # Get all active states that need to be exited
+        active_states = set()
+        if isinstance(self.source, CompositeState):
+            active_states.update(self.source.active_states)
+        else:
+            active_states.add(self.source)
+            
+        # Exit states in reverse hierarchical order (deepest first)
+        for state in sorted(active_states, key=lambda s: len(s.path), reverse=True):
+            state.exit()
+            
+        # Execute transition effect if any
+        if self.effect:
+            self.effect(self.event.data if self.event else {})
+            
+        # Enter target state and activate any initial states
+        self.target.enter()
+        
+        # If target is composite, enter its regions
+        if isinstance(self.target, CompositeState):
+            for region in self.target.regions:
+                region.enter()
+                
+        return True
 
 
 class InternalTransition(Transition):
@@ -498,159 +500,455 @@ class InternalTransition(Transition):
     2. O(a) action execution where a is action count
     3. O(1) consistency check
     """
-    pass
+    
+    def __init__(
+        self,
+        source: 'State',
+        target: Optional['State'] = None,  # Allow target for validation
+        event: Optional['Event'] = None,
+        guard: Optional[Union[GuardCondition, Callable[[Dict[str, Any]], bool]]] = None,
+        effect: Optional[Union[TransitionEffect, Callable[[Dict[str, Any]], None]]] = None,
+        priority: TransitionPriority = TransitionPriority.NORMAL
+    ) -> None:
+        """Initialize an InternalTransition instance.
+        
+        Args:
+            source: Source state
+            target: Optional target state (must be same as source)
+            event: Optional triggering event
+            guard: Optional guard condition
+            effect: Optional transition effect
+            priority: Transition priority
+            
+        Raises:
+            ValueError: If target is specified and different from source
+        """
+        if target is not None and target != source:
+            raise ValueError("Internal transitions must have same source and target state")
+            
+        super().__init__(
+            source=source,
+            target=source,  # Internal transitions stay in same state
+            event=event,
+            guard=guard,
+            effect=effect,
+            priority=priority,
+            kind=TransitionKind.INTERNAL
+        )
+        
+    def execute(self) -> bool:
+        """Execute the internal transition.
+        
+        Returns:
+            True if transition executed successfully, False otherwise
+        """
+        # Check guard condition
+        if not self.evaluate_guard():
+            return False
+            
+        # Execute effect only, no state changes
+        if self._effect is not None:
+            if isinstance(self._effect, TransitionEffect):
+                self._effect.execute(self._event.data if self._event else {})
+            else:
+                self._effect(self._event.data if self._event else {})
+        
+        return True
 
 
 class LocalTransition(Transition):
-    """Represents a local transition within a composite state.
+    """Represents a local transition between states with same parent.
     
-    LocalTransition minimizes the scope of state exit/entry operations
-    while maintaining proper transition semantics.
+    LocalTransition executes a transition between sibling states,
+    maintaining the parent state's active status.
     
     Class Invariants:
-    1. Must minimize state exit/entry
-    2. Must maintain hierarchy consistency
-    3. Must execute actions in order
-    4. Must preserve region stability
+    1. Must maintain parent state
+    2. Must handle sibling state changes
+    3. Must validate state hierarchy
+    4. Must maintain active state consistency
     
     Design Patterns:
-    - Strategy: Implements local semantics
-    - Command: Encapsulates minimal changes
-    - Observer: Notifies of local changes
+    - Template Method: Defines transition sequence
+    - State: Manages state configuration
+    - Command: Encapsulates actions
     
     Threading/Concurrency Guarantees:
-    1. Thread-safe local changes
-    2. Atomic scope execution
+    1. Thread-safe state changes
+    2. Atomic transition execution
     3. Safe concurrent access
     
     Performance Characteristics:
-    1. O(d) scope computation where d is depth difference
-    2. O(a) action execution where a is action count
-    3. O(r) region synchronization where r is region count
+    1. O(1) parent validation
+    2. O(1) state changes
+    3. O(1) effect execution
     """
-    pass
+    
+    def __init__(
+        self,
+        source: 'State',
+        target: 'State',
+        event: Optional['Event'] = None,
+        guard: Optional[Union[GuardCondition, Callable[[Dict[str, Any]], bool]]] = None,
+        effect: Optional[Union[TransitionEffect, Callable[[Dict[str, Any]], None]]] = None,
+        priority: TransitionPriority = TransitionPriority.NORMAL
+    ) -> None:
+        """Initialize a LocalTransition instance.
+        
+        Args:
+            source: Source state
+            target: Target state
+            event: Optional triggering event
+            guard: Optional guard condition
+            effect: Optional transition effect
+            priority: Transition priority
+            
+        Raises:
+            ValueError: If states don't share same parent
+        """
+        # Validate parent states before calling super().__init__
+        if source.parent is None or target.parent is None:
+            raise ValueError("Both source and target states must have parents")
+            
+        source_parent = source.parent() if isinstance(source.parent, ReferenceType) else source.parent
+        target_parent = target.parent() if isinstance(target.parent, ReferenceType) else target.parent
+            
+        if source_parent is None or target_parent is None:
+            raise ValueError("Both source and target states must have parents")
+            
+        if source_parent.id != target_parent.id:
+            raise ValueError("Source and target states must share same parent")
+            
+        super().__init__(
+            source=source,
+            target=target,
+            event=event,
+            guard=guard,
+            effect=effect,
+            priority=priority,
+            kind=TransitionKind.LOCAL
+        )
 
 
 class CompoundTransition(Transition):
-    """Represents a compound transition with multiple segments.
+    """Represents a transition path through pseudostates.
     
-    CompoundTransition manages a sequence of transition segments,
-    coordinating their execution through pseudostates.
+    CompoundTransition manages a sequence of transitions through
+    intermediate pseudostates, executing them as a single atomic
+    transition.
     
     Class Invariants:
-    1. Must have valid segment sequence
-    2. Must maintain execution order
-    3. Must coordinate pseudostates
-    4. Must handle segment failures
+    1. Must maintain segment connectivity
+    2. Must execute segments atomically
+    3. Must validate path consistency
+    4. Must handle pseudostate semantics
     
     Design Patterns:
     - Composite: Manages transition segments
-    - Chain of Responsibility: Processes segments
-    - Command: Encapsulates segment execution
-    
-    Data Structures:
-    - List of ordered segments
-    - Queue for pending segments
-    - Set for completed segments
+    - Chain of Responsibility: Handles execution chain
+    - Command: Encapsulates segment actions
     
     Threading/Concurrency Guarantees:
-    1. Thread-safe segment execution
-    2. Atomic sequence completion
+    1. Thread-safe execution
+    2. Atomic path traversal
     3. Safe concurrent access
     
     Performance Characteristics:
-    1. O(s) execution where s is segment count
-    2. O(p) pseudostate coordination where p is pseudostate count
-    3. O(r) rollback where r is completed segment count
+    1. O(n) execution where n is segment count
+    2. O(n) validation
+    3. O(1) segment access
     """
-    pass
+    
+    def __init__(
+        self,
+        segments: List['Transition'],
+        event: Optional['Event'] = None,
+        priority: TransitionPriority = TransitionPriority.NORMAL
+    ) -> None:
+        """Initialize a CompoundTransition instance.
+        
+        Args:
+            segments: List of transition segments
+            event: Optional triggering event
+            priority: Transition priority
+            
+        Raises:
+            ValueError: If segments are invalid
+        """
+        if not segments:
+            raise ValueError("Must provide at least one transition segment")
+            
+        # Validate segment connectivity
+        for i in range(len(segments) - 1):
+            if segments[i].target != segments[i + 1].source:
+                raise ValueError("Transition segments must be connected")
+                
+        super().__init__(
+            source=segments[0].source,
+            target=segments[-1].target,
+            event=event,
+            priority=priority,
+            kind=TransitionKind.EXTERNAL  # Compound transitions are always external
+        )
+        
+        self._segments = segments
+        
+    def execute(self) -> bool:
+        """Execute the compound transition.
+        
+        Returns:
+            True if transition executed successfully, False otherwise
+        """
+        # Execute each segment in sequence
+        for segment in self._segments:
+            if not segment.execute():
+                return False
+                
+        return True
 
 
 class ProtocolTransition(Transition):
-    """Represents a protocol transition with strict constraints.
+    """Represents a transition triggered by protocol events.
     
-    ProtocolTransition enforces protocol state machine semantics,
-    ensuring valid state sequences and operation calls.
+    ProtocolTransition validates operation calls and manages
+    protocol-based state changes in behavioral interfaces.
     
     Class Invariants:
-    1. Must follow protocol constraints
-    2. Must validate operation calls
-    3. Must maintain protocol state
-    4. Must enforce sequence rules
+    1. Must validate operation calls
+    2. Must maintain protocol semantics
+    3. Must handle operation parameters
+    4. Must maintain interface consistency
     
     Design Patterns:
-    - State: Manages protocol states
-    - Strategy: Implements protocol rules
+    - Strategy: Implements operation validation
     - Command: Encapsulates operations
+    - State: Manages protocol state
     
     Threading/Concurrency Guarantees:
-    1. Thread-safe protocol checks
-    2. Atomic operation validation
+    1. Thread-safe operation validation
+    2. Atomic state changes
     3. Safe concurrent access
     
     Performance Characteristics:
-    1. O(1) protocol state check
-    2. O(v) operation validation where v is validator count
-    3. O(c) constraint checking where c is constraint count
+    1. O(1) operation validation
+    2. O(1) state changes
+    3. O(1) parameter handling
     """
-    pass
+    
+    def __init__(
+        self,
+        source: 'State',
+        target: 'State',
+        event: Optional['Event'] = None,
+        operation: str = None,
+        guard: Optional[Union[GuardCondition, Callable[[Dict[str, Any]], bool]]] = None,
+        effect: Optional[Union[TransitionEffect, Callable[[Dict[str, Any]], None]]] = None,
+        priority: TransitionPriority = TransitionPriority.NORMAL
+    ) -> None:
+        """Initialize a ProtocolTransition instance.
+        
+        Args:
+            source: Source state
+            target: Target state
+            event: Optional triggering event
+            operation: Operation name to validate
+            guard: Optional guard condition
+            effect: Optional transition effect
+            priority: Transition priority
+        """
+        super().__init__(
+            source=source,
+            target=target,
+            event=event,
+            guard=guard,
+            effect=effect,
+            priority=priority,
+            kind=TransitionKind.EXTERNAL
+        )
+        self._operation = operation
+        
+    def execute(self) -> bool:
+        """Execute the protocol transition.
+        
+        Returns:
+            True if transition executed successfully, False otherwise
+        """
+        if not self._validate_operation():
+            return False
+            
+        return super().execute()
+        
+    def _validate_operation(self) -> bool:
+        """Validate the operation call.
+        
+        Returns:
+            True if operation is valid, False otherwise
+        """
+        if not self._event or not self._operation:
+            return False
+            
+        event_data = self._event.data
+        if not event_data or "operation" not in event_data:
+            return False
+            
+        return event_data["operation"] == self._operation
 
 
 class TimeTransition(Transition):
-    """Represents a time-triggered transition.
+    """Represents a transition triggered by time events.
     
-    TimeTransition manages transitions triggered by time events,
-    both relative ("after") and absolute ("at") timing.
+    TimeTransition manages time-based state changes, supporting
+    both absolute and relative time triggers.
     
     Class Invariants:
-    1. Must have valid time specification
-    2. Must maintain timing accuracy
-    3. Must handle timer interruptions
-    4. Must support cancellation
+    1. Must validate time events
+    2. Must handle time semantics
+    3. Must maintain temporal consistency
+    4. Must handle timer operations
     
     Design Patterns:
-    - Command: Encapsulates time events
-    - Observer: Notifies of timing
-    - Strategy: Implements timing types
+    - Strategy: Implements time validation
+    - Observer: Monitors time events
+    - State: Manages temporal state
     
     Threading/Concurrency Guarantees:
-    1. Thread-safe timer operations
-    2. Atomic execution scheduling
+    1. Thread-safe time handling
+    2. Atomic state changes
     3. Safe concurrent access
     
     Performance Characteristics:
-    1. O(1) timer operations
-    2. O(log n) scheduling where n is timer count
-    3. O(1) cancellation
+    1. O(1) time validation
+    2. O(1) state changes
+    3. O(1) timer operations
     """
-    pass
+    
+    VALID_TIME_TYPES = {"after", "at"}
+    
+    def __init__(
+        self,
+        source: 'State',
+        target: 'State',
+        event: Optional['Event'] = None,
+        guard: Optional[Union[GuardCondition, Callable[[Dict[str, Any]], bool]]] = None,
+        effect: Optional[Union[TransitionEffect, Callable[[Dict[str, Any]], None]]] = None,
+        priority: TransitionPriority = TransitionPriority.NORMAL
+    ) -> None:
+        """Initialize a TimeTransition instance.
+        
+        Args:
+            source: Source state
+            target: Target state
+            event: Optional triggering event
+            guard: Optional guard condition
+            effect: Optional transition effect
+            priority: Transition priority
+            
+        Raises:
+            ValueError: If time event is invalid
+        """
+        if event and event.kind == EventKind.TIME:
+            if not event.data or "type" not in event.data:
+                raise ValueError("Time event must specify type")
+                
+            if event.data["type"] not in self.VALID_TIME_TYPES:
+                raise ValueError(f"Invalid time event type. Must be one of: {self.VALID_TIME_TYPES}")
+                
+            if "time" not in event.data or event.data["time"] < 0:
+                raise ValueError("Time event must specify non-negative time value")
+                
+        super().__init__(
+            source=source,
+            target=target,
+            event=event,
+            guard=guard,
+            effect=effect,
+            priority=priority,
+            kind=TransitionKind.EXTERNAL
+        )
 
 
 class ChangeTransition(Transition):
-    """Represents a change-triggered transition.
+    """Represents a transition triggered by value changes.
     
-    ChangeTransition manages transitions triggered by changes in
-    boolean conditions, implementing the observer pattern.
+    ChangeTransition monitors changes in values and triggers
+    transitions based on change conditions.
     
     Class Invariants:
-    1. Must have valid change condition
-    2. Must detect all changes
-    3. Must prevent missed triggers
-    4. Must maintain condition state
+    1. Must validate change events
+    2. Must evaluate change conditions
+    3. Must maintain value consistency
+    4. Must handle change notifications
     
     Design Patterns:
-    - Observer: Monitors changes
-    - Strategy: Implements detection
-    - Command: Encapsulates triggers
+    - Observer: Monitors value changes
+    - Strategy: Implements change evaluation
+    - Command: Encapsulates change actions
     
     Threading/Concurrency Guarantees:
-    1. Thread-safe condition monitoring
-    2. Atomic change detection
+    1. Thread-safe change handling
+    2. Atomic state changes
     3. Safe concurrent access
     
     Performance Characteristics:
-    1. O(1) state checking
-    2. O(c) condition evaluation where c is condition complexity
-    3. O(o) observer notification where o is observer count
+    1. O(1) change validation
+    2. O(1) condition evaluation
+    3. O(1) state changes
     """
-    pass
+    
+    def __init__(
+        self,
+        source: 'State',
+        target: 'State',
+        event: Optional['Event'] = None,
+        condition: Optional[Callable[[Any, Any], bool]] = None,
+        guard: Optional[Union[GuardCondition, Callable[[Dict[str, Any]], bool]]] = None,
+        effect: Optional[Union[TransitionEffect, Callable[[Dict[str, Any]], None]]] = None,
+        priority: TransitionPriority = TransitionPriority.NORMAL
+    ) -> None:
+        """Initialize a ChangeTransition instance.
+        
+        Args:
+            source: Source state
+            target: Target state
+            event: Optional triggering event
+            condition: Optional change condition function
+            guard: Optional guard condition
+            effect: Optional transition effect
+            priority: Transition priority
+        """
+        super().__init__(
+            source=source,
+            target=target,
+            event=event,
+            guard=guard,
+            effect=effect,
+            priority=priority,
+            kind=TransitionKind.EXTERNAL
+        )
+        self._condition = condition
+        
+    def execute(self) -> bool:
+        """Execute the change transition.
+        
+        Returns:
+            True if transition executed successfully, False otherwise
+        """
+        if not self._evaluate_change():
+            return False
+            
+        return super().execute()
+        
+    def _evaluate_change(self) -> bool:
+        """Evaluate the change condition.
+        
+        Returns:
+            True if change condition is satisfied, False otherwise
+        """
+        if not self._event or not self._condition:
+            return False
+            
+        event_data = self._event.data
+        if not event_data or "old_value" not in event_data or "new_value" not in event_data:
+            return False
+            
+        return self._condition(event_data["old_value"], event_data["new_value"])

@@ -10,7 +10,10 @@ from gotstate.core.state import (
     StateType,
     CompositeState,
     PseudoState,
-    HistoryState
+    HistoryState,
+    ConnectionPointState,
+    ChoiceState,
+    JunctionState
 )
 
 
@@ -513,6 +516,226 @@ class TestHistoryState(unittest.TestCase):
         # Test default transition when no history
         history.clear_history()
         self.assertIsNone(history.get_restoration_state())
+
+
+class TestConnectionPointState(unittest.TestCase):
+    """Test cases for the ConnectionPointState class."""
+    
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.parent = CompositeState(state_id="parent")
+        
+    def test_connection_point_creation(self):
+        """Test that connection points can be created with valid parameters."""
+        # Test entry point
+        entry_point = ConnectionPointState(
+            state_id="entry",
+            state_type=StateType.ENTRY_POINT,
+            parent=self.parent
+        )
+        
+        self.assertEqual(entry_point.id, "entry")
+        self.assertEqual(entry_point.type, StateType.ENTRY_POINT)
+        self.assertEqual(entry_point.parent, self.parent)
+        
+        # Test exit point
+        exit_point = ConnectionPointState(
+            state_id="exit",
+            state_type=StateType.EXIT_POINT,
+            parent=self.parent
+        )
+        
+        self.assertEqual(exit_point.id, "exit")
+        self.assertEqual(exit_point.type, StateType.EXIT_POINT)
+        self.assertEqual(exit_point.parent, self.parent)
+        
+    def test_connection_point_validation(self):
+        """Test connection point validation rules."""
+        # Test invalid type
+        with self.assertRaises(ValueError):
+            ConnectionPointState(
+                state_id="invalid",
+                state_type=StateType.SIMPLE,
+                parent=self.parent
+            )
+            
+        # Test missing parent
+        with self.assertRaises(ValueError):
+            ConnectionPointState(
+                state_id="no_parent",
+                state_type=StateType.ENTRY_POINT,
+                parent=None
+            )
+            
+        # Test non-composite parent
+        simple_parent = State(state_id="simple", state_type=StateType.SIMPLE)
+        with self.assertRaises(ValueError):
+            ConnectionPointState(
+                state_id="invalid_parent",
+                state_type=StateType.ENTRY_POINT,
+                parent=simple_parent
+            )
+            
+    def test_connection_point_transition_validation(self):
+        """Test connection point transition validation."""
+        entry_point = ConnectionPointState(
+            state_id="entry",
+            state_type=StateType.ENTRY_POINT,
+            parent=self.parent
+        )
+        
+        exit_point = ConnectionPointState(
+            state_id="exit",
+            state_type=StateType.EXIT_POINT,
+            parent=self.parent
+        )
+        
+        # Create mock transitions
+        to_entry = Mock()
+        to_entry.target = entry_point
+        to_entry.source = None
+        
+        from_entry = Mock()
+        from_entry.source = entry_point
+        from_entry.target = None
+        
+        to_exit = Mock()
+        to_exit.target = exit_point
+        to_exit.source = None
+        
+        from_exit = Mock()
+        from_exit.source = exit_point
+        from_exit.target = None
+        
+        # Test entry point validation
+        self.assertTrue(entry_point.validate_transition(to_entry))
+        self.assertFalse(entry_point.validate_transition(from_entry))
+        
+        # Test exit point validation
+        self.assertTrue(exit_point.validate_transition(from_exit))
+        self.assertFalse(exit_point.validate_transition(to_exit))
+
+
+class TestChoiceState(unittest.TestCase):
+    """Test cases for the ChoiceState class."""
+    
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.parent = CompositeState(state_id="parent")
+        self.choice = ChoiceState(state_id="choice", parent=self.parent)
+        self.target1 = State(state_id="target1", state_type=StateType.SIMPLE)
+        self.target2 = State(state_id="target2", state_type=StateType.SIMPLE)
+        
+    def test_choice_state_creation(self):
+        """Test that a ChoiceState can be created with valid parameters."""
+        self.assertEqual(self.choice.id, "choice")
+        self.assertEqual(self.choice.type, StateType.CHOICE)
+        self.assertEqual(self.choice.parent, self.parent)
+        self.assertIsNone(self.choice.default_transition)
+        
+    def test_choice_state_transitions(self):
+        """Test choice state transition management."""
+        # Create transitions with guards
+        transition1 = Mock()
+        transition1.source = self.choice
+        transition1.target = self.target1
+        transition1.evaluate_guard.return_value = False
+        
+        transition2 = Mock()
+        transition2.source = self.choice
+        transition2.target = self.target2
+        transition2.evaluate_guard.return_value = True
+        
+        default = Mock()
+        default.source = self.choice
+        default.target = self.target1
+        
+        # Add transitions
+        self.choice.add_outgoing_transition(transition1)
+        self.choice.add_outgoing_transition(transition2)
+        self.choice.set_default_transition(default)
+        
+        # Test transition selection
+        selected = self.choice.select_transition({})
+        self.assertEqual(selected, transition2)  # Second transition's guard is true
+        
+        # Test default selection when no guards are true
+        transition2.evaluate_guard.return_value = False
+        selected = self.choice.select_transition({})
+        self.assertEqual(selected, default)
+        
+    def test_choice_state_validation(self):
+        """Test choice state validation rules."""
+        # Test invalid transition source
+        invalid_transition = Mock()
+        invalid_transition.source = self.target1  # Not the choice state
+        
+        with self.assertRaises(ValueError):
+            self.choice.add_outgoing_transition(invalid_transition)
+            
+        with self.assertRaises(ValueError):
+            self.choice.set_default_transition(invalid_transition)
+
+
+class TestJunctionState(unittest.TestCase):
+    """Test cases for the JunctionState class."""
+    
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.parent = CompositeState(state_id="parent")
+        self.junction = JunctionState(state_id="junction", parent=self.parent)
+        self.target1 = State(state_id="target1", state_type=StateType.SIMPLE)
+        self.target2 = State(state_id="target2", state_type=StateType.SIMPLE)
+        
+    def test_junction_state_creation(self):
+        """Test that a JunctionState can be created with valid parameters."""
+        self.assertEqual(self.junction.id, "junction")
+        self.assertEqual(self.junction.type, StateType.JUNCTION)
+        self.assertEqual(self.junction.parent, self.parent)
+        self.assertIsNone(self.junction.default_transition)
+        
+    def test_junction_state_transitions(self):
+        """Test junction state transition management."""
+        # Create transitions with static conditions
+        transition1 = Mock()
+        transition1.source = self.junction
+        transition1.target = self.target1
+        transition1.evaluate_guard.return_value = False
+        
+        transition2 = Mock()
+        transition2.source = self.junction
+        transition2.target = self.target2
+        transition2.evaluate_guard.return_value = True
+        
+        default = Mock()
+        default.source = self.junction
+        default.target = self.target1
+        
+        # Add transitions
+        self.junction.add_outgoing_transition(transition1)
+        self.junction.add_outgoing_transition(transition2)
+        self.junction.set_default_transition(default)
+        
+        # Test transition selection
+        selected = self.junction.select_transition({})
+        self.assertEqual(selected, transition2)  # Second transition's condition is true
+        
+        # Test default selection when no conditions are true
+        transition2.evaluate_guard.return_value = False
+        selected = self.junction.select_transition({})
+        self.assertEqual(selected, default)
+        
+    def test_junction_state_validation(self):
+        """Test junction state validation rules."""
+        # Test invalid transition source
+        invalid_transition = Mock()
+        invalid_transition.source = self.target1  # Not the junction state
+        
+        with self.assertRaises(ValueError):
+            self.junction.add_outgoing_transition(invalid_transition)
+            
+        with self.assertRaises(ValueError):
+            self.junction.set_default_transition(invalid_transition)
 
 
 if __name__ == '__main__':

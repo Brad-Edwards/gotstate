@@ -5,14 +5,21 @@ Tests the transition management and execution functionality.
 
 import unittest
 from unittest.mock import Mock, patch
-from gotstate.core.state import State, StateType, PseudoState
+from gotstate.core.state import State, StateType, PseudoState, CompositeState, ChoiceState
 from gotstate.core.event import Event, EventKind, EventPriority
 from gotstate.core.transition import (
     Transition,
     TransitionKind,
     TransitionPriority,
     GuardCondition,
-    TransitionEffect
+    TransitionEffect,
+    ExternalTransition,
+    InternalTransition,
+    LocalTransition,
+    CompoundTransition,
+    ProtocolTransition,
+    TimeTransition,
+    ChangeTransition
 )
 
 
@@ -287,6 +294,410 @@ class TestTransitionEffect(unittest.TestCase):
         
         action1.assert_called_once_with(self.event_data)
         action2.assert_called_once_with(self.event_data)
+
+
+class TestExternalTransition(unittest.TestCase):
+    """Test cases for the ExternalTransition class."""
+    
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.source = State(state_id="source", state_type=StateType.SIMPLE)
+        self.target = State(state_id="target", state_type=StateType.SIMPLE)
+        self.event = Event(
+            event_id="test_event",
+            kind=EventKind.SIGNAL,
+            priority=EventPriority.NORMAL
+        )
+        self.guard = Mock(return_value=True)
+        self.effect = Mock()
+        
+    def test_external_transition_execution(self):
+        """Test external transition execution sequence."""
+        transition = ExternalTransition(
+            source=self.source,
+            target=self.target,
+            event=self.event,
+            guard=self.guard,
+            effect=self.effect
+        )
+        
+        # Activate source state
+        self.source.activate()
+        
+        # Execute transition
+        result = transition.execute()
+        
+        # Verify execution sequence
+        self.assertTrue(result)
+        self.guard.assert_called_once()
+        self.effect.assert_called_once()
+        self.assertFalse(self.source.is_active)
+        self.assertTrue(self.target.is_active)
+        
+    def test_external_transition_composite_states(self):
+        """Test external transition between composite states."""
+        # Create composite states with regions
+        source = CompositeState(state_id="source")
+        source_region = source.add_region("region1")
+        source_substate = State(state_id="source_sub", state_type=StateType.SIMPLE, parent=source)
+        
+        target = CompositeState(state_id="target")
+        target_region = target.add_region("region1")
+        target_substate = State(state_id="target_sub", state_type=StateType.SIMPLE, parent=target)
+        
+        transition = ExternalTransition(
+            source=source,
+            target=target,
+            event=self.event
+        )
+        
+        # Activate source state and substate
+        source.activate()
+        source_substate.activate()
+        
+        # Execute transition
+        result = transition.execute()
+        
+        # Verify full state exit/entry
+        self.assertTrue(result)
+        self.assertFalse(source.is_active)
+        self.assertFalse(source_substate.is_active)
+        self.assertTrue(target.is_active)
+
+
+class TestInternalTransition(unittest.TestCase):
+    """Test cases for the InternalTransition class."""
+    
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.state = State(state_id="state", state_type=StateType.SIMPLE)
+        self.event = Event(
+            event_id="test_event",
+            kind=EventKind.SIGNAL,
+            priority=EventPriority.NORMAL
+        )
+        self.effect = Mock()
+        
+    def test_internal_transition_execution(self):
+        """Test internal transition execution."""
+        transition = InternalTransition(
+            source=self.state,
+            event=self.event,
+            effect=self.effect
+        )
+        
+        # Activate state
+        self.state.activate()
+        
+        # Execute transition
+        result = transition.execute()
+        
+        # Verify state remains active and effect executed
+        self.assertTrue(result)
+        self.effect.assert_called_once()
+        self.assertTrue(self.state.is_active)
+        
+    def test_internal_transition_validation(self):
+        """Test internal transition validation rules."""
+        # Test with different source and target
+        with self.assertRaises(ValueError):
+            InternalTransition(
+                source=self.state,
+                target=State(state_id="other", state_type=StateType.SIMPLE),
+                event=self.event
+            )
+
+
+class TestLocalTransition(unittest.TestCase):
+    """Test cases for the LocalTransition class."""
+    
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.parent = CompositeState(state_id="parent")
+        self.source = State(state_id="source", state_type=StateType.SIMPLE, parent=self.parent)
+        self.target = State(state_id="target", state_type=StateType.SIMPLE, parent=self.parent)
+        self.event = Event(
+            event_id="test_event",
+            kind=EventKind.SIGNAL,
+            priority=EventPriority.NORMAL
+        )
+        self.effect = Mock()
+        
+    def test_local_transition_execution(self):
+        """Test local transition execution."""
+        transition = LocalTransition(
+            source=self.source,
+            target=self.target,
+            event=self.event,
+            effect=self.effect
+        )
+        
+        # Activate states
+        self.parent.activate()
+        self.source.activate()
+        
+        # Execute transition
+        result = transition.execute()
+        
+        # Verify minimal state changes
+        self.assertTrue(result)
+        self.effect.assert_called_once()
+        self.assertTrue(self.parent.is_active)  # Parent remains active
+        self.assertFalse(self.source.is_active)
+        self.assertTrue(self.target.is_active)
+        
+    def test_local_transition_validation(self):
+        """Test local transition validation rules."""
+        # Test transition between states in different parents
+        other_parent = CompositeState(state_id="other_parent")
+        other_target = State(state_id="other_target", state_type=StateType.SIMPLE, parent=other_parent)
+        
+        with self.assertRaises(ValueError):
+            LocalTransition(
+                source=self.source,
+                target=other_target,
+                event=self.event
+            )
+
+
+class TestCompoundTransition(unittest.TestCase):
+    """Test cases for the CompoundTransition class."""
+    
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.source = State(state_id="source", state_type=StateType.SIMPLE)
+        self.choice = ChoiceState(state_id="choice", parent=None)
+        self.target = State(state_id="target", state_type=StateType.SIMPLE)
+        self.event = Event(
+            event_id="test_event",
+            kind=EventKind.SIGNAL,
+            priority=EventPriority.NORMAL
+        )
+        
+    def test_compound_transition_execution(self):
+        """Test compound transition execution through pseudostates."""
+        # Create transition segments
+        segment1 = Transition(
+            source=self.source,
+            target=self.choice,
+            event=self.event
+        )
+        
+        segment2 = Transition(
+            source=self.choice,
+            target=self.target,
+            guard=lambda data: True
+        )
+        
+        transition = CompoundTransition(
+            segments=[segment1, segment2],
+            event=self.event
+        )
+        
+        # Activate source state
+        self.source.activate()
+        
+        # Execute compound transition
+        result = transition.execute()
+        
+        # Verify complete execution
+        self.assertTrue(result)
+        self.assertFalse(self.source.is_active)
+        self.assertTrue(self.target.is_active)
+        
+    def test_compound_transition_validation(self):
+        """Test compound transition validation rules."""
+        # Test empty segments
+        with self.assertRaises(ValueError):
+            CompoundTransition(segments=[], event=self.event)
+            
+        # Test disconnected segments
+        other_state = State(state_id="other", state_type=StateType.SIMPLE)
+        segment1 = Transition(source=self.source, target=self.choice)
+        segment2 = Transition(source=other_state, target=self.target)  # Not connected
+        
+        with self.assertRaises(ValueError):
+            CompoundTransition(segments=[segment1, segment2], event=self.event)
+
+
+class TestProtocolTransition(unittest.TestCase):
+    """Test cases for the ProtocolTransition class."""
+    
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.source = State(state_id="source", state_type=StateType.SIMPLE)
+        self.target = State(state_id="target", state_type=StateType.SIMPLE)
+        self.event = Event(
+            event_id="test_event",
+            kind=EventKind.CALL,
+            priority=EventPriority.NORMAL,
+            data={"operation": "test_op", "args": [], "kwargs": {}}
+        )
+        
+    def test_protocol_transition_execution(self):
+        """Test protocol transition execution with operation validation."""
+        # Create protocol transition with operation constraint
+        transition = ProtocolTransition(
+            source=self.source,
+            target=self.target,
+            event=self.event,
+            operation="test_op"
+        )
+        
+        # Activate source state
+        self.source.activate()
+        
+        # Execute transition
+        result = transition.execute()
+        
+        # Verify execution and operation validation
+        self.assertTrue(result)
+        self.assertFalse(self.source.is_active)
+        self.assertTrue(self.target.is_active)
+        
+    def test_protocol_transition_validation(self):
+        """Test protocol transition validation rules."""
+        transition = ProtocolTransition(
+            source=self.source,
+            target=self.target,
+            event=self.event,
+            operation="test_op"
+        )
+        
+        # Test invalid operation
+        self.event._data["operation"] = "invalid_op"
+        result = transition.execute()
+        self.assertFalse(result)
+        
+        # Test missing operation
+        self.event._data.pop("operation")
+        result = transition.execute()
+        self.assertFalse(result)
+
+
+class TestTimeTransition(unittest.TestCase):
+    """Test cases for the TimeTransition class."""
+    
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.source = State(state_id="source", state_type=StateType.SIMPLE)
+        self.target = State(state_id="target", state_type=StateType.SIMPLE)
+        self.event = Event(
+            event_id="test_event",
+            kind=EventKind.TIME,
+            priority=EventPriority.NORMAL,
+            data={"type": "after", "time": 1000}  # 1 second
+        )
+        
+    def test_time_transition_execution(self):
+        """Test time transition execution."""
+        transition = TimeTransition(
+            source=self.source,
+            target=self.target,
+            event=self.event
+        )
+        
+        # Activate source state
+        self.source.activate()
+        
+        # Execute transition
+        result = transition.execute()
+        
+        # Verify execution
+        self.assertTrue(result)
+        self.assertFalse(self.source.is_active)
+        self.assertTrue(self.target.is_active)
+        
+    def test_time_transition_validation(self):
+        """Test time transition validation rules."""
+        # Test invalid time event type
+        invalid_event = Event(
+            event_id="invalid",
+            kind=EventKind.TIME,
+            priority=EventPriority.NORMAL,
+            data={"type": "invalid", "time": 1000}
+        )
+        
+        with self.assertRaises(ValueError):
+            TimeTransition(
+                source=self.source,
+                target=self.target,
+                event=invalid_event
+            )
+            
+        # Test negative time value
+        invalid_event = Event(
+            event_id="negative",
+            kind=EventKind.TIME,
+            priority=EventPriority.NORMAL,
+            data={"type": "after", "time": -1000}
+        )
+        
+        with self.assertRaises(ValueError):
+            TimeTransition(
+                source=self.source,
+                target=self.target,
+                event=invalid_event
+            )
+
+
+class TestChangeTransition(unittest.TestCase):
+    """Test cases for the ChangeTransition class."""
+    
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.source = State(state_id="source", state_type=StateType.SIMPLE)
+        self.target = State(state_id="target", state_type=StateType.SIMPLE)
+        self.event = Event(
+            event_id="test_event",
+            kind=EventKind.CHANGE,
+            priority=EventPriority.NORMAL,
+            data={
+                "condition": "value_changed",
+                "target": "test_var",
+                "old_value": 1,
+                "new_value": 2
+            }
+        )
+        
+    def test_change_transition_execution(self):
+        """Test change transition execution."""
+        transition = ChangeTransition(
+            source=self.source,
+            target=self.target,
+            event=self.event,
+            condition=lambda old, new: new > old
+        )
+        
+        # Activate source state
+        self.source.activate()
+        
+        # Execute transition
+        result = transition.execute()
+        
+        # Verify execution
+        self.assertTrue(result)
+        self.assertFalse(self.source.is_active)
+        self.assertTrue(self.target.is_active)
+        
+    def test_change_transition_validation(self):
+        """Test change transition validation rules."""
+        transition = ChangeTransition(
+            source=self.source,
+            target=self.target,
+            event=self.event,
+            condition=lambda old, new: new > old
+        )
+        
+        # Test condition not satisfied
+        self.event._data["new_value"] = 0
+        result = transition.execute()
+        self.assertFalse(result)
+        
+        # Test missing change values
+        self.event._data.pop("old_value")
+        result = transition.execute()
+        self.assertFalse(result)
 
 
 if __name__ == '__main__':
