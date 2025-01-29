@@ -63,9 +63,11 @@ Dependencies:
 - machine.py: Machine context
 """
 
-from typing import Optional, List, Callable, Any
+from typing import Optional, List, Callable, Any, Dict, Union
 from enum import Enum, auto
 from dataclasses import dataclass
+from functools import reduce
+from operator import and_, or_
 
 
 class TransitionKind(Enum):
@@ -89,6 +91,150 @@ class TransitionPriority(Enum):
     HIGH = auto()    # Takes precedence over lower priorities
     NORMAL = auto()  # Default priority level
     LOW = auto()     # Yields to higher priority transitions
+
+
+class GuardCondition:
+    """Represents a guard condition for a transition.
+    
+    GuardCondition implements composable boolean logic for transition
+    guards with proper evaluation semantics.
+    
+    Class Invariants:
+    1. Must be deterministic
+    2. Must be side-effect free
+    3. Must complete quickly
+    4. Must handle all data types
+    5. Must compose properly
+    
+    Design Patterns:
+    - Strategy: Implements evaluation logic
+    - Composite: Enables condition composition
+    - Command: Encapsulates condition logic
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe evaluation
+    2. Atomic composition
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) simple evaluation
+    2. O(n) composite evaluation where n is condition count
+    3. O(1) composition operations
+    """
+    
+    def __init__(self, condition: Callable[[Dict[str, Any]], bool]) -> None:
+        """Initialize a GuardCondition instance.
+        
+        Args:
+            condition: Function that takes event data and returns bool
+        """
+        self._condition = condition
+        
+    def evaluate(self, event_data: Dict[str, Any]) -> bool:
+        """Evaluate the guard condition.
+        
+        Args:
+            event_data: Event data dictionary for condition context
+            
+        Returns:
+            True if condition is satisfied, False otherwise
+        """
+        return self._condition(event_data)
+        
+    def __and__(self, other: 'GuardCondition') -> 'GuardCondition':
+        """Compose two guards with AND logic.
+        
+        Args:
+            other: Another guard condition
+            
+        Returns:
+            New guard that is true only if both are true
+        """
+        return GuardCondition(
+            lambda data: self.evaluate(data) and other.evaluate(data)
+        )
+        
+    def __or__(self, other: 'GuardCondition') -> 'GuardCondition':
+        """Compose two guards with OR logic.
+        
+        Args:
+            other: Another guard condition
+            
+        Returns:
+            New guard that is true if either is true
+        """
+        return GuardCondition(
+            lambda data: self.evaluate(data) or other.evaluate(data)
+        )
+        
+    def __invert__(self) -> 'GuardCondition':
+        """Negate the guard condition.
+        
+        Returns:
+            New guard that is true when original is false
+        """
+        return GuardCondition(
+            lambda data: not self.evaluate(data)
+        )
+
+
+class TransitionEffect:
+    """Represents an effect (action) executed during a transition.
+    
+    TransitionEffect implements composable actions that are executed
+    when a transition fires, with proper execution semantics.
+    
+    Class Invariants:
+    1. Must maintain state consistency
+    2. Must handle errors gracefully
+    3. Must be idempotent when possible
+    4. Must compose properly
+    5. Must clean up resources
+    
+    Design Patterns:
+    - Command: Encapsulates effect logic
+    - Composite: Enables effect composition
+    - Chain of Responsibility: Handles execution
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe execution
+    2. Atomic composition
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) simple execution
+    2. O(n) composite execution where n is effect count
+    3. O(1) composition operations
+    """
+    
+    def __init__(self, action: Callable[[Dict[str, Any]], None]) -> None:
+        """Initialize a TransitionEffect instance.
+        
+        Args:
+            action: Function that takes event data and performs effect
+        """
+        self._action = action
+        
+    def execute(self, event_data: Dict[str, Any]) -> None:
+        """Execute the transition effect.
+        
+        Args:
+            event_data: Event data dictionary for effect context
+        """
+        self._action(event_data)
+        
+    def __add__(self, other: 'TransitionEffect') -> 'TransitionEffect':
+        """Compose two effects sequentially.
+        
+        Args:
+            other: Another transition effect
+            
+        Returns:
+            New effect that executes both in sequence
+        """
+        return TransitionEffect(
+            lambda data: (self.execute(data), other.execute(data))
+        )
 
 
 class Transition:
@@ -152,7 +298,147 @@ class Transition:
     4. Pooled transition objects
     5. Cached computation results
     """
-    pass
+    
+    def __init__(
+        self,
+        source: 'State',
+        target: Optional['State'] = None,
+        event: Optional['Event'] = None,
+        guard: Optional[Union[GuardCondition, Callable[[Dict[str, Any]], bool]]] = None,
+        effect: Optional[Union[TransitionEffect, Callable[[Dict[str, Any]], None]]] = None,
+        kind: TransitionKind = TransitionKind.EXTERNAL,
+        priority: TransitionPriority = TransitionPriority.NORMAL
+    ) -> None:
+        """Initialize a Transition instance.
+        
+        Args:
+            source: Source state of the transition
+            target: Optional target state (None for internal)
+            event: Optional triggering event
+            guard: Optional guard condition
+            effect: Optional transition effect
+            kind: Type of transition (external, local, internal)
+            priority: Transition priority level
+            
+        Raises:
+            ValueError: If any parameters are invalid
+        """
+        if source is None:
+            raise ValueError("Source state must be provided")
+            
+        if kind != TransitionKind.INTERNAL and target is None:
+            raise ValueError("Target state required for non-internal transitions")
+            
+        if not isinstance(kind, TransitionKind):
+            raise ValueError("Transition kind must be a TransitionKind enum value")
+            
+        if not isinstance(priority, TransitionPriority):
+            raise ValueError("Transition priority must be a TransitionPriority enum value")
+            
+        self._source = source
+        self._target = target
+        self._event = event
+        self._guard = guard  # Store raw guard function or GuardCondition
+        self._effect = effect  # Store raw effect function or TransitionEffect
+        self._kind = kind
+        self._priority = priority
+        
+    @property
+    def source(self) -> 'State':
+        """Get the source state."""
+        return self._source
+        
+    @property
+    def target(self) -> Optional['State']:
+        """Get the target state."""
+        return self._target
+        
+    @property
+    def event(self) -> Optional['Event']:
+        """Get the triggering event."""
+        return self._event
+        
+    @property
+    def guard(self) -> Optional[Union[GuardCondition, Callable[[Dict[str, Any]], bool]]]:
+        """Get the guard condition."""
+        return self._guard
+        
+    @property
+    def effect(self) -> Optional[Union[TransitionEffect, Callable[[Dict[str, Any]], None]]]:
+        """Get the transition effect."""
+        return self._effect
+        
+    @property
+    def kind(self) -> TransitionKind:
+        """Get the transition kind."""
+        return self._kind
+        
+    @property
+    def priority(self) -> TransitionPriority:
+        """Get the transition priority."""
+        return self._priority
+        
+    def evaluate_guard(self) -> bool:
+        """Evaluate the transition's guard condition.
+        
+        Returns:
+            True if guard is satisfied or no guard,
+            False if guard evaluates to false
+        """
+        if self._guard is None:
+            return True
+            
+        event_data = self._event.data if self._event else {}
+        
+        if isinstance(self._guard, GuardCondition):
+            return self._guard.evaluate(event_data)
+        else:
+            return self._guard(event_data)  # Call raw guard function
+        
+    def execute_effect(self) -> None:
+        """Execute the transition's effect."""
+        if self._effect is not None:
+            event_data = self._event.data if self._event else {}
+            
+            if isinstance(self._effect, TransitionEffect):
+                self._effect.execute(event_data)
+            else:
+                self._effect(event_data)  # Call raw effect function
+            
+    def execute(self) -> bool:
+        """Execute the complete transition.
+        
+        This method evaluates the guard, coordinates the states,
+        and executes the effect according to the transition kind.
+        
+        Returns:
+            True if transition executed successfully,
+            False if guard prevented execution
+        """
+        # Check guard condition
+        if not self.evaluate_guard():
+            return False
+            
+        # Handle different transition kinds
+        if self._kind == TransitionKind.INTERNAL:
+            # Internal transitions don't change state
+            self.execute_effect()
+            
+        elif self._kind == TransitionKind.LOCAL:
+            # Local transitions minimize state changes
+            if self._target is not None:
+                self._source.deactivate()
+                self.execute_effect()
+                self._target.activate()
+                
+        else:  # EXTERNAL
+            # External transitions do full exit/entry
+            self._source.exit()
+            self.execute_effect()
+            if self._target is not None:
+                self._target.enter()
+                
+        return True
 
 
 class ExternalTransition(Transition):
