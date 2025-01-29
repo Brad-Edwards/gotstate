@@ -143,7 +143,96 @@ class Region:
     4. Automatic cleanup
     5. Load balancing
     """
-    pass
+    def __init__(
+        self,
+        region_id: str,
+        parent_state: 'State'
+    ) -> None:
+        """Initialize a Region instance.
+        
+        Args:
+            region_id: Unique identifier for the region
+            parent_state: The composite state containing this region
+            
+        Raises:
+            ValueError: If any parameters are invalid
+        """
+        if not region_id or not isinstance(region_id, str):
+            raise ValueError("Region ID must be a non-empty string")
+            
+        if parent_state is None:
+            raise ValueError("Parent state must be provided")
+            
+        self._id = region_id
+        self._parent_state = parent_state
+        self._status = RegionStatus.INACTIVE
+        self._active_states: Set['State'] = set()
+        self._lock = Lock()
+        
+    @property
+    def id(self) -> str:
+        """Get the region ID."""
+        return self._id
+        
+    @property
+    def parent_state(self) -> 'State':
+        """Get the parent state."""
+        return self._parent_state
+        
+    @property
+    def status(self) -> RegionStatus:
+        """Get the region status."""
+        return self._status
+        
+    @property
+    def active_states(self) -> Set['State']:
+        """Get a copy of the active states set."""
+        with self._lock:
+            return self._active_states.copy()
+            
+    @property
+    def is_active(self) -> bool:
+        """Check if the region is active."""
+        return self._status == RegionStatus.ACTIVE
+        
+    def activate(self) -> None:
+        """Activate the region."""
+        with self._lock:
+            if self._status == RegionStatus.INACTIVE:
+                self._status = RegionStatus.ACTIVE
+                
+    def deactivate(self) -> None:
+        """Deactivate the region."""
+        with self._lock:
+            if self._status == RegionStatus.ACTIVE:
+                self._status = RegionStatus.INACTIVE
+                self._active_states.clear()
+                
+    def enter(self) -> None:
+        """Enter the region, initializing its initial state."""
+        self.activate()
+        
+    def exit(self) -> None:
+        """Exit the region, clearing its active states."""
+        self.deactivate()
+        
+    def add_active_state(self, state: 'State') -> None:
+        """Add a state to the set of active states.
+        
+        Args:
+            state: The state to mark as active
+        """
+        with self._lock:
+            self._active_states.add(state)
+            
+    def remove_active_state(self, state: 'State') -> None:
+        """Remove a state from the set of active states.
+        
+        Args:
+            state: The state to mark as inactive
+        """
+        with self._lock:
+            self._active_states.discard(state)
 
 
 class ParallelRegion(Region):

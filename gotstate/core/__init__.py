@@ -26,10 +26,50 @@ Cross-cutting:
 - Testing boundaries for validation
 """
 
-from .state import State
+# Import order matters to avoid circular dependencies
+from .state import (
+    State,
+    StateType,
+    CompositeState,
+    PseudoState,
+    HistoryState
+)
+from .event import (
+    Event,
+    EventKind,
+    EventPriority,
+    SignalEvent,
+    CallEvent,
+    TimeEvent,
+    ChangeEvent,
+    CompletionEvent,
+    EventQueue
+)
 from .transition import Transition
-from .event import Event
 from .region import Region
 from .machine import StateMachine
 
-__all__ = ["State", "Transition", "Event", "Region", "StateMachine"]
+__all__ = [
+    # State classes
+    "State",
+    "StateType",
+    "CompositeState",
+    "PseudoState",
+    "HistoryState",
+    
+    # Event classes
+    "Event",
+    "EventKind",
+    "EventPriority",
+    "SignalEvent",
+    "CallEvent",
+    "TimeEvent",
+    "ChangeEvent",
+    "CompletionEvent",
+    "EventQueue",
+    
+    # Other core classes
+    "Transition",
+    "Region",
+    "StateMachine"
+]
