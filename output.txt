@@ -1,0 +1,4760 @@
+=== DIRECTORY TREE (INCLUDED ONLY) ===
+gotstate/
+    tests/
+        unit/
+    gotstate/
+        runtime/
+        core/
+        types/
+        extensions/
+        persistence/
+
+=== PACKED FILES ===
+
+--- START OF FILE: /home/atomik/src/gotstate/tests/__init__.py ---
+
+--- END OF FILE: /home/atomik/src/gotstate/tests/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/tests/unit/__init__.py ---
+
+--- END OF FILE: /home/atomik/src/gotstate/tests/unit/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/__init__.py ---
+"""gotstate: UML-compliant Hierarchical Finite State Machine (HFSM) implementation
+
+This package provides a robust implementation of hierarchical state machines following
+UML state machine semantics.
+
+Responsibilities:
+    - State machine definition and execution
+    - Event processing and transition management
+    - Hierarchical state composition 
+    - Parallel region handling
+    - History state tracking
+    - Runtime validation
+
+Interactions:
+    - Client code through public API
+    - Python type system for static/runtime type checking
+    - Operating system for concurrency primitives
+    - Storage systems for persistence
+    - Logging system for diagnostics
+
+Cross-cutting Concerns:
+    Thread Safety:
+        - All public APIs are thread-safe
+        - Internal state protected by appropriate locks
+        - Documented thread safety guarantees per component
+
+    Error Handling:
+        - Structured error hierarchy
+        - Consistent error reporting
+        - Clean error recovery paths
+
+    Logging:
+        - Structured logging format
+        - Configurable verbosity levels
+        - Performance impact minimized
+
+    Performance:
+        - O(1) state lookup where possible
+        - Bounded memory usage
+        - Predictable latency
+
+    Security:
+        - Input validation on all public APIs
+        - Safe serialization/deserialization
+        - Protected internal state
+"""
+
+__version__ = "0.1.0"
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/runtime/__init__.py ---
+"""
+Runtime package for execution and monitoring.
+
+Architecture:
+- Manages event execution and run-to-completion
+- Handles time and change event scheduling
+- Provides monitoring and metrics
+- Coordinates with core components
+- Maintains execution guarantees
+
+Design Patterns:
+- State Pattern for execution
+- Publisher/Subscriber for monitoring
+- Factory Pattern for creation
+- Builder Pattern for configuration
+- Singleton Pattern for schedulers
+
+Security:
+- Execution isolation
+- Resource monitoring
+- Timer management
+- Event validation
+- Extension boundaries
+
+Cross-cutting:
+- Error handling with recovery
+- Performance optimization
+- Execution metrics
+- Thread safety
+"""
+
+from .executor import Executor
+from .scheduler import Scheduler
+from .monitor import Monitor
+
+__all__ = ["Executor", "Scheduler", "Monitor"]
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/runtime/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/runtime/monitor.py ---
+"""
+State machine monitoring and metrics management.
+
+Architecture:
+- Provides introspection capabilities
+- Emits state machine events
+- Tracks execution metrics
+- Coordinates with all modules
+- Maintains monitoring boundaries
+
+Design Patterns:
+- Observer Pattern: State monitoring
+- Publisher/Subscriber: Event emission
+- Strategy Pattern: Metric collection
+- Decorator Pattern: Monitoring hooks
+- Chain of Responsibility: Event filtering
+
+Responsibilities:
+1. State Introspection
+   - Current state access
+   - Active transitions
+   - Event status
+   - Machine configuration
+   - Runtime metrics
+
+2. Event Emission
+   - State changes
+   - Transition events
+   - Event handling
+   - Error conditions
+   - Resource usage
+
+3. Metric Collection
+   - Execution timing
+   - Resource usage
+   - Event statistics
+   - Error rates
+   - Performance data
+
+4. Monitoring Control
+   - Filter configuration
+   - Metric selection
+   - Event filtering
+   - Resource limits
+   - Data retention
+
+Security:
+- Data protection
+- Access control
+- Resource limits
+- Event filtering
+
+Cross-cutting:
+- Error handling
+- Performance impact
+- Resource usage
+- Thread safety
+
+Dependencies:
+- machine.py: Machine monitoring
+- executor.py: Execution metrics
+- scheduler.py: Timer metrics
+- event.py: Event monitoring
+"""
+
+from typing import Optional, Dict, List, Set, Any
+from enum import Enum, auto
+from dataclasses import dataclass
+from threading import Lock, Event
+from queue import Queue
+
+
+class MonitoringLevel(Enum):
+    """Defines monitoring detail levels.
+    
+    Used to control monitoring granularity and resource usage.
+    """
+    MINIMAL = auto()   # Basic state changes only
+    NORMAL = auto()    # Standard monitoring level
+    DETAILED = auto()  # Detailed metrics and events
+    DEBUG = auto()     # Full debugging information
+
+
+class MetricType(Enum):
+    """Defines types of metrics to collect.
+    
+    Used to categorize and organize monitoring data.
+    """
+    STATE = auto()      # State-related metrics
+    TRANSITION = auto() # Transition timing/counts
+    EVENT = auto()      # Event processing stats
+    RESOURCE = auto()   # Resource utilization
+    ERROR = auto()      # Error statistics
+
+
+class Monitor:
+    """Provides state machine monitoring and metrics.
+    
+    The Monitor class implements the Observer pattern to track
+    state machine behavior and collect performance metrics.
+    
+    Class Invariants:
+    1. Must maintain monitoring boundaries
+    2. Must preserve event order
+    3. Must track all metrics
+    4. Must control resource usage
+    5. Must handle concurrent access
+    6. Must filter sensitive data
+    7. Must maintain history
+    8. Must support queries
+    9. Must minimize impact
+    10. Must enforce limits
+    
+    Design Patterns:
+    - Observer: Monitors state machine
+    - Publisher: Emits monitoring events
+    - Strategy: Implements policies
+    - Decorator: Adds monitoring
+    - Chain: Filters events
+    
+    Data Structures:
+    - Queue for events
+    - Map for metrics
+    - Set for subscribers
+    - Tree for filtering
+    - Ring buffer for history
+    
+    Algorithms:
+    - Event filtering
+    - Metric aggregation
+    - Data retention
+    - Resource tracking
+    - Query processing
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe monitoring
+    2. Atomic metric updates
+    3. Synchronized event emission
+    4. Safe concurrent access
+    5. Lock-free inspection
+    6. Mutex protection
+    
+    Performance Characteristics:
+    1. O(1) event emission
+    2. O(log n) metric updates
+    3. O(f) filtering where f is filter count
+    4. O(s) subscription where s is subscriber count
+    5. O(q) querying where q is query complexity
+    
+    Resource Management:
+    1. Bounded memory usage
+    2. Controlled event rate
+    3. Data retention policies
+    4. Automatic cleanup
+    5. Load shedding
+    """
+    pass
+
+
+class StateMonitor:
+    """Monitors state machine state changes.
+    
+    StateMonitor tracks state configurations and transitions
+    with minimal performance impact.
+    
+    Class Invariants:
+    1. Must track all states
+    2. Must detect changes
+    3. Must maintain history
+    4. Must minimize impact
+    
+    Design Patterns:
+    - Observer: Monitors states
+    - Strategy: Implements tracking
+    - Command: Encapsulates queries
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe tracking
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) state updates
+    2. O(h) history tracking where h is history size
+    3. O(q) querying where q is query complexity
+    """
+    pass
+
+
+class EventMonitor:
+    """Monitors event processing and metrics.
+    
+    EventMonitor tracks event handling performance and
+    statistics across the state machine.
+    
+    Class Invariants:
+    1. Must track all events
+    2. Must collect metrics
+    3. Must maintain order
+    4. Must support filtering
+    
+    Design Patterns:
+    - Observer: Monitors events
+    - Strategy: Implements tracking
+    - Chain: Filters events
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe monitoring
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) event tracking
+    2. O(f) filtering where f is filter count
+    3. O(m) metric updates where m is metric count
+    """
+    pass
+
+
+class MetricCollector:
+    """Collects and aggregates performance metrics.
+    
+    MetricCollector implements efficient metric collection
+    and aggregation with minimal overhead.
+    
+    Class Invariants:
+    1. Must collect accurately
+    2. Must aggregate efficiently
+    3. Must maintain history
+    4. Must support queries
+    
+    Design Patterns:
+    - Strategy: Implements collection
+    - Observer: Monitors sources
+    - Command: Encapsulates queries
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe collection
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) metric updates
+    2. O(a) aggregation where a is metric count
+    3. O(q) querying where q is query complexity
+    """
+    pass
+
+
+class MonitoringFilter:
+    """Filters monitoring events and metrics.
+    
+    MonitoringFilter implements configurable filtering of
+    monitoring data based on policies.
+    
+    Class Invariants:
+    1. Must filter correctly
+    2. Must maintain policies
+    3. Must be configurable
+    4. Must minimize impact
+    
+    Design Patterns:
+    - Chain: Processes filters
+    - Strategy: Implements policies
+    - Command: Encapsulates rules
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe filtering
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) policy checks
+    2. O(f) filtering where f is filter count
+    3. O(r) rule evaluation where r is rule count
+    """
+    pass
+
+
+class MonitoringSubscriber:
+    """Manages monitoring event subscriptions.
+    
+    MonitoringSubscriber implements the Publisher/Subscriber
+    pattern for monitoring event distribution.
+    
+    Class Invariants:
+    1. Must track subscribers
+    2. Must maintain topics
+    3. Must deliver events
+    4. Must handle failures
+    
+    Design Patterns:
+    - Publisher: Distributes events
+    - Observer: Notifies subscribers
+    - Strategy: Implements delivery
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe subscription
+    2. Atomic delivery
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) subscription
+    2. O(s) delivery where s is subscriber count
+    3. O(t) topic management where t is topic count
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/runtime/monitor.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/runtime/scheduler.py ---
+"""
+Time and change event scheduling management.
+
+Architecture:
+- Manages time and change events
+- Maintains timer consistency
+- Coordinates with Event for queuing
+- Integrates with Executor for processing
+- Handles timer interruptions
+
+Design Patterns:
+- Singleton Pattern: Timer management
+- Observer Pattern: Time events
+- Command Pattern: Scheduled actions
+- Strategy Pattern: Scheduling policies
+- Chain of Responsibility: Event handling
+
+Responsibilities:
+1. Time Events
+   - Relative time events
+   - Absolute time events
+   - Timer management
+   - Timer cancellation
+   - Timer interruption
+
+2. Change Events
+   - Change detection
+   - State condition evaluation
+   - Change event triggers
+   - Condition monitoring
+   - Event generation
+
+3. Timer Management
+   - Timer creation
+   - Timer cancellation
+   - Timer interruption
+   - Timer state preservation
+   - Timer recovery
+
+4. Event Coordination
+   - Event queuing
+   - Priority handling
+   - Order preservation
+   - Timer synchronization
+   - Resource management
+
+Security:
+- Timer isolation
+- Resource limits
+- Event validation
+- State protection
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Timer metrics
+- Thread safety
+
+Dependencies:
+- event.py: Event processing
+- executor.py: Event execution
+- monitor.py: Timer monitoring
+- machine.py: Machine context
+"""
+
+from typing import Optional, Dict, List, Set, Any
+from enum import Enum, auto
+from dataclasses import dataclass
+from threading import Lock, Timer, Event
+from queue import PriorityQueue
+from time import monotonic
+
+
+class TimerStatus(Enum):
+    """Defines the possible states of a timer.
+    
+    Used to track timer lifecycle and coordinate operations.
+    """
+    IDLE = auto()      # Timer not started
+    ACTIVE = auto()    # Timer running
+    PAUSED = auto()    # Timer temporarily paused
+    CANCELLED = auto() # Timer cancelled
+    EXPIRED = auto()   # Timer completed
+
+
+class TimerKind(Enum):
+    """Defines the different types of timers.
+    
+    Used to determine timer behavior and scheduling.
+    """
+    RELATIVE = auto() # After X time units
+    ABSOLUTE = auto() # At specific time
+    PERIODIC = auto() # Repeating interval
+
+
+class Scheduler:
+    """Manages time and change event scheduling.
+    
+    The Scheduler class implements the Singleton pattern to provide
+    centralized timer and change event management.
+    
+    Class Invariants:
+    1. Must maintain timer consistency
+    2. Must preserve event order
+    3. Must handle interruptions
+    4. Must manage resources
+    5. Must track timer state
+    6. Must detect changes
+    7. Must coordinate events
+    8. Must handle cancellation
+    9. Must maintain metrics
+    10. Must enforce limits
+    
+    Design Patterns:
+    - Singleton: Centralizes scheduling
+    - Observer: Monitors events
+    - Command: Encapsulates actions
+    - Strategy: Implements policies
+    - Chain: Processes events
+    
+    Data Structures:
+    - Priority queue for timers
+    - Set for active timers
+    - Map for timer state
+    - Queue for change events
+    - Tree for conditions
+    
+    Algorithms:
+    - Timer scheduling
+    - Change detection
+    - Event ordering
+    - Resource allocation
+    - State tracking
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe scheduling
+    2. Atomic timer operations
+    3. Synchronized state access
+    4. Safe concurrent events
+    5. Lock-free inspection
+    6. Mutex protection
+    
+    Performance Characteristics:
+    1. O(1) timer creation
+    2. O(log n) scheduling
+    3. O(1) cancellation
+    4. O(c) change detection where c is condition count
+    5. O(e) event coordination where e is event count
+    
+    Resource Management:
+    1. Bounded timer count
+    2. Controlled thread usage
+    3. Memory pooling
+    4. Automatic cleanup
+    5. Load balancing
+    """
+    pass
+
+
+class TimerManager:
+    """Manages timer lifecycle and operations.
+    
+    TimerManager implements timer creation, tracking, and cleanup
+    with proper synchronization.
+    
+    Class Invariants:
+    1. Must track all timers
+    2. Must handle interruptions
+    3. Must preserve state
+    4. Must cleanup resources
+    
+    Design Patterns:
+    - Factory: Creates timers
+    - Observer: Monitors timers
+    - Command: Encapsulates operations
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe management
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) timer tracking
+    2. O(n) cleanup where n is timer count
+    3. O(1) state updates
+    """
+    pass
+
+
+class ChangeDetector:
+    """Monitors and detects state changes.
+    
+    ChangeDetector implements efficient change detection and
+    event generation for monitored conditions.
+    
+    Class Invariants:
+    1. Must detect all changes
+    2. Must prevent missed events
+    3. Must maintain history
+    4. Must track conditions
+    
+    Design Patterns:
+    - Observer: Monitors changes
+    - Strategy: Implements detection
+    - Command: Encapsulates events
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe detection
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) change detection
+    2. O(c) condition evaluation where c is condition count
+    3. O(h) history tracking where h is history size
+    """
+    pass
+
+
+class EventCoordinator:
+    """Coordinates scheduled events and processing.
+    
+    EventCoordinator manages event ordering and coordination
+    with the execution system.
+    
+    Class Invariants:
+    1. Must preserve order
+    2. Must handle priorities
+    3. Must coordinate timing
+    4. Must manage resources
+    
+    Design Patterns:
+    - Mediator: Coordinates events
+    - Observer: Monitors processing
+    - Strategy: Implements policies
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe coordination
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(log n) event ordering
+    2. O(p) priority handling where p is priority count
+    3. O(r) resource management where r is resource count
+    """
+    pass
+
+
+class SchedulerMonitor:
+    """Monitors scheduler operations and metrics.
+    
+    SchedulerMonitor tracks scheduling performance and
+    resource utilization.
+    
+    Class Invariants:
+    1. Must track metrics
+    2. Must detect issues
+    3. Must maintain history
+    4. Must support queries
+    
+    Design Patterns:
+    - Observer: Monitors scheduler
+    - Strategy: Implements policies
+    - Command: Encapsulates queries
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe monitoring
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) metric updates
+    2. O(q) query execution where q is query complexity
+    3. O(h) history tracking where h is history size
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/runtime/scheduler.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/runtime/executor.py ---
+"""
+Event execution and run-to-completion management.
+
+Architecture:
+- Enforces run-to-completion semantics
+- Manages transition execution
+- Handles concurrent operations
+- Coordinates with Event for processing
+- Integrates with Monitor for metrics
+
+Design Patterns:
+- State Pattern: Execution states
+- Command Pattern: Execution units
+- Observer Pattern: Execution events
+- Strategy Pattern: Execution policies
+- Chain of Responsibility: Event processing
+
+Responsibilities:
+1. Run-to-Completion
+   - Event processing semantics
+   - Event queuing
+   - Transition atomicity
+   - Order preservation
+   - Re-entrancy handling
+
+2. Transition Execution
+   - Guard evaluation
+   - Action execution
+   - State changes
+   - Error recovery
+   - Resource cleanup
+
+3. Concurrency
+   - Parallel execution
+   - Synchronization
+   - Resource management
+   - Deadlock prevention
+   - Race condition handling
+
+4. Error Management
+   - Execution failures
+   - Partial completion
+   - State recovery
+   - Resource cleanup
+   - Error propagation
+
+Security:
+- Execution isolation
+- Resource boundaries
+- Action sandboxing
+- State protection
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Execution metrics
+- Thread safety
+
+Dependencies:
+- event.py: Event processing
+- transition.py: Transition handling
+- monitor.py: Execution monitoring
+- machine.py: Machine context
+"""
+
+from typing import Optional, Dict, List, Set, Any
+from enum import Enum, auto
+from dataclasses import dataclass
+from threading import Lock, RLock, Event, Condition
+
+
+class ExecutionStatus(Enum):
+    """Defines the possible states of execution.
+    
+    Used to track execution progress and coordinate operations.
+    """
+    IDLE = auto()        # No execution in progress
+    EXECUTING = auto()   # Currently executing
+    SUSPENDED = auto()   # Temporarily suspended
+    ROLLING_BACK = auto() # Handling failure
+    FAILED = auto()      # Execution failed
+
+
+class ExecutionMode(Enum):
+    """Defines execution modes for the executor.
+    
+    Used to determine execution behavior and policies.
+    """
+    SYNCHRONOUS = auto()  # Execute in calling thread
+    ASYNCHRONOUS = auto() # Execute in separate thread
+    PARALLEL = auto()     # Execute in thread pool
+
+
+class Executor:
+    """Manages event execution with run-to-completion semantics.
+    
+    The Executor class implements the Command pattern to manage
+    execution units while enforcing run-to-completion semantics.
+    
+    Class Invariants:
+    1. Must maintain run-to-completion semantics
+    2. Must preserve event ordering
+    3. Must ensure transition atomicity
+    4. Must handle concurrent execution
+    5. Must manage resources properly
+    6. Must recover from failures
+    7. Must prevent deadlocks
+    8. Must maintain metrics
+    9. Must isolate execution
+    10. Must enforce boundaries
+    
+    Design Patterns:
+    - Command: Encapsulates execution units
+    - State: Manages execution states
+    - Observer: Notifies of execution
+    - Strategy: Implements policies
+    - Chain: Processes events
+    
+    Data Structures:
+    - Queue for pending executions
+    - Set for active executions
+    - Map for execution status
+    - Graph for dependencies
+    - Stack for rollback
+    
+    Algorithms:
+    - Dependency resolution
+    - Resource allocation
+    - Deadlock detection
+    - Rollback planning
+    - Metrics collection
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe execution
+    2. Atomic transitions
+    3. Synchronized resources
+    4. Safe concurrent access
+    5. Lock-free inspection
+    6. Mutex protection
+    
+    Performance Characteristics:
+    1. O(1) status checks
+    2. O(log n) scheduling
+    3. O(d) dependency check where d is dependency count
+    4. O(r) rollback where r is operation count
+    5. O(m) metrics update where m is metric count
+    
+    Resource Management:
+    1. Bounded thread usage
+    2. Controlled memory allocation
+    3. Resource pooling
+    4. Automatic cleanup
+    5. Load balancing
+    """
+    pass
+
+
+class ExecutionUnit:
+    """Represents an atomic unit of execution.
+    
+    ExecutionUnit implements the Command pattern to encapsulate
+    a single execution operation with rollback capability.
+    
+    Class Invariants:
+    1. Must be atomic
+    2. Must support rollback
+    3. Must track resources
+    4. Must maintain metrics
+    
+    Design Patterns:
+    - Command: Encapsulates operation
+    - Memento: Supports rollback
+    - Observer: Reports progress
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe execution
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) execution
+    2. O(r) rollback where r is state size
+    3. O(m) metrics where m is metric count
+    """
+    pass
+
+
+class ExecutionContext:
+    """Maintains context for execution units.
+    
+    ExecutionContext provides isolation and resource tracking
+    for execution unit operations.
+    
+    Class Invariants:
+    1. Must maintain isolation
+    2. Must track resources
+    3. Must support cleanup
+    4. Must preserve state
+    
+    Design Patterns:
+    - Context: Provides execution environment
+    - Memento: Preserves state
+    - Observer: Monitors resources
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe context
+    2. Atomic state updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) context switches
+    2. O(r) resource tracking where r is resource count
+    3. O(s) state management where s is state size
+    """
+    pass
+
+
+class ExecutionScheduler:
+    """Schedules execution units for processing.
+    
+    ExecutionScheduler manages the ordering and timing of
+    execution unit processing.
+    
+    Class Invariants:
+    1. Must preserve order
+    2. Must handle priorities
+    3. Must prevent starvation
+    4. Must manage resources
+    
+    Design Patterns:
+    - Strategy: Implements scheduling
+    - Observer: Monitors execution
+    - Chain: Processes units
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe scheduling
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(log n) scheduling
+    2. O(p) priority management where p is priority count
+    3. O(r) resource allocation where r is resource count
+    """
+    pass
+
+
+class ExecutionMonitor:
+    """Monitors execution progress and metrics.
+    
+    ExecutionMonitor tracks execution status and collects
+    performance metrics.
+    
+    Class Invariants:
+    1. Must track progress
+    2. Must collect metrics
+    3. Must detect issues
+    4. Must maintain history
+    
+    Design Patterns:
+    - Observer: Monitors execution
+    - Strategy: Implements policies
+    - Command: Encapsulates queries
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe monitoring
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) status updates
+    2. O(m) metric collection where m is metric count
+    3. O(h) history tracking where h is history size
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/runtime/executor.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/core/state.py ---
+"""
+State class and hierarchy management.
+
+Architecture:
+- Implements hierarchical state structure using Composite pattern
+- Manages state data with isolation guarantees
+- Enforces state invariants and validation
+- Coordinates with Region for parallel state execution
+- Preserves history state information
+
+Design Patterns:
+- Composite Pattern: Hierarchical state structure
+- Observer Pattern: State change notifications
+- Memento Pattern: History state preservation
+- Builder Pattern: State configuration
+- Visitor Pattern: State traversal
+
+Responsibilities:
+1. State Hierarchy
+   - Parent/child relationships
+   - Composite state management
+   - Submachine state handling
+   - State redefinition support
+
+2. State Data
+   - Data isolation between states
+   - Parent state data inheritance
+   - Parallel region data management
+   - History state data preservation
+
+3. State Behavior
+   - Entry/exit actions
+   - Do-activity execution
+   - Internal transitions
+   - State invariants
+
+4. State Configuration
+   - Initial/final states
+   - History state types
+   - Entry/exit points
+   - Choice/junction pseudostates
+
+Security:
+- State data isolation
+- Action execution boundaries
+- Resource usage monitoring
+- Validation at state boundaries
+
+Cross-cutting:
+- Error handling for state operations
+- Performance optimization for traversal
+- Monitoring of state changes
+- Thread safety for parallel regions
+
+Dependencies:
+- region.py: Parallel region coordination
+- transition.py: State change management
+- event.py: Event processing integration
+- machine.py: State machine context
+"""
+
+from typing import Optional, Dict, List, Set
+from dataclasses import dataclass
+from enum import Enum, auto
+
+
+class StateType(Enum):
+    """Defines the different types of states in the hierarchical state machine.
+    
+    Used to distinguish between regular states, pseudostates, and special state types
+    for proper behavioral implementation and validation.
+    """
+    SIMPLE = auto()          # Leaf state with no substates
+    COMPOSITE = auto()       # State containing substates
+    SUBMACHINE = auto()      # Reference to another state machine
+    INITIAL = auto()         # Initial pseudostate
+    FINAL = auto()          # Final state
+    CHOICE = auto()         # Dynamic conditional branching
+    JUNCTION = auto()       # Static conditional branching
+    SHALLOW_HISTORY = auto() # Remembers only direct substate
+    DEEP_HISTORY = auto()    # Remembers full substate configuration
+    ENTRY_POINT = auto()    # Named entry point
+    EXIT_POINT = auto()     # Named exit point
+    TERMINATE = auto()      # Terminates entire state machine
+
+
+class State:
+    """Represents a state in a hierarchical state machine.
+    
+    The State class implements the Composite pattern to manage the hierarchical
+    structure of states. It maintains parent-child relationships, handles state
+    data with proper isolation, and coordinates with parallel regions.
+    
+    Class Invariants:
+    1. A state must have a unique identifier within its parent's scope
+    2. A state's type must not change after initialization
+    3. Parent-child relationships must form a directed acyclic graph (DAG)
+    4. Initial pseudostates must have exactly one outgoing transition
+    5. History states must belong to a composite state
+    6. Entry/exit points must have valid connections
+    7. State data must remain isolated between parallel regions
+    8. Parent state data must be accessible to child states
+    9. Active do-activities must be properly tracked and managed
+    10. State configuration must be valid according to UML state machine rules
+    
+    Design Patterns:
+    - Composite: Hierarchical state structure using parent-child relationships
+    - Observer: Notifies observers of state entry/exit and data changes
+    - Memento: Preserves and restores history state information
+    - Builder: Constructs complex state configurations
+    - Visitor: Enables traversal of state hierarchy
+    - Command: Encapsulates entry/exit actions and do-activities
+    
+    Data Structures:
+    - Dictionary for child state lookup (O(1) access)
+    - Set for active regions (fast membership testing)
+    - Queue for pending events (FIFO processing)
+    - Tree for hierarchical traversal
+    - Stack for history state tracking
+    
+    Algorithms:
+    - Depth-first search for state traversal
+    - Topological sort for transition execution order
+    - LCA (Lowest Common Ancestor) for transition path computation
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe state data access within parallel regions
+    2. Atomic state configuration changes
+    3. Safe concurrent execution of do-activities
+    4. Synchronized access to history state information
+    5. Lock-free read access to state configuration
+    6. Mutex protection for state data modifications
+    
+    Performance Characteristics:
+    1. O(1) child state lookup
+    2. O(log n) ancestor traversal
+    3. O(1) state type checking
+    4. O(k) parallel region synchronization where k is region count
+    5. O(d) history state restoration where d is hierarchy depth
+    
+    Resource Management:
+    1. Bounded memory usage for state data
+    2. Controlled resource allocation for do-activities
+    3. Limited thread pool for parallel regions
+    4. Cached state configuration for fast access
+    5. Pooled event objects for reduced allocation
+    """
+    pass
+
+
+class CompositeState(State):
+    """Represents a composite state that can contain other states.
+    
+    CompositeState extends the base State class to implement the Composite pattern,
+    managing a collection of child states and their relationships.
+    
+    Class Invariants:
+    1. Must maintain valid parent-child relationships
+    2. Must have at most one initial state per region
+    3. Must properly manage parallel regions
+    4. Must maintain history state consistency
+    5. Must enforce state naming uniqueness within scope
+    
+    Design Patterns:
+    - Composite: Manages child state hierarchy
+    - Factory: Creates appropriate state types
+    - Observer: Notifies of child state changes
+    
+    Data Structures:
+    - Dictionary of child states by name
+    - List of parallel regions
+    - Map of history states
+    - Set of active substates
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe child state access
+    2. Atomic region activation/deactivation
+    3. Synchronized history state updates
+    4. Safe concurrent region execution
+    
+    Performance Characteristics:
+    1. O(1) child state lookup
+    2. O(r) region synchronization where r is region count
+    3. O(h) history state management where h is history count
+    """
+    pass
+
+
+class PseudoState(State):
+    """Base class for all pseudostates in the state machine.
+    
+    PseudoState provides common functionality for special states that control
+    execution flow but don't represent actual system states.
+    
+    Class Invariants:
+    1. Must have valid connections according to type
+    2. Must not contain substates
+    3. Must follow UML pseudostate semantics
+    4. Must maintain transition consistency
+    
+    Design Patterns:
+    - Template Method: Defines pseudostate behavior
+    - Strategy: Implements type-specific logic
+    - Chain of Responsibility: Handles transition routing
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe transition execution
+    2. Atomic decision point evaluation
+    3. Safe concurrent access to guard conditions
+    
+    Performance Characteristics:
+    1. O(1) type checking
+    2. O(t) transition evaluation where t is transition count
+    3. O(g) guard condition evaluation where g is guard count
+    """
+    pass
+
+
+class HistoryState(PseudoState):
+    """Represents history pseudostates (shallow and deep) in the state machine.
+    
+    HistoryState maintains the historical state configuration of its parent
+    composite state, enabling state restoration.
+    
+    Class Invariants:
+    1. Must belong to a composite state
+    2. Must maintain valid history configuration
+    3. Must preserve parallel region history
+    4. Must handle default transitions
+    
+    Design Patterns:
+    - Memento: Stores and restores state configuration
+    - Observer: Tracks state configuration changes
+    - Strategy: Implements history type behavior
+    
+    Data Structures:
+    - Stack for state configuration history
+    - Map for region history tracking
+    - Set for active state tracking
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe history updates
+    2. Atomic configuration restoration
+    3. Safe concurrent region history tracking
+    
+    Performance Characteristics:
+    1. O(1) history type checking
+    2. O(d) configuration storage where d is hierarchy depth
+    3. O(r) region history management where r is region count
+    """
+    pass
+
+
+class ConnectionPointState(PseudoState):
+    """Represents entry and exit points for states.
+    
+    ConnectionPointState manages named entry and exit points that provide
+    interfaces for transitions into and out of composite states.
+    
+    Class Invariants:
+    1. Must have valid connection to parent state
+    2. Must maintain transition consistency
+    3. Must have unique name within parent scope
+    4. Must enforce valid transition paths
+    
+    Design Patterns:
+    - Facade: Provides clean interface to state
+    - Mediator: Coordinates transition routing
+    - Chain of Responsibility: Handles transition paths
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe transition routing
+    2. Atomic path validation
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) point type checking
+    2. O(p) path validation where p is path length
+    3. O(t) transition routing where t is transition count
+    """
+    pass
+
+
+class ChoiceState(PseudoState):
+    """Represents a dynamic conditional branch point.
+    
+    ChoiceState evaluates guard conditions at runtime to determine the
+    transition path, enabling dynamic behavioral decisions.
+    
+    Class Invariants:
+    1. Must have at least one outgoing transition
+    2. Must evaluate guards in defined order
+    3. Must have valid default transition
+    4. Must maintain consistent decision state
+    
+    Design Patterns:
+    - Strategy: Implements guard evaluation
+    - Chain of Responsibility: Processes guards
+    - Command: Encapsulates guard conditions
+    
+    Data Structures:
+    - Priority queue for guard evaluation
+    - Decision tree for condition checking
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe guard evaluation
+    2. Atomic decision making
+    3. Safe concurrent condition access
+    
+    Performance Characteristics:
+    1. O(g) guard evaluation where g is guard count
+    2. O(log g) guard prioritization
+    3. O(d) decision tree traversal where d is tree depth
+    """
+    pass
+
+
+class JunctionState(PseudoState):
+    """Represents a static conditional branch point.
+    
+    JunctionState implements static conditional branching based on
+    guard conditions that are evaluated when the junction is reached.
+    
+    Class Invariants:
+    1. Must have at least one outgoing transition
+    2. Must evaluate guards in static order
+    3. Must have valid default transition
+    4. Must maintain transition consistency
+    
+    Design Patterns:
+    - Strategy: Implements branching logic
+    - Chain of Responsibility: Processes conditions
+    - Command: Encapsulates static decisions
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe transition selection
+    2. Atomic path determination
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(t) transition evaluation where t is transition count
+    2. O(g) guard checking where g is guard count
+    3. O(1) default transition access
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/core/state.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/core/__init__.py ---
+"""
+Core package providing the fundamental HFSM functionality.
+
+Architecture:
+- Implements hierarchical state machine core components
+- Manages state hierarchy, transitions, events, and regions
+- Coordinates between components through machine orchestration
+
+Design Patterns:
+- Composite Pattern for state hierarchy
+- Observer Pattern for state changes
+- Command Pattern for transitions
+- Strategy Pattern for event processing
+- Mediator Pattern for coordination
+
+Security:
+- Input validation at module boundaries
+- State data isolation
+- Resource usage monitoring
+- Type system safety checks
+
+Cross-cutting:
+- Error handling with consistent propagation
+- Performance optimization for state operations
+- Monitoring hooks for metrics
+- Testing boundaries for validation
+"""
+
+from .state import State
+from .transition import Transition
+from .event import Event
+from .region import Region
+from .machine import StateMachine
+
+__all__ = ["State", "Transition", "Event", "Region", "StateMachine"]
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/core/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/core/region.py ---
+"""
+Parallel region and concurrency management.
+
+Architecture:
+- Implements parallel region execution
+- Manages region synchronization
+- Handles cross-region transitions
+- Coordinates with State for hierarchy
+- Integrates with Executor for concurrency
+
+Design Patterns:
+- Composite Pattern: Region hierarchy
+- Observer Pattern: Region events
+- Mediator Pattern: Region coordination
+- State Pattern: Region lifecycle
+- Strategy Pattern: Execution policies
+
+Responsibilities:
+1. Parallel Execution
+   - True parallel regions
+   - State consistency
+   - Cross-region transitions
+   - Join/fork pseudostates
+   - Event ordering
+
+2. Region Synchronization
+   - State consistency
+   - Event processing
+   - Synchronization points
+   - Race condition prevention
+   - Resource coordination
+
+3. Region Lifecycle
+   - Initialization sequence
+   - Termination order
+   - History restoration
+   - Cross-region coordination
+   - Data consistency
+
+4. Event Management
+   - Event ordering
+   - Event propagation
+   - Priority handling
+   - Scope boundaries
+   - Processing rules
+
+Security:
+- Region isolation
+- Resource boundaries
+- State protection
+- Event validation
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Region metrics
+- Thread safety
+
+Dependencies:
+- state.py: State hierarchy
+- event.py: Event processing
+- executor.py: Parallel execution
+- machine.py: Machine context
+"""
+
+from typing import Optional, List, Set, Dict
+from enum import Enum, auto
+from dataclasses import dataclass
+from threading import Lock, Event
+
+
+class RegionStatus(Enum):
+    """Defines the possible states of a region.
+    
+    Used to track region lifecycle and coordinate execution.
+    """
+    INACTIVE = auto()   # Region not yet started
+    ACTIVE = auto()     # Region executing normally
+    SUSPENDED = auto()  # Region temporarily suspended
+    TERMINATING = auto() # Region in process of terminating
+    TERMINATED = auto() # Region fully terminated
+
+
+class Region:
+    """Represents a parallel region in a hierarchical state machine.
+    
+    The Region class implements concurrent execution of orthogonal
+    state configurations with proper synchronization and isolation.
+    
+    Class Invariants:
+    1. Must maintain state consistency
+    2. Must preserve event ordering
+    3. Must handle cross-region transitions
+    4. Must enforce isolation boundaries
+    5. Must coordinate initialization/termination
+    6. Must preserve history state
+    7. Must handle interruptions gracefully
+    8. Must maintain event scope
+    9. Must prevent race conditions
+    10. Must manage resources properly
+    
+    Design Patterns:
+    - Composite: Manages region hierarchy
+    - Observer: Notifies of region events
+    - Mediator: Coordinates between regions
+    - State: Manages region lifecycle
+    - Strategy: Implements execution policies
+    - Command: Encapsulates region operations
+    
+    Data Structures:
+    - Set for active states
+    - Queue for pending events
+    - Map for history states
+    - Tree for scope hierarchy
+    - Graph for transition paths
+    
+    Algorithms:
+    - Parallel execution scheduling
+    - Event propagation routing
+    - Synchronization point management
+    - Resource allocation
+    - Deadlock prevention
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe state access
+    2. Atomic region operations
+    3. Synchronized event processing
+    4. Safe cross-region transitions
+    5. Lock-free status inspection
+    6. Mutex protection for critical sections
+    
+    Performance Characteristics:
+    1. O(1) status updates
+    2. O(log n) event routing
+    3. O(p) parallel execution where p is active paths
+    4. O(s) synchronization where s is sync points
+    5. O(r) cross-region coordination where r is region count
+    
+    Resource Management:
+    1. Bounded thread usage
+    2. Controlled memory allocation
+    3. Resource pooling
+    4. Automatic cleanup
+    5. Load balancing
+    """
+    pass
+
+
+class ParallelRegion(Region):
+    """Represents a region that executes in parallel with siblings.
+    
+    ParallelRegion implements true concurrent execution with proper
+    isolation and synchronization guarantees.
+    
+    Class Invariants:
+    1. Must maintain parallel execution
+    2. Must preserve isolation
+    3. Must handle shared resources
+    4. Must coordinate termination
+    
+    Design Patterns:
+    - Strategy: Implements parallel execution
+    - Observer: Monitors execution status
+    - Mediator: Coordinates resources
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe execution
+    2. Atomic operations
+    3. Safe resource sharing
+    
+    Performance Characteristics:
+    1. O(1) execution management
+    2. O(r) resource coordination where r is resource count
+    3. O(s) state synchronization where s is shared state count
+    """
+    pass
+
+
+class SynchronizationRegion(Region):
+    """Represents a region that coordinates synchronization points.
+    
+    SynchronizationRegion manages join/fork pseudostates and ensures
+    proper coordination between parallel regions.
+    
+    Class Invariants:
+    1. Must maintain sync point validity
+    2. Must handle partial completion
+    3. Must prevent deadlocks
+    4. Must track progress
+    
+    Design Patterns:
+    - Mediator: Coordinates synchronization
+    - Observer: Monitors progress
+    - Command: Encapsulates sync operations
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe synchronization
+    2. Atomic progress updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) point management
+    2. O(p) progress tracking where p is participant count
+    3. O(d) deadlock detection where d is dependency count
+    """
+    pass
+
+
+class HistoryRegion(Region):
+    """Represents a region that maintains history state information.
+    
+    HistoryRegion preserves and restores historical state configurations
+    for both shallow and deep history.
+    
+    Class Invariants:
+    1. Must maintain history accuracy
+    2. Must handle parallel states
+    3. Must preserve ordering
+    4. Must support restoration
+    
+    Design Patterns:
+    - Memento: Preserves history state
+    - Strategy: Implements history types
+    - Command: Encapsulates restoration
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe history tracking
+    2. Atomic state restoration
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) history updates
+    2. O(h) state restoration where h is history depth
+    3. O(s) parallel state handling where s is state count
+    """
+    pass
+
+
+class RegionManager:
+    """Manages multiple regions and their interactions.
+    
+    RegionManager coordinates parallel regions, handles resource
+    allocation, and ensures proper synchronization.
+    
+    Class Invariants:
+    1. Must maintain region isolation
+    2. Must handle resource allocation
+    3. Must prevent deadlocks
+    4. Must coordinate execution
+    5. Must manage lifecycle
+    6. Must track dependencies
+    7. Must handle failures
+    8. Must preserve ordering
+    9. Must support scaling
+    10. Must enforce boundaries
+    
+    Design Patterns:
+    - Facade: Provides region management interface
+    - Factory: Creates region instances
+    - Observer: Monitors region status
+    - Mediator: Coordinates interactions
+    
+    Data Structures:
+    - Map of active regions
+    - Graph of dependencies
+    - Queue of pending operations
+    - Pool of resources
+    
+    Algorithms:
+    - Resource allocation
+    - Deadlock detection
+    - Load balancing
+    - Failure recovery
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe management
+    2. Atomic operations
+    3. Synchronized coordination
+    4. Safe concurrent access
+    5. Lock-free inspection
+    6. Mutex protection
+    
+    Performance Characteristics:
+    1. O(1) region lookup
+    2. O(log n) resource allocation
+    3. O(d) deadlock detection where d is dependency count
+    4. O(r) coordination where r is region count
+    5. O(f) failure handling where f is failure count
+    
+    Resource Management:
+    1. Bounded region count
+    2. Pooled resources
+    3. Automatic cleanup
+    4. Load distribution
+    5. Failure isolation
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/core/region.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/core/machine.py ---
+"""
+State machine orchestration and lifecycle management.
+
+Architecture:
+- Orchestrates state machine components
+- Manages machine lifecycle and configuration
+- Coordinates core component interactions
+- Integrates with Monitor for introspection
+- Handles dynamic modifications
+
+Design Patterns:
+- Facade Pattern: Component coordination
+- Builder Pattern: Machine configuration
+- Observer Pattern: State notifications
+- Mediator Pattern: Component interaction
+- Strategy Pattern: Machine policies
+
+Responsibilities:
+1. Machine Lifecycle
+   - Initialization
+   - Configuration
+   - Dynamic modification
+   - Version management
+   - Termination
+
+2. Component Coordination
+   - State management
+   - Transition handling
+   - Event processing
+   - Region execution
+   - Resource control
+
+3. Machine Configuration
+   - Validation rules
+   - Security policies
+   - Resource limits
+   - Extension settings
+   - Monitoring options
+
+4. Dynamic Modifications
+   - Runtime changes
+   - Semantic consistency
+   - State preservation
+   - Version compatibility
+   - Modification atomicity
+
+Security:
+- Configuration validation
+- Component isolation
+- Resource management
+- Extension control
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Machine metrics
+- Thread safety
+
+Dependencies:
+- state.py: State management
+- transition.py: Transition handling
+- event.py: Event processing
+- region.py: Region coordination
+- monitor.py: Machine monitoring
+"""
+
+from typing import Optional, Dict, List, Any
+from enum import Enum, auto
+from dataclasses import dataclass
+from threading import Lock, RLock, Event
+
+
+class MachineStatus(Enum):
+    """Defines the possible states of a state machine.
+    
+    Used to track machine lifecycle and coordinate operations.
+    """
+    UNINITIALIZED = auto()  # Machine not yet configured
+    INITIALIZING = auto()   # Machine being configured
+    ACTIVE = auto()         # Machine running normally
+    MODIFYING = auto()      # Machine being modified
+    TERMINATING = auto()    # Machine shutting down
+    TERMINATED = auto()     # Machine fully stopped
+
+
+class StateMachine:
+    """Represents a hierarchical state machine.
+    
+    The StateMachine class implements the Facade pattern to coordinate
+    all components and manage the machine lifecycle.
+    
+    Class Invariants:
+    1. Must maintain semantic consistency
+    2. Must preserve state hierarchy
+    3. Must coordinate components
+    4. Must enforce configuration
+    5. Must handle modifications
+    6. Must manage resources
+    7. Must track versions
+    8. Must support introspection
+    9. Must isolate extensions
+    10. Must maintain metrics
+    
+    Design Patterns:
+    - Facade: Coordinates components
+    - Builder: Configures machine
+    - Observer: Notifies of changes
+    - Mediator: Manages interactions
+    - Strategy: Implements policies
+    - Command: Encapsulates operations
+    
+    Data Structures:
+    - Tree for state hierarchy
+    - Graph for transitions
+    - Queue for events
+    - Map for components
+    - Set for active states
+    
+    Algorithms:
+    - Configuration validation
+    - Version compatibility
+    - Resource allocation
+    - Modification planning
+    - Metrics aggregation
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe operations
+    2. Atomic modifications
+    3. Synchronized components
+    4. Safe concurrent access
+    5. Lock-free inspection
+    6. Mutex protection
+    
+    Performance Characteristics:
+    1. O(1) status checks
+    2. O(log n) component access
+    3. O(h) hierarchy operations where h is height
+    4. O(m) modifications where m is change count
+    5. O(v) version checks where v is version count
+    
+    Resource Management:
+    1. Bounded memory usage
+    2. Controlled thread allocation
+    3. Resource pooling
+    4. Automatic cleanup
+    5. Load distribution
+    """
+    pass
+
+
+class ProtocolMachine(StateMachine):
+    """Represents a protocol state machine.
+    
+    ProtocolMachine enforces protocol constraints and operation
+    sequences for behavioral specifications.
+    
+    Class Invariants:
+    1. Must enforce protocol rules
+    2. Must validate operations
+    3. Must track protocol state
+    4. Must maintain sequences
+    
+    Design Patterns:
+    - State: Manages protocol states
+    - Strategy: Implements protocols
+    - Command: Encapsulates operations
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe validation
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) state checks
+    2. O(r) rule validation where r is rule count
+    3. O(s) sequence tracking where s is sequence length
+    """
+    pass
+
+
+class SubmachineMachine(StateMachine):
+    """Represents a submachine state machine.
+    
+    SubmachineMachine implements reusable state machine components
+    that can be referenced by other machines.
+    
+    Class Invariants:
+    1. Must maintain encapsulation
+    2. Must handle references
+    3. Must coordinate lifecycle
+    4. Must isolate data
+    
+    Design Patterns:
+    - Proxy: Manages references
+    - Flyweight: Shares instances
+    - Bridge: Decouples interface
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe reference management
+    2. Atomic lifecycle operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) reference management
+    2. O(r) coordination where r is reference count
+    3. O(d) data isolation where d is data size
+    """
+    pass
+
+
+class MachineBuilder:
+    """Builds state machine configurations.
+    
+    MachineBuilder implements the Builder pattern to construct
+    valid state machine configurations.
+    
+    Class Invariants:
+    1. Must validate configuration
+    2. Must enforce constraints
+    3. Must maintain consistency
+    4. Must track dependencies
+    
+    Design Patterns:
+    - Builder: Constructs machines
+    - Factory: Creates components
+    - Validator: Checks configuration
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe construction
+    2. Atomic validation
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(c) configuration where c is component count
+    2. O(v) validation where v is rule count
+    3. O(d) dependency resolution where d is dependency count
+    """
+    pass
+
+
+class MachineModifier:
+    """Manages dynamic state machine modifications.
+    
+    MachineModifier implements safe runtime modifications while
+    preserving semantic consistency.
+    
+    Class Invariants:
+    1. Must preserve semantics
+    2. Must maintain atomicity
+    3. Must handle rollback
+    4. Must validate changes
+    
+    Design Patterns:
+    - Command: Encapsulates changes
+    - Memento: Preserves state
+    - Strategy: Implements policies
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe modifications
+    2. Atomic changes
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(c) change application where c is change count
+    2. O(v) validation where v is validation count
+    3. O(r) rollback where r is change depth
+    """
+    pass
+
+
+class MachineMonitor:
+    """Monitors state machine execution.
+    
+    MachineMonitor implements introspection capabilities and
+    collects runtime metrics.
+    
+    Class Invariants:
+    1. Must track metrics
+    2. Must handle events
+    3. Must maintain history
+    4. Must support queries
+    
+    Design Patterns:
+    - Observer: Monitors changes
+    - Strategy: Implements policies
+    - Command: Encapsulates queries
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe monitoring
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) metric updates
+    2. O(q) query execution where q is query complexity
+    3. O(h) history tracking where h is history size
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/core/machine.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/core/transition.py ---
+"""
+Transition types and behavior management.
+
+Architecture:
+- Implements transition type hierarchy and behavior
+- Manages transition execution and actions
+- Resolves transition conflicts
+- Coordinates with State for state changes
+- Integrates with Event for triggers
+
+Design Patterns:
+- Command Pattern: Transition execution
+- Strategy Pattern: Transition types
+- Chain of Responsibility: Guard evaluation
+- Observer Pattern: Transition notifications
+- Template Method: Transition execution steps
+
+Responsibilities:
+1. Transition Types
+   - External transitions
+   - Internal transitions
+   - Local transitions
+   - Compound transitions
+   - Protocol transitions
+
+2. Transition Behavior
+   - Guard conditions
+   - Actions execution
+   - Source/target validation
+   - Completion transitions
+   - Time/change triggers
+
+3. Semantic Resolution
+   - Conflict resolution
+   - Priority handling
+   - Simultaneous transitions
+   - Cross-region coordination
+   - Execution ordering
+
+4. Error Handling
+   - Partial completion
+   - Guard evaluation errors
+   - Action execution failures
+   - State consistency
+   - Resource cleanup
+
+Security:
+- Action execution isolation
+- Guard evaluation boundaries
+- Resource usage control
+- State change validation
+
+Cross-cutting:
+- Error propagation
+- Performance monitoring
+- Transition metrics
+- Thread safety
+
+Dependencies:
+- state.py: State change coordination
+- event.py: Event trigger integration
+- region.py: Cross-region transitions
+- machine.py: Machine context
+"""
+
+from typing import Optional, List, Callable, Any
+from enum import Enum, auto
+from dataclasses import dataclass
+
+
+class TransitionKind(Enum):
+    """Defines the different types of transitions in the state machine.
+    
+    Used to determine the execution semantics and state exit/entry behavior
+    for each transition type.
+    """
+    EXTERNAL = auto()  # Exits source state(s), enters target state(s)
+    INTERNAL = auto()  # No state exit/entry, source must equal target
+    LOCAL = auto()     # Minimizes state exit/entry within composite state
+    COMPOUND = auto()  # Multiple segments with intermediate pseudostates
+
+
+class TransitionPriority(Enum):
+    """Defines priority levels for transition conflict resolution.
+    
+    Used to determine which transition takes precedence when multiple
+    transitions are enabled simultaneously.
+    """
+    HIGH = auto()    # Takes precedence over lower priorities
+    NORMAL = auto()  # Default priority level
+    LOW = auto()     # Yields to higher priority transitions
+
+
+class Transition:
+    """Represents a transition between states in a hierarchical state machine.
+    
+    The Transition class implements the Command pattern to encapsulate all aspects
+    of a state transition including guards, actions, and execution semantics.
+    
+    Class Invariants:
+    1. Source and target states must be valid and compatible
+    2. Guard conditions must be side-effect free
+    3. Actions must maintain state consistency
+    4. Transition kind must not change after initialization
+    5. Priority must be valid for conflict resolution
+    6. Trigger specifications must be well-formed
+    7. Cross-region transitions must be properly synchronized
+    8. Compound transitions must have valid segments
+    9. Protocol transitions must maintain protocol constraints
+    10. Time/change triggers must be properly scheduled
+    
+    Design Patterns:
+    - Command: Encapsulates transition execution
+    - Strategy: Implements transition type behavior
+    - Chain of Responsibility: Processes guard conditions
+    - Observer: Notifies of transition execution
+    - Template Method: Defines execution steps
+    - Memento: Preserves state for rollback
+    
+    Data Structures:
+    - List for compound transition segments
+    - Queue for pending actions
+    - Set for affected regions
+    - Tree for LCA computation
+    - Priority queue for conflict resolution
+    
+    Algorithms:
+    - LCA computation for transition scope
+    - Topological sort for execution order
+    - Priority-based conflict resolution
+    - Path computation for state changes
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe transition execution
+    2. Atomic guard evaluation
+    3. Synchronized action execution
+    4. Safe concurrent conflict resolution
+    5. Lock-free transition inspection
+    6. Mutex protection for state changes
+    
+    Performance Characteristics:
+    1. O(1) kind/priority checking
+    2. O(log n) conflict resolution
+    3. O(h) LCA computation where h is hierarchy depth
+    4. O(a) action execution where a is action count
+    5. O(g) guard evaluation where g is guard count
+    
+    Resource Management:
+    1. Bounded action execution time
+    2. Controlled guard evaluation scope
+    3. Limited concurrent transitions
+    4. Pooled transition objects
+    5. Cached computation results
+    """
+    pass
+
+
+class ExternalTransition(Transition):
+    """Represents an external transition that exits source state(s).
+    
+    ExternalTransition implements the full exit/entry state behavior,
+    following UML state machine semantics.
+    
+    Class Invariants:
+    1. Must exit source state(s)
+    2. Must enter target state(s)
+    3. Must execute actions in correct order
+    4. Must maintain state consistency
+    
+    Design Patterns:
+    - Template Method: Defines execution sequence
+    - Command: Encapsulates state changes
+    - Observer: Notifies of state changes
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe state changes
+    2. Atomic execution sequence
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(h) state exit/entry where h is hierarchy depth
+    2. O(a) action execution where a is action count
+    3. O(r) region synchronization where r is region count
+    """
+    pass
+
+
+class InternalTransition(Transition):
+    """Represents an internal transition within a single state.
+    
+    InternalTransition executes without exiting or entering states,
+    maintaining the current state configuration.
+    
+    Class Invariants:
+    1. Source must equal target state
+    2. Must not exit/enter states
+    3. Must maintain state consistency
+    4. Must execute actions atomically
+    
+    Design Patterns:
+    - Strategy: Implements internal behavior
+    - Command: Encapsulates actions
+    - Observer: Notifies of execution
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe action execution
+    2. Atomic state updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) state validation
+    2. O(a) action execution where a is action count
+    3. O(1) consistency check
+    """
+    pass
+
+
+class LocalTransition(Transition):
+    """Represents a local transition within a composite state.
+    
+    LocalTransition minimizes the scope of state exit/entry operations
+    while maintaining proper transition semantics.
+    
+    Class Invariants:
+    1. Must minimize state exit/entry
+    2. Must maintain hierarchy consistency
+    3. Must execute actions in order
+    4. Must preserve region stability
+    
+    Design Patterns:
+    - Strategy: Implements local semantics
+    - Command: Encapsulates minimal changes
+    - Observer: Notifies of local changes
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe local changes
+    2. Atomic scope execution
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(d) scope computation where d is depth difference
+    2. O(a) action execution where a is action count
+    3. O(r) region synchronization where r is region count
+    """
+    pass
+
+
+class CompoundTransition(Transition):
+    """Represents a compound transition with multiple segments.
+    
+    CompoundTransition manages a sequence of transition segments,
+    coordinating their execution through pseudostates.
+    
+    Class Invariants:
+    1. Must have valid segment sequence
+    2. Must maintain execution order
+    3. Must coordinate pseudostates
+    4. Must handle segment failures
+    
+    Design Patterns:
+    - Composite: Manages transition segments
+    - Chain of Responsibility: Processes segments
+    - Command: Encapsulates segment execution
+    
+    Data Structures:
+    - List of ordered segments
+    - Queue for pending segments
+    - Set for completed segments
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe segment execution
+    2. Atomic sequence completion
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(s) execution where s is segment count
+    2. O(p) pseudostate coordination where p is pseudostate count
+    3. O(r) rollback where r is completed segment count
+    """
+    pass
+
+
+class ProtocolTransition(Transition):
+    """Represents a protocol transition with strict constraints.
+    
+    ProtocolTransition enforces protocol state machine semantics,
+    ensuring valid state sequences and operation calls.
+    
+    Class Invariants:
+    1. Must follow protocol constraints
+    2. Must validate operation calls
+    3. Must maintain protocol state
+    4. Must enforce sequence rules
+    
+    Design Patterns:
+    - State: Manages protocol states
+    - Strategy: Implements protocol rules
+    - Command: Encapsulates operations
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe protocol checks
+    2. Atomic operation validation
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) protocol state check
+    2. O(v) operation validation where v is validator count
+    3. O(c) constraint checking where c is constraint count
+    """
+    pass
+
+
+class TimeTransition(Transition):
+    """Represents a time-triggered transition.
+    
+    TimeTransition manages transitions triggered by time events,
+    both relative ("after") and absolute ("at") timing.
+    
+    Class Invariants:
+    1. Must have valid time specification
+    2. Must maintain timing accuracy
+    3. Must handle timer interruptions
+    4. Must support cancellation
+    
+    Design Patterns:
+    - Command: Encapsulates time events
+    - Observer: Notifies of timing
+    - Strategy: Implements timing types
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe timer operations
+    2. Atomic execution scheduling
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) timer operations
+    2. O(log n) scheduling where n is timer count
+    3. O(1) cancellation
+    """
+    pass
+
+
+class ChangeTransition(Transition):
+    """Represents a change-triggered transition.
+    
+    ChangeTransition manages transitions triggered by changes in
+    boolean conditions, implementing the observer pattern.
+    
+    Class Invariants:
+    1. Must have valid change condition
+    2. Must detect all changes
+    3. Must prevent missed triggers
+    4. Must maintain condition state
+    
+    Design Patterns:
+    - Observer: Monitors changes
+    - Strategy: Implements detection
+    - Command: Encapsulates triggers
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe condition monitoring
+    2. Atomic change detection
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) state checking
+    2. O(c) condition evaluation where c is condition complexity
+    3. O(o) observer notification where o is observer count
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/core/transition.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/core/event.py ---
+"""
+Event processing and queue management.
+
+Architecture:
+- Implements event processing and queue management
+- Handles event patterns and ordering
+- Maintains event processing semantics
+- Coordinates with Executor for processing
+- Integrates with Scheduler for time events
+
+Design Patterns:
+- Observer Pattern: Event notifications
+- Command Pattern: Event execution
+- Strategy Pattern: Processing patterns
+- Queue Pattern: Event queuing
+- Chain of Responsibility: Event handling
+
+Responsibilities:
+1. Event Processing
+   - Synchronous processing
+   - Asynchronous processing
+   - Event deferral
+   - Priority handling
+   - Completion events
+
+2. Event Queue
+   - Queue management
+   - Event ordering
+   - Event cancellation
+   - Timeout handling
+   - Event filtering
+
+3. Processing Patterns
+   - Single consumption
+   - Broadcast events
+   - Conditional events
+   - Event scoping
+   - Priority rules
+
+4. Run-to-Completion
+   - RTC semantics
+   - Queue during transitions
+   - Order preservation
+   - Re-entrant processing
+   - Timeout handling
+
+Security:
+- Event validation
+- Queue protection
+- Resource monitoring
+- Processing boundaries
+
+Cross-cutting:
+- Error handling
+- Performance optimization
+- Event metrics
+- Thread safety
+
+Dependencies:
+- transition.py: Event triggers
+- executor.py: Event execution
+- scheduler.py: Time events
+- machine.py: Machine context
+"""
+
+from typing import Optional, Dict, List, Any, Set
+from enum import Enum, auto
+from dataclasses import dataclass
+from queue import PriorityQueue
+
+
+class EventKind(Enum):
+    """Defines the different types of events in the state machine.
+    
+    Used to determine event processing behavior and routing.
+    """
+    SIGNAL = auto()     # External signal events
+    CALL = auto()       # Synchronous call events
+    TIME = auto()       # Time-based events
+    CHANGE = auto()     # Change notification events
+    COMPLETION = auto() # State completion events
+
+
+class EventPriority(Enum):
+    """Defines priority levels for event processing.
+    
+    Used to determine event processing order in the queue.
+    """
+    HIGH = auto()    # Processed before normal priority
+    NORMAL = auto()  # Default processing priority
+    LOW = auto()     # Processed after normal priority
+    DEFER = auto()   # Deferred until state exit
+
+
+class Event:
+    """Represents an event in the state machine.
+    
+    The Event class implements the Command pattern to encapsulate event
+    data and processing behavior. It supports various event types and
+    processing patterns.
+    
+    Class Invariants:
+    1. Event ID must be unique within its scope
+    2. Event kind must not change after creation
+    3. Event data must be immutable
+    4. Priority must be valid
+    5. Timeout must be non-negative if specified
+    6. Parameters must be serializable
+    7. Event scope must be well-defined
+    8. Processing status must be tracked
+    9. Cancellation must be handled gracefully
+    10. Resources must be properly managed
+    
+    Design Patterns:
+    - Command: Encapsulates event data and behavior
+    - Observer: Notifies of event processing
+    - Strategy: Implements processing patterns
+    - Memento: Preserves event state
+    - Chain of Responsibility: Handles event processing
+    
+    Data Structures:
+    - Dictionary for event parameters
+    - Set for consumed status
+    - Queue for processing order
+    - Tree for scope hierarchy
+    - Map for deferred events
+    
+    Algorithms:
+    - Priority-based scheduling
+    - Scope resolution
+    - Timeout handling
+    - Consumption tracking
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe event processing
+    2. Atomic parameter access
+    3. Synchronized scope checking
+    4. Safe concurrent consumption
+    5. Lock-free status inspection
+    6. Mutex protection for queue operations
+    
+    Performance Characteristics:
+    1. O(1) event creation
+    2. O(log n) priority queuing
+    3. O(1) parameter access
+    4. O(h) scope checking where h is hierarchy depth
+    5. O(1) status updates
+    
+    Resource Management:
+    1. Bounded queue size
+    2. Pooled event objects
+    3. Cached scope information
+    4. Limited concurrent processing
+    5. Automatic timeout cleanup
+    """
+    pass
+
+
+class SignalEvent(Event):
+    """Represents an asynchronous signal event.
+    
+    SignalEvent implements asynchronous event processing with
+    optional payload data and broadcast capabilities.
+    
+    Class Invariants:
+    1. Must maintain signal ordering
+    2. Must handle broadcast properly
+    3. Must track consumption status
+    4. Must preserve payload integrity
+    
+    Design Patterns:
+    - Observer: Implements signal notification
+    - Command: Encapsulates signal data
+    - Strategy: Implements broadcast behavior
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe signal dispatch
+    2. Atomic consumption tracking
+    3. Safe concurrent broadcast
+    
+    Performance Characteristics:
+    1. O(1) signal creation
+    2. O(n) broadcast where n is listener count
+    3. O(1) consumption status
+    """
+    pass
+
+
+class CallEvent(Event):
+    """Represents a synchronous call event.
+    
+    CallEvent implements synchronous operation calls with
+    return values and parameter passing.
+    
+    Class Invariants:
+    1. Must complete synchronously
+    2. Must handle return values
+    3. Must validate parameters
+    4. Must maintain call semantics
+    
+    Design Patterns:
+    - Command: Encapsulates operation call
+    - Strategy: Implements call handling
+    - Template Method: Defines call sequence
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe parameter handling
+    2. Atomic operation execution
+    3. Safe concurrent calls
+    
+    Performance Characteristics:
+    1. O(1) call creation
+    2. O(p) parameter validation where p is parameter count
+    3. O(1) return value handling
+    """
+    pass
+
+
+class TimeEvent(Event):
+    """Represents a time-based event.
+    
+    TimeEvent implements both relative ("after") and absolute ("at")
+    timing events with proper scheduling.
+    
+    Class Invariants:
+    1. Must have valid time specification
+    2. Must maintain timing accuracy
+    3. Must handle cancellation
+    4. Must track scheduling status
+    
+    Design Patterns:
+    - Command: Encapsulates timing logic
+    - Observer: Notifies of timing
+    - Strategy: Implements timing types
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe scheduling
+    2. Atomic timer operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) event creation
+    2. O(log n) scheduling where n is timer count
+    3. O(1) cancellation
+    """
+    pass
+
+
+class ChangeEvent(Event):
+    """Represents a change notification event.
+    
+    ChangeEvent implements condition-based events that trigger
+    when monitored values change.
+    
+    Class Invariants:
+    1. Must track condition state
+    2. Must detect all changes
+    3. Must prevent missed events
+    4. Must maintain change history
+    
+    Design Patterns:
+    - Observer: Monitors changes
+    - Command: Encapsulates conditions
+    - Strategy: Implements detection
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe condition monitoring
+    2. Atomic change detection
+    3. Safe concurrent notification
+    
+    Performance Characteristics:
+    1. O(1) event creation
+    2. O(c) condition evaluation where c is condition complexity
+    3. O(h) history tracking where h is history size
+    """
+    pass
+
+
+class CompletionEvent(Event):
+    """Represents a state completion event.
+    
+    CompletionEvent is automatically generated when a state
+    completes its do-activity or becomes final.
+    
+    Class Invariants:
+    1. Must track completion status
+    2. Must maintain state consistency
+    3. Must handle parallel regions
+    4. Must preserve completion order
+    
+    Design Patterns:
+    - Observer: Notifies of completion
+    - Command: Encapsulates completion
+    - Strategy: Implements completion types
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe status tracking
+    2. Atomic completion detection
+    3. Safe concurrent notification
+    
+    Performance Characteristics:
+    1. O(1) event creation
+    2. O(r) region checking where r is region count
+    3. O(1) status updates
+    """
+    pass
+
+
+class EventQueue:
+    """Manages event queuing and processing.
+    
+    EventQueue implements a priority-based event queue with
+    run-to-completion semantics and proper ordering.
+    
+    Class Invariants:
+    1. Must maintain event order
+    2. Must enforce RTC semantics
+    3. Must handle priorities
+    4. Must manage timeouts
+    5. Must support cancellation
+    6. Must track queue status
+    7. Must handle overflow
+    8. Must preserve fairness
+    9. Must support filtering
+    10. Must maintain consistency
+    
+    Design Patterns:
+    - Queue: Manages event ordering
+    - Strategy: Implements queue policies
+    - Observer: Notifies of queue changes
+    - Chain of Responsibility: Processes events
+    
+    Data Structures:
+    - Priority queue for events
+    - Set for cancelled events
+    - Map for deferred events
+    - List for processing history
+    
+    Algorithms:
+    - Priority scheduling
+    - Timeout management
+    - Fairness enforcement
+    - Load balancing
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe queue operations
+    2. Atomic event processing
+    3. Synchronized status updates
+    4. Safe concurrent access
+    5. Lock-free inspection
+    6. Mutex protection for modifications
+    
+    Performance Characteristics:
+    1. O(log n) enqueue/dequeue
+    2. O(1) cancellation
+    3. O(1) status check
+    4. O(k) filtering where k is filter count
+    5. O(t) timeout cleanup where t is timeout count
+    
+    Resource Management:
+    1. Bounded queue size
+    2. Memory-efficient storage
+    3. Automatic cleanup
+    4. Resource pooling
+    5. Load shedding
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/core/event.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/types/base.py ---
+"""
+Core type system definitions and management.
+
+Architecture:
+- Defines core type system
+- Specifies type compatibility
+- Manages type safety
+- Coordinates with validation
+- Integrates with extensions
+
+Design Patterns:
+- Factory Pattern: Type creation
+- Strategy Pattern: Type operations
+- Visitor Pattern: Type traversal
+- Observer Pattern: Type changes
+- Template Method: Type behavior
+
+Responsibilities:
+1. Type System
+   - Core types
+   - Type hierarchy
+   - Type relationships
+   - Type constraints
+   - Type operations
+
+2. Type Safety
+   - Type checking
+   - Type conversion
+   - Type validation
+   - Error handling
+   - Safety guarantees
+
+3. Type Management
+   - Type registration
+   - Type lookup
+   - Type caching
+   - Type versioning
+   - Type metadata
+
+4. Type Integration
+   - Extension support
+   - Validation hooks
+   - Conversion bridges
+   - Serialization
+   - Type evolution
+
+Security:
+- Type validation
+- Operation safety
+- Resource limits
+- Access control
+
+Cross-cutting:
+- Error handling
+- Performance optimization
+- Type metrics
+- Thread safety
+
+Dependencies:
+- extensions.py: Type extensions
+- validator.py: Type validation
+- serializer.py: Type serialization
+- monitor.py: Type monitoring
+"""
+
+from typing import Optional, Dict, List, Set, Any, TypeVar, Generic
+from enum import Enum, auto
+from dataclasses import dataclass
+from threading import Lock, RLock
+from abc import ABC, abstractmethod
+
+
+class TypeKind(Enum):
+    """Defines the different kinds of types.
+    
+    Used to determine type behavior and compatibility.
+    """
+    PRIMITIVE = auto()  # Basic primitive types
+    COMPOSITE = auto()  # Composed of other types
+    GENERIC = auto()    # Parameterized types
+    UNION = auto()      # Union of types
+    EXTENSION = auto()  # Extension-provided types
+
+
+class TypeConstraint(Enum):
+    """Defines type system constraints.
+    
+    Used to enforce type system rules and safety.
+    """
+    IMMUTABLE = auto()  # Cannot be modified
+    COVARIANT = auto()  # Allows subtype variance
+    INVARIANT = auto()  # No variance allowed
+    BOUNDED = auto()    # Has type bounds
+
+
+class BaseType(ABC):
+    """Base class for all types in the system.
+    
+    The BaseType class implements the Template Method pattern
+    to define common type behavior and operations.
+    
+    Class Invariants:
+    1. Must maintain type safety
+    2. Must preserve constraints
+    3. Must handle conversions
+    4. Must validate operations
+    5. Must track metadata
+    6. Must support extensions
+    7. Must enable traversal
+    8. Must enforce bounds
+    9. Must optimize performance
+    10. Must maintain metrics
+    
+    Design Patterns:
+    - Template Method: Defines behavior
+    - Strategy: Implements operations
+    - Visitor: Enables traversal
+    - Observer: Tracks changes
+    - Factory: Creates instances
+    
+    Data Structures:
+    - Graph for type hierarchy
+    - Map for conversions
+    - Cache for operations
+    - Set for constraints
+    - Tree for structure
+    
+    Algorithms:
+    - Type checking
+    - Constraint solving
+    - Conversion routing
+    - Bound checking
+    - Operation resolution
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe operations
+    2. Atomic type checks
+    3. Synchronized metadata
+    4. Safe concurrent access
+    5. Lock-free inspection
+    6. Mutex protection
+    
+    Performance Characteristics:
+    1. O(1) kind checking
+    2. O(log n) hierarchy traversal
+    3. O(c) constraint check where c is constraint count
+    4. O(m) metadata access where m is metadata size
+    5. O(o) operation lookup where o is operation count
+    
+    Resource Management:
+    1. Bounded memory usage
+    2. Cached operations
+    3. Pooled instances
+    4. Automatic cleanup
+    5. Load balancing
+    """
+    pass
+
+
+class PrimitiveType(BaseType):
+    """Represents primitive types in the system.
+    
+    PrimitiveType implements basic type operations for
+    fundamental data types.
+    
+    Class Invariants:
+    1. Must be immutable
+    2. Must be atomic
+    3. Must handle conversions
+    4. Must validate values
+    
+    Design Patterns:
+    - Strategy: Implements operations
+    - Factory: Creates instances
+    - Flyweight: Shares instances
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe operations
+    2. Immutable state
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) value operations
+    2. O(c) conversion where c is conversion complexity
+    3. O(v) validation where v is validation complexity
+    """
+    pass
+
+
+class CompositeType(BaseType):
+    """Represents composite types in the system.
+    
+    CompositeType implements operations for types composed
+    of other types.
+    
+    Class Invariants:
+    1. Must maintain structure
+    2. Must validate components
+    3. Must handle recursion
+    4. Must preserve constraints
+    
+    Design Patterns:
+    - Composite: Manages structure
+    - Visitor: Traverses structure
+    - Builder: Constructs instances
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe composition
+    2. Atomic validation
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(n) traversal where n is component count
+    2. O(v) validation where v is validator count
+    3. O(c) construction where c is component count
+    """
+    pass
+
+
+class GenericType(BaseType, Generic[TypeVar('T')]):
+    """Represents generic types in the system.
+    
+    GenericType implements operations for parameterized
+    types with type parameters.
+    
+    Class Invariants:
+    1. Must handle parameters
+    2. Must enforce bounds
+    3. Must resolve variance
+    4. Must maintain safety
+    
+    Design Patterns:
+    - Strategy: Implements generics
+    - Factory: Creates instances
+    - Builder: Resolves parameters
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe resolution
+    2. Atomic instantiation
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(p) parameter handling where p is parameter count
+    2. O(b) bound checking where b is bound count
+    3. O(v) variance check where v is variance point count
+    """
+    pass
+
+
+class UnionType(BaseType):
+    """Represents union types in the system.
+    
+    UnionType implements operations for types that can
+    be one of several possible types.
+    
+    Class Invariants:
+    1. Must track variants
+    2. Must handle dispatch
+    3. Must validate members
+    4. Must preserve safety
+    
+    Design Patterns:
+    - Strategy: Implements unions
+    - Visitor: Handles variants
+    - Chain: Processes dispatch
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe dispatch
+    2. Atomic validation
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(v) variant check where v is variant count
+    2. O(d) dispatch where d is dispatch complexity
+    3. O(m) member validation where m is member count
+    """
+    pass
+
+
+class TypeRegistry:
+    """Manages type registration and lookup.
+    
+    TypeRegistry implements efficient type management and
+    lookup operations.
+    
+    Class Invariants:
+    1. Must maintain registry
+    2. Must handle versions
+    3. Must cache lookups
+    4. Must validate entries
+    
+    Design Patterns:
+    - Registry: Manages types
+    - Factory: Creates entries
+    - Cache: Optimizes lookup
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe registration
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) lookup
+    2. O(log n) registration
+    3. O(v) version check where v is version count
+    """
+    pass
+
+
+class TypeConverter:
+    """Manages type conversions.
+    
+    TypeConverter implements safe type conversion operations
+    with validation.
+    
+    Class Invariants:
+    1. Must validate conversion
+    2. Must preserve semantics
+    3. Must handle errors
+    4. Must track success
+    
+    Design Patterns:
+    - Strategy: Implements conversion
+    - Chain: Processes steps
+    - Observer: Reports results
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe conversion
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(c) conversion where c is conversion complexity
+    2. O(v) validation where v is validation count
+    3. O(s) step execution where s is step count
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/types/base.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/types/extensions.py ---
+"""
+Type system extension management.
+
+Architecture:
+- Provides type extension points
+- Manages type conversions
+- Maintains type consistency
+- Coordinates with base types
+- Integrates with sandbox
+
+Design Patterns:
+- Plugin Pattern: Type extensions
+- Adapter Pattern: Type conversion
+- Decorator Pattern: Type wrapping
+- Strategy Pattern: Extension behavior
+- Chain of Responsibility: Type handling
+
+Responsibilities:
+1. Extension Management
+   - Extension registration
+   - Extension lifecycle
+   - Extension validation
+   - Extension isolation
+   - Resource control
+
+2. Type Conversion
+   - Conversion rules
+   - Type mapping
+   - Data transformation
+   - Validation hooks
+   - Error handling
+
+3. Type Integration
+   - Base type coordination
+   - Extension composition
+   - Type compatibility
+   - Version management
+   - Extension interfaces
+
+4. Extension Safety
+   - Type validation
+   - Resource limits
+   - Isolation boundaries
+   - Error containment
+   - Security checks
+
+Security:
+- Extension isolation
+- Type safety
+- Resource control
+- Access validation
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Extension metrics
+- Thread safety
+
+Dependencies:
+- base.py: Core types
+- sandbox.py: Extension isolation
+- validator.py: Type validation
+- monitor.py: Extension monitoring
+"""
+
+from typing import Optional, Dict, List, Set, Any, Protocol, TypeVar
+from enum import Enum, auto
+from dataclasses import dataclass
+from threading import Lock, RLock
+from abc import ABC, abstractmethod
+
+
+class ExtensionStatus(Enum):
+    """Defines extension lifecycle states.
+    
+    Used to track extension status and coordinate operations.
+    """
+    UNREGISTERED = auto() # Not yet registered
+    REGISTERING = auto()  # Registration in progress
+    ACTIVE = auto()       # Extension active
+    SUSPENDED = auto()    # Temporarily suspended
+    UNLOADING = auto()    # Being unloaded
+
+
+class ExtensionScope(Enum):
+    """Defines extension visibility scopes.
+    
+    Used to control extension access and isolation.
+    """
+    PRIVATE = auto()   # Extension-only access
+    SHARED = auto()    # Shared with other extensions
+    PUBLIC = auto()    # Available to all components
+    SYSTEM = auto()    # System-level access
+
+
+class TypeExtension(ABC):
+    """Base class for type system extensions.
+    
+    The TypeExtension class implements the Plugin pattern to
+    provide extensible type system functionality.
+    
+    Class Invariants:
+    1. Must maintain isolation
+    2. Must preserve type safety
+    3. Must handle lifecycle
+    4. Must validate operations
+    5. Must control resources
+    6. Must track metrics
+    7. Must support composition
+    8. Must handle errors
+    9. Must enforce limits
+    10. Must maintain compatibility
+    
+    Design Patterns:
+    - Plugin: Implements extension
+    - Adapter: Converts types
+    - Decorator: Wraps types
+    - Strategy: Implements behavior
+    - Chain: Handles operations
+    
+    Data Structures:
+    - Map for type mappings
+    - Graph for dependencies
+    - Queue for operations
+    - Cache for conversions
+    - Set for capabilities
+    
+    Algorithms:
+    - Type conversion
+    - Dependency resolution
+    - Resource tracking
+    - Operation routing
+    - Error handling
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe operations
+    2. Atomic conversions
+    3. Synchronized state
+    4. Safe concurrent access
+    5. Lock-free inspection
+    6. Mutex protection
+    
+    Performance Characteristics:
+    1. O(1) status checks
+    2. O(log n) type lookup
+    3. O(c) conversion where c is conversion complexity
+    4. O(v) validation where v is validator count
+    5. O(r) resource tracking where r is resource count
+    
+    Resource Management:
+    1. Bounded memory usage
+    2. Controlled operations
+    3. Resource pooling
+    4. Automatic cleanup
+    5. Load shedding
+    """
+    pass
+
+
+class ExtensionManager:
+    """Manages type system extensions.
+    
+    ExtensionManager implements extension lifecycle and
+    resource management.
+    
+    Class Invariants:
+    1. Must track extensions
+    2. Must enforce isolation
+    3. Must manage resources
+    4. Must validate safety
+    
+    Design Patterns:
+    - Factory: Creates extensions
+    - Observer: Monitors lifecycle
+    - Strategy: Implements policies
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe management
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) extension lookup
+    2. O(n) lifecycle operations where n is extension count
+    3. O(r) resource management where r is resource count
+    """
+    pass
+
+
+class TypeConverter(Protocol):
+    """Protocol for type conversion operations.
+    
+    TypeConverter defines the interface for implementing
+    type conversion strategies.
+    
+    Class Invariants:
+    1. Must preserve semantics
+    2. Must validate types
+    3. Must handle errors
+    4. Must be efficient
+    
+    Design Patterns:
+    - Strategy: Implements conversion
+    - Chain: Processes steps
+    - Observer: Reports results
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe conversion
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(c) conversion where c is conversion complexity
+    2. O(v) validation where v is validator count
+    3. O(e) error handling where e is error count
+    """
+    pass
+
+
+class ExtensionType(ABC):
+    """Base class for extension-provided types.
+    
+    ExtensionType implements the foundation for types
+    provided by extensions.
+    
+    Class Invariants:
+    1. Must maintain isolation
+    2. Must integrate safely
+    3. Must handle conversion
+    4. Must support validation
+    
+    Design Patterns:
+    - Template Method: Defines behavior
+    - Adapter: Converts types
+    - Visitor: Enables traversal
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe operations
+    2. Atomic conversions
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) type operations
+    2. O(c) conversion where c is conversion complexity
+    3. O(v) validation where v is validator count
+    """
+    pass
+
+
+class ExtensionComposite:
+    """Composes multiple extensions.
+    
+    ExtensionComposite implements composition of multiple
+    extensions with proper isolation.
+    
+    Class Invariants:
+    1. Must maintain boundaries
+    2. Must resolve conflicts
+    3. Must manage dependencies
+    4. Must preserve isolation
+    
+    Design Patterns:
+    - Composite: Composes extensions
+    - Mediator: Coordinates interaction
+    - Chain: Processes operations
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe composition
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(n) composition where n is extension count
+    2. O(d) dependency resolution where d is dependency count
+    3. O(c) conflict resolution where c is conflict count
+    """
+    pass
+
+
+class ExtensionValidator:
+    """Validates extension operations.
+    
+    ExtensionValidator implements validation of extension
+    operations and type safety.
+    
+    Class Invariants:
+    1. Must verify safety
+    2. Must check resources
+    3. Must validate types
+    4. Must track usage
+    
+    Design Patterns:
+    - Strategy: Implements validation
+    - Chain: Processes rules
+    - Observer: Reports issues
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe validation
+    2. Atomic checks
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(r) rule checking where r is rule count
+    2. O(t) type validation where t is type count
+    3. O(u) usage tracking where u is usage count
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/types/extensions.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/types/__init__.py ---
+"""
+Types package for type system integration.
+
+Architecture:
+- Defines core type system
+- Manages type extensions
+- Maintains type safety
+- Coordinates with validation
+- Ensures type consistency
+
+Design Patterns:
+- Factory Pattern: Type creation
+- Strategy Pattern: Type handling
+- Adapter Pattern: Type conversion
+- Visitor Pattern: Type validation
+- Composite Pattern: Type composition
+
+Security:
+- Type validation
+- Conversion safety
+- Extension isolation
+- Resource protection
+- Access control
+
+Cross-cutting:
+- Error handling
+- Performance optimization
+- Type metrics
+- Thread safety
+"""
+
+from .base import BaseType
+from .extensions import TypeExtension
+
+__all__ = ["BaseType", "TypeExtension"]
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/types/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/extensions/__init__.py ---
+"""
+Extensions package for extension mechanisms.
+
+Architecture:
+- Defines extension interfaces
+- Manages extension lifecycle
+- Provides extension points
+- Coordinates with sandbox
+- Maintains extension boundaries
+
+Design Patterns:
+- Plugin Pattern: Extension loading
+- Strategy Pattern: Extension behavior
+- Observer Pattern: Extension events
+- Proxy Pattern: Extension isolation
+- Chain of Responsibility: Extension handling
+
+Security:
+- Extension isolation
+- Resource control
+- Access validation
+- Sandbox enforcement
+- Security boundaries
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Extension metrics
+- Thread safety
+"""
+
+from .hooks import ExtensionHooks
+from .sandbox import ExtensionSandbox
+
+__all__ = ["ExtensionHooks", "ExtensionSandbox"]
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/extensions/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/extensions/sandbox.py ---
+"""
+Extension isolation and security management.
+
+Architecture:
+- Implements extension isolation
+- Enforces resource boundaries
+- Manages extension security
+- Coordinates with hooks
+- Maintains extension guarantees
+
+Design Patterns:
+- Proxy Pattern: Extension isolation
+- Strategy Pattern: Security policies
+- Observer Pattern: Resource monitoring
+- Decorator Pattern: Security wrapping
+- Chain of Responsibility: Security checks
+
+Responsibilities:
+1. Extension Isolation
+   - Resource boundaries
+   - Memory limits
+   - CPU constraints
+   - I/O restrictions
+   - Network control
+
+2. Security Management
+   - Access control
+   - Permission checking
+   - Resource validation
+   - Operation monitoring
+   - Threat prevention
+
+3. Resource Control
+   - Usage monitoring
+   - Limit enforcement
+   - Resource cleanup
+   - Leak prevention
+   - Performance tracking
+
+4. Extension Safety
+   - State protection
+   - Data isolation
+   - Error containment
+   - Recovery handling
+   - Security boundaries
+
+Security:
+- Sandbox enforcement
+- Resource isolation
+- Access control
+- Threat mitigation
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Security metrics
+- Thread safety
+
+Dependencies:
+- hooks.py: Extension lifecycle
+- monitor.py: Resource tracking
+- validator.py: Security validation
+- machine.py: State protection
+"""
+
+from typing import Optional, Dict, List, Set, Any
+from enum import Enum, auto
+from dataclasses import dataclass
+from threading import Lock, RLock
+from abc import ABC, abstractmethod
+
+
+class SecurityLevel(Enum):
+    """Defines security enforcement levels.
+    
+    Used to determine security policy strictness.
+    """
+    STRICT = auto()    # Maximum security
+    HIGH = auto()      # High security
+    STANDARD = auto()  # Normal security
+    RELAXED = auto()   # Minimal security
+
+
+class ResourceLimit(Enum):
+    """Defines resource limitation types.
+    
+    Used to control resource allocation and usage.
+    """
+    MEMORY = auto()   # Memory usage limits
+    CPU = auto()      # CPU usage limits
+    IO = auto()       # I/O operation limits
+    NETWORK = auto()  # Network access limits
+    STORAGE = auto()  # Storage space limits
+
+
+class ExtensionSandbox:
+    """Manages extension isolation and security.
+    
+    The ExtensionSandbox class implements the Proxy pattern to
+    provide secure extension execution environments.
+    
+    Class Invariants:
+    1. Must maintain isolation
+    2. Must enforce security
+    3. Must control resources
+    4. Must prevent leaks
+    5. Must track usage
+    6. Must handle violations
+    7. Must support recovery
+    8. Must log activity
+    9. Must optimize performance
+    10. Must scale efficiently
+    
+    Design Patterns:
+    - Proxy: Isolates extensions
+    - Strategy: Implements policies
+    - Observer: Monitors resources
+    - Decorator: Adds security
+    - Chain: Processes checks
+    
+    Data Structures:
+    - Map for resources
+    - Set for permissions
+    - Queue for operations
+    - Tree for hierarchy
+    - Graph for dependencies
+    
+    Algorithms:
+    - Resource allocation
+    - Permission checking
+    - Threat detection
+    - Cleanup tracking
+    - Load balancing
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe isolation
+    2. Atomic operations
+    3. Synchronized resources
+    4. Safe concurrent access
+    5. Lock-free inspection
+    6. Mutex protection
+    
+    Performance Characteristics:
+    1. O(1) security checks
+    2. O(log n) resource allocation
+    3. O(p) permission validation where p is permission count
+    4. O(t) threat detection where t is threat count
+    5. O(c) cleanup where c is resource count
+    
+    Resource Management:
+    1. Bounded memory usage
+    2. Controlled CPU usage
+    3. Limited I/O operations
+    4. Restricted network access
+    5. Managed storage space
+    """
+    pass
+
+
+class SecurityManager:
+    """Manages security policies and enforcement.
+    
+    SecurityManager implements security policy definition
+    and enforcement for extensions.
+    
+    Class Invariants:
+    1. Must enforce policies
+    2. Must track violations
+    3. Must handle threats
+    4. Must maintain logs
+    
+    Design Patterns:
+    - Strategy: Implements policies
+    - Observer: Monitors threats
+    - Chain: Processes checks
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe enforcement
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) policy checks
+    2. O(v) violation handling where v is violation count
+    3. O(t) threat detection where t is threat count
+    """
+    pass
+
+
+class ResourceManager:
+    """Manages resource allocation and limits.
+    
+    ResourceManager implements resource control and
+    monitoring for extensions.
+    
+    Class Invariants:
+    1. Must track resources
+    2. Must enforce limits
+    3. Must prevent leaks
+    4. Must handle cleanup
+    
+    Design Patterns:
+    - Observer: Monitors usage
+    - Strategy: Implements policies
+    - Command: Encapsulates actions
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe allocation
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) limit checks
+    2. O(r) resource tracking where r is resource count
+    3. O(c) cleanup where c is cleanup size
+    """
+    pass
+
+
+class IsolationContext:
+    """Maintains extension isolation context.
+    
+    IsolationContext provides isolated execution
+    environments for extensions.
+    
+    Class Invariants:
+    1. Must maintain isolation
+    2. Must track state
+    3. Must handle errors
+    4. Must support recovery
+    
+    Design Patterns:
+    - Context: Provides environment
+    - Strategy: Implements isolation
+    - Memento: Preserves state
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe context
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) context switches
+    2. O(s) state tracking where s is state size
+    3. O(r) recovery where r is recovery size
+    """
+    pass
+
+
+class SecurityMonitor:
+    """Monitors security and resource usage.
+    
+    SecurityMonitor implements security event monitoring
+    and resource usage tracking.
+    
+    Class Invariants:
+    1. Must detect threats
+    2. Must track usage
+    3. Must log events
+    4. Must alert violations
+    
+    Design Patterns:
+    - Observer: Monitors system
+    - Strategy: Implements detection
+    - Chain: Processes events
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe monitoring
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) event processing
+    2. O(t) threat detection where t is threat count
+    3. O(l) logging where l is log size
+    """
+    pass
+
+
+class RecoveryHandler:
+    """Handles sandbox recovery operations.
+    
+    RecoveryHandler implements error recovery and
+    cleanup for sandbox violations.
+    
+    Class Invariants:
+    1. Must handle errors
+    2. Must restore state
+    3. Must clean resources
+    4. Must log recovery
+    
+    Design Patterns:
+    - Strategy: Implements recovery
+    - Command: Encapsulates actions
+    - Memento: Preserves state
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe recovery
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(e) error handling where e is error count
+    2. O(s) state restoration where s is state size
+    3. O(c) cleanup where c is cleanup size
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/extensions/sandbox.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/extensions/hooks.py ---
+"""
+Extension interface and lifecycle management.
+
+Architecture:
+- Defines extension interfaces
+- Manages extension lifecycle
+- Provides customization points
+- Coordinates with sandbox
+- Integrates with modules
+
+Design Patterns:
+- Plugin Pattern: Extension points
+- Observer Pattern: Extension events
+- Template Method: Hook methods
+- Strategy Pattern: Extension behavior
+- Chain of Responsibility: Hook chaining
+
+Responsibilities:
+1. Extension Interfaces
+   - Hook definitions
+   - Extension points
+   - Interface contracts
+   - Version support
+   - API stability
+
+2. Lifecycle Management
+   - Extension loading
+   - Initialization
+   - Activation
+   - Deactivation
+   - Cleanup
+
+3. Customization Points
+   - State behavior
+   - Event processing
+   - Persistence
+   - Monitoring
+   - Type system
+
+4. Integration
+   - Module coordination
+   - Event propagation
+   - Resource sharing
+   - Error handling
+   - State access
+
+Security:
+- Interface validation
+- Resource control
+- Access boundaries
+- Extension isolation
+- Security checks
+
+Cross-cutting:
+- Error handling
+- Performance monitoring
+- Extension metrics
+- Thread safety
+
+Dependencies:
+- sandbox.py: Extension isolation
+- machine.py: State machine access
+- monitor.py: Extension monitoring
+- validator.py: Interface validation
+"""
+
+from typing import Optional, Dict, List, Set, Any, Protocol, TypeVar
+from enum import Enum, auto
+from dataclasses import dataclass
+from threading import Lock, RLock
+from abc import ABC, abstractmethod
+
+
+class HookPhase(Enum):
+    """Defines extension hook execution phases.
+    
+    Used to determine hook execution order and timing.
+    """
+    PRE = auto()      # Before main operation
+    MAIN = auto()     # During main operation
+    POST = auto()     # After main operation
+    ERROR = auto()    # Error handling
+    CLEANUP = auto()  # Resource cleanup
+
+
+class HookPriority(Enum):
+    """Defines hook execution priorities.
+    
+    Used to determine hook execution order within phases.
+    """
+    HIGHEST = auto()  # Execute first
+    HIGH = auto()     # Execute early
+    NORMAL = auto()   # Standard priority
+    LOW = auto()      # Execute late
+    LOWEST = auto()   # Execute last
+
+
+class ExtensionHooks(ABC):
+    """Defines extension hook interfaces.
+    
+    The ExtensionHooks class implements the Plugin pattern to
+    provide extensible behavior through hook points.
+    
+    Class Invariants:
+    1. Must maintain hook contracts
+    2. Must preserve ordering
+    3. Must handle lifecycle
+    4. Must isolate execution
+    5. Must manage resources
+    6. Must track metrics
+    7. Must support chaining
+    8. Must handle errors
+    9. Must enforce limits
+    10. Must maintain stability
+    
+    Design Patterns:
+    - Plugin: Defines hooks
+    - Observer: Notifies events
+    - Template: Defines methods
+    - Strategy: Implements behavior
+    - Chain: Processes hooks
+    
+    Data Structures:
+    - Map for hook registry
+    - Queue for execution
+    - Graph for dependencies
+    - Set for active hooks
+    - Tree for hierarchy
+    
+    Algorithms:
+    - Hook resolution
+    - Priority sorting
+    - Chain execution
+    - Error propagation
+    - Resource tracking
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe execution
+    2. Atomic operations
+    3. Synchronized state
+    4. Safe concurrent access
+    5. Lock-free inspection
+    6. Mutex protection
+    
+    Performance Characteristics:
+    1. O(1) hook lookup
+    2. O(log n) priority sorting
+    3. O(c) chain execution where c is chain length
+    4. O(d) dependency check where d is dependency count
+    5. O(r) resource tracking where r is resource count
+    
+    Resource Management:
+    1. Bounded memory usage
+    2. Controlled execution
+    3. Resource pooling
+    4. Automatic cleanup
+    5. Load shedding
+    """
+    pass
+
+
+class StateHooks(ExtensionHooks):
+    """Defines state behavior extension points.
+    
+    StateHooks provides customization points for state
+    machine behavior and transitions.
+    
+    Class Invariants:
+    1. Must preserve semantics
+    2. Must maintain consistency
+    3. Must handle transitions
+    4. Must track state
+    
+    Design Patterns:
+    - Template: Defines hooks
+    - Observer: Monitors state
+    - Strategy: Implements behavior
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe state access
+    2. Atomic transitions
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) hook execution
+    2. O(s) state tracking where s is state count
+    3. O(t) transition handling where t is transition count
+    """
+    pass
+
+
+class EventHooks(ExtensionHooks):
+    """Defines event processing extension points.
+    
+    EventHooks provides customization points for event
+    handling and processing.
+    
+    Class Invariants:
+    1. Must preserve order
+    2. Must maintain queuing
+    3. Must handle priorities
+    4. Must track processing
+    
+    Design Patterns:
+    - Observer: Monitors events
+    - Chain: Processes events
+    - Strategy: Implements handling
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe processing
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) hook execution
+    2. O(p) priority handling where p is priority count
+    3. O(q) queue management where q is queue size
+    """
+    pass
+
+
+class PersistenceHooks(ExtensionHooks):
+    """Defines persistence extension points.
+    
+    PersistenceHooks provides customization points for
+    state machine persistence operations.
+    
+    Class Invariants:
+    1. Must maintain consistency
+    2. Must handle formats
+    3. Must preserve data
+    4. Must track versions
+    
+    Design Patterns:
+    - Strategy: Implements persistence
+    - Template: Defines operations
+    - Chain: Processes steps
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe persistence
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) hook execution
+    2. O(d) data handling where d is data size
+    3. O(v) version management where v is version count
+    """
+    pass
+
+
+class MonitoringHooks(ExtensionHooks):
+    """Defines monitoring extension points.
+    
+    MonitoringHooks provides customization points for
+    metrics and monitoring operations.
+    
+    Class Invariants:
+    1. Must track metrics
+    2. Must handle events
+    3. Must maintain history
+    4. Must support queries
+    
+    Design Patterns:
+    - Observer: Monitors system
+    - Strategy: Implements collection
+    - Chain: Processes metrics
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe monitoring
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) hook execution
+    2. O(m) metric handling where m is metric count
+    3. O(h) history tracking where h is history size
+    """
+    pass
+
+
+class HookManager:
+    """Manages extension hook lifecycle.
+    
+    HookManager implements hook registration, execution,
+    and lifecycle management.
+    
+    Class Invariants:
+    1. Must track hooks
+    2. Must maintain order
+    3. Must handle lifecycle
+    4. Must manage resources
+    
+    Design Patterns:
+    - Factory: Creates hooks
+    - Observer: Monitors lifecycle
+    - Strategy: Implements policies
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe management
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) hook lookup
+    2. O(n) lifecycle operations where n is hook count
+    3. O(r) resource management where r is resource count
+    """
+    pass
+
+
+class HookExecutor:
+    """Executes extension hooks.
+    
+    HookExecutor implements safe and controlled execution
+    of extension hooks.
+    
+    Class Invariants:
+    1. Must maintain isolation
+    2. Must handle errors
+    3. Must track execution
+    4. Must enforce limits
+    
+    Design Patterns:
+    - Command: Encapsulates execution
+    - Chain: Processes hooks
+    - Observer: Reports results
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe execution
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) hook execution
+    2. O(c) chain processing where c is chain length
+    3. O(e) error handling where e is error count
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/extensions/hooks.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/persistence/__init__.py ---
+"""
+Persistence package for storage and validation.
+
+Architecture:
+- Manages state machine persistence
+- Handles definition validation
+- Maintains version compatibility
+- Coordinates with core components
+- Ensures data integrity
+
+Design Patterns:
+- Strategy Pattern for storage
+- Builder Pattern for loading
+- Visitor Pattern for validation
+- Chain of Responsibility for rules
+- Observer Pattern for changes
+
+Security:
+- Data validation
+- Format verification
+- Version checking
+- Resource protection
+- Access control
+
+Cross-cutting:
+- Error handling
+- Performance optimization
+- Storage metrics
+- Thread safety
+"""
+
+from .serializer import Serializer
+from .validator import Validator
+
+__all__ = ["Serializer", "Validator"]
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/persistence/__init__.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/persistence/serializer.py ---
+"""
+State machine serialization and persistence management.
+
+Architecture:
+- Handles state machine persistence
+- Preserves runtime state
+- Maintains version compatibility
+- Coordinates with Validator
+- Integrates with Types
+
+Design Patterns:
+- Strategy Pattern: Storage formats
+- Builder Pattern: State loading
+- Memento Pattern: State capture
+- Adapter Pattern: Format conversion
+- Factory Pattern: Format handlers
+
+Responsibilities:
+1. State Persistence
+   - Machine definition
+   - Runtime state
+   - History states
+   - Version information
+   - Extension data
+
+2. Format Management
+   - Format validation
+   - Version compatibility
+   - Schema evolution
+   - Data migration
+   - Format conversion
+
+3. State Recovery
+   - State restoration
+   - History recovery
+   - Version migration
+   - Error recovery
+   - Partial loading
+
+4. Version Control
+   - Version tracking
+   - Compatibility checks
+   - Breaking changes
+   - Migration paths
+   - Version metadata
+
+Security:
+- Data validation
+- Format verification
+- Resource limits
+- Access control
+
+Cross-cutting:
+- Error handling
+- Performance optimization
+- Storage metrics
+- Thread safety
+
+Dependencies:
+- validator.py: Format validation
+- machine.py: State access
+- types.py: Type serialization
+- monitor.py: Operation tracking
+"""
+
+from typing import Optional, Dict, List, Any, Protocol
+from enum import Enum, auto
+from dataclasses import dataclass
+from threading import Lock, RLock
+
+
+class SerializationFormat(Enum):
+    """Defines supported serialization formats.
+    
+    Used to determine format-specific handling and validation.
+    """
+    JSON = auto()    # JSON text format
+    BINARY = auto()  # Binary format
+    XML = auto()     # XML text format
+    YAML = auto()    # YAML text format
+
+
+class VersionCompatibility(Enum):
+    """Defines version compatibility levels.
+    
+    Used to determine migration and compatibility handling.
+    """
+    EXACT = auto()     # Exact version match required
+    COMPATIBLE = auto() # Compatible versions allowed
+    MIGRATION = auto()  # Migration required
+    BREAKING = auto()   # Breaking changes present
+
+
+class Serializer:
+    """Manages state machine serialization and persistence.
+    
+    The Serializer class implements the Strategy pattern to handle
+    different serialization formats and version compatibility.
+    
+    Class Invariants:
+    1. Must preserve state consistency
+    2. Must maintain version compatibility
+    3. Must validate formats
+    4. Must handle migrations
+    5. Must recover from errors
+    6. Must track versions
+    7. Must protect data
+    8. Must support extensions
+    9. Must optimize performance
+    10. Must enforce limits
+    
+    Design Patterns:
+    - Strategy: Implements formats
+    - Builder: Constructs state
+    - Memento: Captures state
+    - Adapter: Converts formats
+    - Factory: Creates handlers
+    
+    Data Structures:
+    - Map for format handlers
+    - Graph for version paths
+    - Cache for conversions
+    - Queue for migrations
+    - Tree for state data
+    
+    Algorithms:
+    - Format detection
+    - Version resolution
+    - Migration planning
+    - State traversal
+    - Data validation
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe serialization
+    2. Atomic state capture
+    3. Synchronized migration
+    4. Safe concurrent access
+    5. Lock-free inspection
+    6. Mutex protection
+    
+    Performance Characteristics:
+    1. O(1) format selection
+    2. O(n) serialization where n is state size
+    3. O(v) version check where v is version count
+    4. O(m) migration where m is change count
+    5. O(c) conversion where c is complexity
+    
+    Resource Management:
+    1. Bounded memory usage
+    2. Controlled I/O
+    3. Cache management
+    4. Automatic cleanup
+    5. Load balancing
+    """
+    pass
+
+
+class FormatHandler:
+    """Handles format-specific serialization.
+    
+    FormatHandler implements format-specific serialization
+    and deserialization logic.
+    
+    Class Invariants:
+    1. Must handle format correctly
+    2. Must validate data
+    3. Must maintain consistency
+    4. Must support migration
+    
+    Design Patterns:
+    - Strategy: Implements format
+    - Validator: Checks format
+    - Builder: Constructs data
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe handling
+    2. Atomic operations
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(n) serialization where n is data size
+    2. O(v) validation where v is rule count
+    3. O(c) conversion where c is complexity
+    """
+    pass
+
+
+class StateSerializer:
+    """Serializes state machine state.
+    
+    StateSerializer implements efficient state capture and
+    restoration with consistency guarantees.
+    
+    Class Invariants:
+    1. Must preserve state
+    2. Must maintain hierarchy
+    3. Must handle history
+    4. Must support partial
+    
+    Design Patterns:
+    - Memento: Captures state
+    - Composite: Handles hierarchy
+    - Builder: Restores state
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe capture
+    2. Atomic restoration
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(s) capture where s is state size
+    2. O(h) hierarchy where h is depth
+    3. O(r) restoration where r is state count
+    """
+    pass
+
+
+class VersionManager:
+    """Manages version compatibility and migration.
+    
+    VersionManager implements version tracking and migration
+    path resolution for state machine definitions.
+    
+    Class Invariants:
+    1. Must track versions
+    2. Must resolve paths
+    3. Must handle breaks
+    4. Must validate changes
+    
+    Design Patterns:
+    - Strategy: Implements migration
+    - Chain: Processes changes
+    - Command: Encapsulates updates
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe versioning
+    2. Atomic migration
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) version check
+    2. O(p) path finding where p is path length
+    3. O(m) migration where m is change count
+    """
+    pass
+
+
+class MigrationHandler:
+    """Handles state machine migrations.
+    
+    MigrationHandler implements safe migration of state
+    machine definitions between versions.
+    
+    Class Invariants:
+    1. Must preserve semantics
+    2. Must handle rollback
+    3. Must validate results
+    4. Must track progress
+    
+    Design Patterns:
+    - Strategy: Implements migration
+    - Memento: Preserves state
+    - Command: Encapsulates steps
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe migration
+    2. Atomic steps
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(s) state migration where s is state size
+    2. O(c) change application where c is change count
+    3. O(v) validation where v is rule count
+    """
+    pass
+
+
+class SerializationCache:
+    """Caches serialization results.
+    
+    SerializationCache implements efficient caching of
+    serialization results for improved performance.
+    
+    Class Invariants:
+    1. Must maintain consistency
+    2. Must handle eviction
+    3. Must track usage
+    4. Must limit size
+    
+    Design Patterns:
+    - Strategy: Implements caching
+    - Observer: Monitors usage
+    - Chain: Processes eviction
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe caching
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) cache lookup
+    2. O(e) eviction where e is entry count
+    3. O(u) usage tracking where u is user count
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/persistence/serializer.py ---
+
+--- START OF FILE: /home/atomik/src/gotstate/gotstate/persistence/validator.py ---
+"""
+State machine definition validation management.
+
+Architecture:
+- Validates state machine definitions
+- Ensures semantic consistency
+- Verifies transition rules
+- Coordinates with all modules
+- Maintains validation boundaries
+
+Design Patterns:
+- Visitor Pattern: Structure validation
+- Chain of Responsibility: Rule checking
+- Strategy Pattern: Validation rules
+- Observer Pattern: Validation events
+- Composite Pattern: Rule composition
+
+Responsibilities:
+1. Definition Validation
+   - State hierarchy
+   - Transition rules
+   - Event definitions
+   - Region structure
+   - Extension configs
+
+2. Semantic Validation
+   - UML compliance
+   - State consistency
+   - Transition validity
+   - Event handling
+   - Region coordination
+
+3. Rule Management
+   - Rule definition
+   - Rule composition
+   - Rule priorities
+   - Rule dependencies
+   - Rule execution
+
+4. Error Handling
+   - Error detection
+   - Error reporting
+   - Error context
+   - Recovery options
+   - Validation status
+
+Security:
+- Input validation
+- Rule isolation
+- Resource limits
+- Access control
+
+Cross-cutting:
+- Error handling
+- Performance optimization
+- Validation metrics
+- Thread safety
+
+Dependencies:
+- serializer.py: Format validation
+- machine.py: Structure access
+- types.py: Type validation
+- monitor.py: Validation tracking
+"""
+
+from typing import Optional, Dict, List, Set, Any
+from enum import Enum, auto
+from dataclasses import dataclass
+from threading import Lock, RLock
+
+
+class ValidationLevel(Enum):
+    """Defines validation detail levels.
+    
+    Used to control validation depth and resource usage.
+    """
+    BASIC = auto()    # Basic structure checks
+    NORMAL = auto()   # Standard validation level
+    STRICT = auto()   # Comprehensive validation
+    COMPLETE = auto() # Full semantic validation
+
+
+class ValidationScope(Enum):
+    """Defines validation scope boundaries.
+    
+    Used to determine validation context and boundaries.
+    """
+    LOCAL = auto()     # Single component only
+    CONNECTED = auto() # Connected components
+    REGIONAL = auto()  # Regional scope
+    GLOBAL = auto()    # Entire machine
+
+
+class Validator:
+    """Validates state machine definitions and semantics.
+    
+    The Validator class implements the Visitor pattern to traverse
+    and validate state machine structure and semantics.
+    
+    Class Invariants:
+    1. Must validate completely
+    2. Must maintain consistency
+    3. Must detect all errors
+    4. Must track context
+    5. Must handle dependencies
+    6. Must compose rules
+    7. Must report errors
+    8. Must support recovery
+    9. Must optimize performance
+    10. Must enforce limits
+    
+    Design Patterns:
+    - Visitor: Traverses structure
+    - Chain: Processes rules
+    - Strategy: Implements validation
+    - Observer: Reports results
+    - Composite: Composes rules
+    
+    Data Structures:
+    - Tree for rule hierarchy
+    - Graph for dependencies
+    - Stack for context
+    - Queue for errors
+    - Set for coverage
+    
+    Algorithms:
+    - Tree traversal
+    - Rule evaluation
+    - Dependency resolution
+    - Error aggregation
+    - Context tracking
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe validation
+    2. Atomic rule checks
+    3. Synchronized context
+    4. Safe concurrent access
+    5. Lock-free inspection
+    6. Mutex protection
+    
+    Performance Characteristics:
+    1. O(n) traversal where n is node count
+    2. O(r) rule evaluation where r is rule count
+    3. O(d) dependency check where d is depth
+    4. O(e) error reporting where e is error count
+    5. O(c) context tracking where c is context size
+    
+    Resource Management:
+    1. Bounded memory usage
+    2. Controlled recursion
+    3. Rule caching
+    4. Automatic cleanup
+    5. Load shedding
+    """
+    pass
+
+
+class ValidationRule:
+    """Represents a validation rule.
+    
+    ValidationRule implements a single validation check with
+    clear scope and dependencies.
+    
+    Class Invariants:
+    1. Must be deterministic
+    2. Must be independent
+    3. Must handle errors
+    4. Must track context
+    
+    Design Patterns:
+    - Strategy: Implements check
+    - Command: Encapsulates rule
+    - Observer: Reports results
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe checking
+    2. Atomic evaluation
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) rule setup
+    2. O(c) checking where c is complexity
+    3. O(d) dependency check where d is dependency count
+    """
+    pass
+
+
+class RuleComposite:
+    """Composes validation rules.
+    
+    RuleComposite implements the Composite pattern to build
+    complex validation rules from simpler ones.
+    
+    Class Invariants:
+    1. Must maintain hierarchy
+    2. Must resolve dependencies
+    3. Must aggregate results
+    4. Must handle failures
+    
+    Design Patterns:
+    - Composite: Composes rules
+    - Chain: Processes rules
+    - Observer: Reports results
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe composition
+    2. Atomic evaluation
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(n) composition where n is rule count
+    2. O(d) dependency resolution where d is depth
+    3. O(r) result aggregation where r is result count
+    """
+    pass
+
+
+class ValidationContext:
+    """Maintains validation context.
+    
+    ValidationContext tracks validation state and provides
+    context for rule evaluation.
+    
+    Class Invariants:
+    1. Must track state
+    2. Must maintain scope
+    3. Must preserve history
+    4. Must support recovery
+    
+    Design Patterns:
+    - Memento: Preserves state
+    - Strategy: Implements tracking
+    - Observer: Reports changes
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe context
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) state access
+    2. O(h) history tracking where h is history size
+    3. O(s) scope management where s is scope size
+    """
+    pass
+
+
+class ValidationError:
+    """Represents a validation error.
+    
+    ValidationError encapsulates error information with
+    context and recovery options.
+    
+    Class Invariants:
+    1. Must contain context
+    2. Must be immutable
+    3. Must support recovery
+    4. Must be reportable
+    
+    Design Patterns:
+    - Memento: Captures context
+    - Command: Encapsulates recovery
+    - Strategy: Implements reporting
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe creation
+    2. Immutable state
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(1) error creation
+    2. O(c) context capture where c is context size
+    3. O(r) recovery planning where r is option count
+    """
+    pass
+
+
+class ValidationReport:
+    """Generates validation reports.
+    
+    ValidationReport aggregates validation results and
+    generates comprehensive reports.
+    
+    Class Invariants:
+    1. Must be complete
+    2. Must be accurate
+    3. Must track coverage
+    4. Must support queries
+    
+    Design Patterns:
+    - Builder: Constructs report
+    - Strategy: Implements formats
+    - Observer: Tracks progress
+    
+    Threading/Concurrency Guarantees:
+    1. Thread-safe generation
+    2. Atomic updates
+    3. Safe concurrent access
+    
+    Performance Characteristics:
+    1. O(r) report generation where r is result count
+    2. O(q) query execution where q is query complexity
+    3. O(c) coverage tracking where c is component count
+    """
+    pass
+
+--- END OF FILE: /home/atomik/src/gotstate/gotstate/persistence/validator.py ---

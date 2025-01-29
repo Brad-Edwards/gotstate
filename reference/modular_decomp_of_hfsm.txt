@@ -1,0 +1,621 @@
+arXiv:2111.04902v2 [cs.FL] 21 Jul 2023 
+Modular Decomposition of Hierarchical Finite State Machines 
+Oliver Biggar, Mohammad Zamani, Iman Shames 
+Abstract 
+In this paper we develop an analogue of the graph-theoretic ‘modular decomposition’ in automata theory. This decomposition allows us to identify hierarchical fnite state machines (HFSMs) equivalent to a given fnite state machine (FSM). We frst defne a module of an FSM, which is a collection of nodes which can be treated as a nested FSM. We then identify a natural subset of FSM modules called thin modules, which are algebraically well-behaved. We construct a linear-space directed graph, which uniquely represents every thin module, and hence every equivalent (thin) HFSM. We call this graph the modular decomposition. The modular decomposition makes clear the signifcant common structure underlying equivalent HFSMs, and allows us to eÿciently construct equivalent HFSMs. Finally, we provide an O(n2 k) algorithm for constructing the modular decomposition of an n-state k-symbol FSM. 
+1 Introduction 
+Finite State Machines (FSMs) are a fundamental model in theoretical computer science, which have applications across numerous disciplines of science and engineering. One well-known extension of this model, originally introduced by Harel [16], is the notion of hierarchy. Harel proposed allowing FSMs to be nested with states of other FSMs, leading to a tree-like structure which nowadays is called a hierarchical fnite state machine (HFSM) [5]. See Figures 1b and 1d. HFSMs manage complexity through the design principle of modularity, separating independent areas of a complex system. Standard FSMs have no such way of being broken down, so understanding their behaviour can be diÿcult as they grow in size. HFSMs can provide a compact representation of FSMs, which can be exploited for model checking [5, 4, 2, 21]. Nowadays, HFSMs are a ubiquitous modelling tool, being a standardised part of the Unifed Modelling Language (UML) [8]. 
+The hierarchy of HFSMs is an optional design tool to improve clarity—from a semantic per­spective, HFSMs are the same as FSMs. In fact, it is easy to remove the hierarchy from an HFSM by recursively expanding nested states, transforming it into an equivalent FSM. This allows us to assign semantics to HFSMs and gives them a natural equivalence relation and partial ordering. 
+However, because hierarchy is a good thing, we generally don’t want to expand HFSMs. We would prefer the opposite transformation: given an FSM, we want to fnd which hierarchical FSMs are equivalent to it. Currently, to our knowledge, there is no existing literature on this problem— all hierarchy in current HFSMs is constructed at design time. We arrive at our central question: how can we discover the innate hierarchical structure in FSMs? Along with the insight this lends into FSM structure, this line of inquiry leads to many concrete and natural algorithmic problems. For instance, given an HFSM, how do we fnd equivalent HFSMs which have: many nested FSMs, deeply nested FSMs; small nested FSMs; and so on. In short, we want the means to 
+
+
+
+y 
+5 
+y 
+
+
+13 79 
+
+
+(a) A graph G (b) An FSM Z 
+5 
+
+y 
+
+
+
+(d) Hierarchical FSM (HFSM) equivalent to 
+(c) Hierarchical graph equivalent to GZ 
+
+
+
+(e) Modular decomposition of G (repre-(f) Modular decomposition of Z (repre­sents all equivalent hierarchical graphs) sents all equivalent HFSMs) 
+Figure 1: A graphical depiction of the contribution of this paper. The left column shows the modular decomposition of a graph G, which constructs a hierarchical representation of G which captures all other such representations [14]. The right column shows our analogous theory for FSMs. The main contribution is the modular decomposition of an FSM (Fig. 1f), a tree-like structure which represents all HFSMs equivalent to a given FSM. 
+eÿciently explore each equivalence class of HFSMs, so that we can construct eÿcient algorithms. This is the goal of this paper. 
+Luckily, we have a direct source of inspiration for this problem: the modular decomposition, from graph theory. The modular decomposition is the graph-theoretic analogue of our goal for FSMs: given a graph, it provides an eÿcient representation of the space of equivalent hierarchically nested graphs (Figures 1e and 1c). Originally developed by Gallai [14] for the purpose of constructing transitive orientations of comparability graphs, it has since been applied to a large number of problems in graph theory and combinatorics [15, 23]. The concept has been generalised to directed graphs, set systems, matroids, hypergraphs and other combinatorial objects [23, 22]. When we have a hierarchical graph, such as Figure 1c, we can remove the hierarchy by recursively expanding the nested graphs, an operation which replaces a node v containing a nested graph H with the nodes of H, where all nodes previously adjacent to v become adjacent to all nodes of H (see Figure 3). The goal of modular decomposition theory is to invert this operation, fnding the sets of nodes in a graph which could have resulted from an expansion. These sets are called modules, and they are the central objects of modular decomposition theory. Intuitively, modules are sets of nodes which can be treated as a nested graph in an equivalent hierarchical representation. Further, modules of modules are themselves modules (Theorem 4.11, [14]), so we can construct equivalent hierarchical graphs by repeating the process of identifying and nesting modules. Modules can overlap, so in general a graph can have exponentially many modules, and hence there are a large number of equivalent hierarchical graphs. However, Gallai [14] constructed a unique tree which succinctly represents all equivalent hierarchical graphs, and this tree is what is known as the modular decomposition of the graph. The modular decomposition allows us to eÿciently solve combinatorial optimisation problems on graphs. This tree is the key contribution of the theory, and this is what we provide for FSMs in this paper. 
+Our contributions are as follows. First, we fnd an appropriate defnition of a module in FSM. We do this by characterising the role which modules play with respect to the operations of expansion, contraction and restriction in graph theory (Section 4). This allows us to defne FSM modules as sets of states which play the same role in FSMs. Unfortunately, while this defnition makes sense conceptually, it is challenging computationally, because the resultant set of modules lacks key algebraic properties which graph modules possess. However, we identify a natural restriction of this defnition, leading to what we call thin modules, which, like graph modules, are closed under intersection and union (Section 4.1). The results of our paper from here apply only to thin modules and thin HFSMs, which are those whose nested FSMs are thin modules. We then defne the modular decomposition of an HFSM, which is a directed acyclic graph built from the non-singleton indecomposable modules, which we call the basis modules of the decomposition. Like in the graph case, we label each node in the modular decomposition by the contracted form (Defnition 5.4) of the associated basis module (see Figure 1f). Our main theorem (Theorem 5.5) establishes that the modular decomposition is linear in size, uniquely represents all thin modules and hence all equivalent HFSMs. Two equivalent HFSMs (such as Figures 5a and 5b) have a one-to-one correspondence between their bases which preserves contracted forms, so their modular decomposition always consists of the same component FSMs, possibly nested in di erent orders. This makes maximally-hierarchical HFSMs easy to represent and search, allowing us to solve optimisation problems on HFSMs using greedy approaches. As an example, Z’s modular decomposition (Figure 1f) has three overlapping basis modules {1, 2}, {1, 3} and {3, 4, 5, 6}. The overlap gives rise to di erent choices of nesting of equivalent HFSMs, such as Figure 5a and 5b, but in any choice the bases remain in one-to-one correspondence. Finally, in Section 6 we give an O(n2k) algorithm for computing the modular decomposition of an FSM. We conclude and discuss open problems in Section 7. Most proofs are in the Appendix. 
+
+2 Related Work 
+Decomposition of automata was extensively studied in the sixties [18, 19, 17, 26], with the focus on a ‘cascading’ composition, where the output of one machine is fed into the input of another. An important result was Krohn-Rhodes theory [20], which presents a decomposition of an automaton and its associated transition monoid [12]. Our theory is distinctly di erent, because our FSMs do not have output, and so the decomposition is hierarchical rather than cascading1 
+. 
+Our approach and naming follow the modular decomposition in graph theory, a parallel devel­opment beginning around the same period [14]. Later work generalised the modular decomposition to many other kinds of mathematical structure [23, 22]; a survey is given in [15]. There are estab­lished criteria for when a family of sets has a tree representation analogous to that of the modular decomposition [23, 9, 15]. For instance, families of sets closed under overlapping union, intersection, set di erence and symmetric di erence always have a linear representation [15]. Further, families closed under only overlapping union and intersection have a quadratic-size representation [13]. Thin FSM modules are only closed under overlapping union and intersection, so our linear-space repre­sentation improves on these results. While modular decomposition has been applied to digraphs, which are similar to FSMs, the notions of ‘equivalence’ and ‘nesting’ on FSMs and digraphs do not coincide so the concept of a module is di erent. See Section 4. 
+In recent years, HFSMs have received interest in more formal problems of software engineering, particularly in model checking [5, 4, 21, 11, 3, 2]. It is shown in [5] that HFSMs can be (when states can be equivalent to each other) signifcantly smaller than their equivalent FSMs, and model checking can be performed on a hierarchical structure in time proportional to its size, thus pro­viding a signifcant improvement in complexity when the HFSM is small. Our work complements this by showing how we can construct HFSMs from FSMs, suggesting that it may be possible to use modular decomposition as a preprocessing step for model checking to reduce the size of an FSM’s representation. In [6], the authors perform a modular decomposition on an acyclic FSM-like architecture called a decision structure. The module defnition presented there is a special case of the thin modules we defne in this paper. However, FSMs are allowed to have cycles, which adds signifcant complexity to the theory. 
+
+3 Finite State Machines 
+In this section we provide some preliminaries and then formalise FSMs and HFSMs and their transition laws. We use the term graph to mean a simple undirected graph, and digraphs for directed graphs, where we allow parallel arcs and loops [7]. In digraphs, we write u
+v to indicate that there is an arc from the node u to v.A directed path (simply a path when there is no ambiguity) is a sequence of nodes v1 
+v2 
+... 
+vn in a digraph where each vi is distinct and there is an arc from each to the subsequent node in the sequence. We write 
+v1 
+vn to mean that there is a path from v1 to vn, in which case we say that vn is reachable from v1. If there is also an arc vn 
+v1 , we call this a cycle. In FSMs, the digraphs are labelled by a set of symbols X, meaning each arc is assigned a symbol from X. We call an arc u
+v 
+
+x
+labelled by x . X an x-arc, denoted by uv . Similarly, a path or cycle made up of x-arcs 
+
+x 
+we call an x-path or x-cycle respectively, and denote an x-path from u to v by uv .A digraph with no cycles is called acyclic, and we call it a directed acyclic graph, which we contract to dag.A tree is a dag where there is a single node called the root which has precisely one path to 
+1 Unfortunately, this decomposition is also sometimes called ‘modular decomposition’ [26], which can lead to confusion. 
+every other node. A digraph is strongly connected if there exists a directed path between every pair of nodes. It is connected if there exists an undirected path between every pair of nodes. We denote a partial function f from X to Y by f : X.Y . Given f : X.Y and x . X we write f (x)= Ø to mean that f is not defned on x, and adopt the convention that for any function g, partial or otherwise, g(Ø)= Ø. Given a set X, we write X* for the set of all fnite sequences of elements of X. 
+Defnition 3.1 (Overlapping Sets). A pair of sets X and Y is overlapping if X n Y =Ø, X . Y , and Y . X. We say a collection of sets X = {X1,...,Xn} is overlapping if for any Xi,Xj . X there exists a sequence Xi,Xa1 ,Xa2 ,...Xj where each adjacent pair in the sequence is overlapping. 
+Defnition 3.2 (Finite state machine (FSM), [12]). A fnite state machine (FSM)2 
+is a 4-tuple (Q, , d, s), where Q is a fnite set of states;  is a fnite set called the alphabet, whose elements we call symbols; d : Q ×  .Q is the transition function, which can be a partial function; and s . Q is a state we call the start state. 
+As is standard in automata theory [12], FSMs are equivalently thought of as labelled digraphs, 
+
+x
+where an arc uv means that d(u, x)= v, x .  and u, v . Q. This is how FSMs are normally depicted, as in Figure 1b. Because of this equivalence, we can freely apply graph-theoretic concepts to FSMs, such as connectedness and reachability. We will impose one further requirement on FSMs, which is that they be accessible [12], meaning that all states are reachable from the start state. We will assume all FSMs and HFSMs are accessible, which causes no loss of generality, because all FSMs are equivalent to an accessible one [12], by ignoring the unreachable states. We defne FSM ‘execution’ as follows. 
+Defnition 3.3 (Output Function of FSMs). Let Z =(Q, , d, s) be an FSM. The output function of Z is the partial function .Z :* .Q which maps sequences of symbols to a state, defned by .Z (x1x2 ...xn)= d(...d(d(s, x1),x2),...,xn). 
+The output function takes a sequence of symbols and returns the state reached after the associ­ated sequence of transitions has been performed in the FSM, starting from the start state. If at any point there is no transition matching the next symbol, the output function returns Ø. Formally, if the i-th symbol xi has no matching transition (that is, d(...d(d(s, x1 ),x2),...,xi)= Ø) then .Z (x1x2 ...xn)= Ø, because d(Ø,x)= Ø. This is the standard way in which FSMs execution is defned, when d is allowed to be partial. We now extend these defnitions to HFSMs. 
+Defnition 3.4 (Hierarchical Finite State Machine (HFSM)). A hierarchical fnite state machine (HFSM) Z is a pair Z =(X, T ), where X = {X1,...,Xn} is a set of FSMs with alphabet  and T is a tree that we call Z’s nesting tree. Each Xi is a node in T , with Q(Xi) as its child nodes, and these may also be FSMs in X, hence the nesting. If Xj is nested in a v . Q(Xi) of Xi, we denote 
+
+v
+this by a labelled arc Xi 
+Xj . The states of Z, written Q(Z), are the states in Q(Xi)
+Xi.X 
+which are sinks in T , that is, they do not contain a nested FSM. 
+As is standard for HFSMs [16, 5], we will present them pictorially as FSMs where FSMs can be nested in the states of other FSMs, as in Figure 1d. An HFSM Z =(X, T ) where X = {Y } we call a fat HFSM. Flat HFSMs have exactly the same data as FSMs in the normal sense (as defned in Defnition 3.2) and we will generally not distinguish between them. 
+2 FSMs, by this defnition, are just Deterministic Finite Automata (DFAs) [12] without ‘accept’ or ‘reject’ states. However, they consequently have a di erent notion of equivalence, as we explain later. Equivalently, an FSM is a Moore machine [24] whose output function is the identity function. 
+Defnition 3.5. Let Z =(X, T ) be an HFSM. We defne the function start : X . Q(Z), by 
+
+
+si
+start(Xj ), there is an arc Xi Xj in T 
+start(Xi)= si, otherwise 
+where si is the start state of the FSM Xi. 
+The ‘start’ function identifes the ‘start state’ of the HFSM, found by following the unique path in T where all arcs are labelled by start states in their respective FSMs. This recursive defnition works because HFSMs have a fnite tree structure. 
+Defnition 3.6 (Hierarchical Transition Function). Let q be an state in an HFSM Z =(X, T ) where q . Q(Xj ), Xj . X. Let v = d(q, x). Then the hierarchical transition function of Z is defned as 
+.(q, x)= 
+...........
+v
+start(Y ),v = Ø,Xj 
+Y . T, Y . X v, v = Ø, otherwise 
+w
+.(w, x),v = Ø,W 
+Xj . T, W . X Ø,v = Ø, otherwise 
+This defnition formalises the functioning of HFSMs in software engineering [16]. There, the symbols in the input sequence x1 ...xn are thought of as ‘events’ to which the machine responds, arriving one-by-one, with the ‘current state’ q of the machine stored in-between. A symbol xi has been ‘processed’ once the appropriate transition has been performed, updating the current state to 
+' 
+q . Q(Z). In the hierarchical case, this is done in a depth-frst manner. As an example, suppose the current state q is contained in an FSM Xj . X, and Xj is nested as a state w in an FSM W . X. When the ‘input event’ xi is received, the FSM checks frst if a transition dXj (q, xi) exists in Xj; if it does, this transition is performed, and the current state is updated to dXj (q, xi). If 
+
+x '' 
+we perform a transition qq , and the state q contains a nested FSM, then the current state becomes the start state of this FSM, unless that too is nested; this process is repeated until a state is reached that does not contain a nested FSM (following Defnition 3.5). Otherwise if the transition dXj (q, xi) does not exists in Xj , the program checks whether a transition out of w on symbol xi exists in the ‘parent’ FSM W (that is, if dW (w, xi) exists); if so, this transition is performed, with the current state updated to dW (w, xi). This concept is repeated for arbitrarily many layers of nesting of FSMs. This is visualised in Figure 2. Conceptually, each FSM attempts to ‘handle’ events that its nested FSMs have not handled. 
+Defnition 3.7 (Output Function of HFSMs). Let Z =(X, T ) be an HFSM. Let R . X be the FSM labelling the root of T . Then the output function of Z is the partial function .Z :* .QZ where .Z (x1x2 ...xn)= .(....(.(.(start(R),x1),x2),...,xn).3 
+
+Defnition 3.8 ((H)FSM Equivalence). Two (H)FSMs Y and Z are equivalent, written Y ~= Z, if their output functions .Y and .Z are equal. 
+It is straightforward to show that two FSMs are equivalent if and only if they are equal (have the same states, transition functions and start states). This is not true of HFSMs. However, by repeatedly expanding (Defnition 4.8) nested FSMs we can convert any HFSM Z into a unique equivalent (by Defnition 3.8) fat HFSM, which we call ZF [5]. It follows that two HFSMs Y and Z are equivalent if and only if Y F and ZF are equal. 
+3 Again recall that ' Z (x1 x2 ...xn)= ; if is not defned on some input in this expression. 
+
+Figure 2: A transition .(a, x)= b in an HFSM, defned by the hierarchical transition function (Defnition 3.6). Here, a has no x-arc, and nor do any of the containing FSMs A1,...,An-1. An x-arc exists out of An, which transitions to the superstate B1. The state b is start(B1) (Defnition 3.5), the nested start state of B1. 
+Theorem 3.9. If Z and Y are accessible HFSMs, ZF and Y F are unique and Z ~= Y if and only if ZF = Y F . 
+
+4 Modules in Graphs and FSMs 
+We begin by defning modules in graphs and FSMs. 
+Defnition 4.1 (x-Exit and x-Entrance). Let M be a set of states of an FSM Z, and x a symbol 
+
+x
+in . Then we call a state v . M an x-exit of M if there is an arc uv , with u . M; we 
+
+x
+call a state u . M an x-entrance of M if there is an arc vu , with v . M. When we say entrance or exit, we mean an x-entrance or x-exit for any x. 
+Defnition 4.2 (FSM Modules). Let Z be an FSM. A non-empty subset M is a module if and only if it has at most one entrance, and for each x . , if M has an x-exit then (1) that x-exit is unique and (2) every state in M has an x-arc. 
+Defnition 4.3 (Graph Modules, [22, 15]). Let G be a graph. A non-empty4 
+subset M is a module if and only if for every v . M, v is adjacent to all of M or none of M. 
+For hierarchical FSMs, modules correspond to modules in the constituent FSMs. 
+Defnition 4.4 (HFSM Modules). Let Z =(X, T ) be an HFSM. A set M of states is a module if there is an FSM Xi . X and module H . Q(Xi) where M is the set of HFSM states recursively nested within states in H. 
+A priori, it is unclear why Defnition 4.2 is the correct defnition of a module in an FSM. In particular, it is not obviously related to modules in graphs (Defnition 4.3). However, in graphs, modules are sets of nodes which satisfy an ‘independence’ property, specifcally, given a graph G and module M, the original G can be recovered uniquely from the contraction G/M (Defnition 4.5) and the restriction G[M] (Defnition 4.6), which are each well-defned graphs. We view this as the defning property of modules, and we arrive at Defnition 4.2 by defning contraction and restriction of FSMs. Theorem 4.9 establishes that graph and FSM modules are characterised by these operations. 
+Defnition 4.5 (Contraction). Let Z be an FSM/graph and M a set of its states/nodes. The 
+Z\M 
+
+contraction of M in Z, written Z/M, is the FSM/graph whose state/node set is {v1,v2, . . ., M}. For FSMs, given any vi,vj . M and x . , there is a transition dZ/M (x, vi)= vj if and only if 
+4 We exclude the trivial empty module for simplicity. 
+FSM G FSM HH nested in G at state 2 The expansion G ·2 H 
+
+Figure 3: An example of FSM expansion (Defnition 4.8) 
+dZ (x, vi)= vj. There is a transition dZ/M (x, M)= vj if and only if dZ (x, u)= vj for some u in M, and there is a transition dZ/M (x, vi)= M if and only if dZ (x, vi)= u for some u in M. For graphs, there is an edge (vi,vj ) in G/M if and only if (vi,vj ) is an edge in G and there is an edge (M, vi) if and only if there is some u . M where (u, vi) is an edge in G. 
+Contractions in graphs is defned by the graph quotient, and the FSM defnition is the analogue on the underlying digraph of the FSM. The astute reader will notice that the FSM defnition is not always well-defned—there may be multiple x-transitions out of M, so dZ/M may not be a function. This motivates the requirement in Defnition 4.2 that the x-exit of a module is unique, because then Z/M is a well-defned FSM. Given multiple disjoint sets M1,M2,... , we can perform multiple contractions at once, which we write Z/M1,M2,... . Note that the order does not matter. 
+Defnition 4.6 (Restriction). If Z is an FSM/graph and M is a subset of its states/nodes, then the restriction of Z to M, written Z[M], is the FSM/graph defned on the subgraph induced by M in Z. For FSMs, the start state of Z[M] is either s (Z’s start state) if this is in M, or otherwise any entrance of M (Defnition 4.1). 
+This defnition is again not always well-defned, because if M has multiple entrances the start state of Z[M] isn’t uniquely specifed. This motivates the requirement (Defnition 4.2) that the entrance of a module is unique, so that Z[M] is a well-defned FSM. In fact, we will refer to the unique entrance of M as its start state, where we overload the term because this state is exactly the start state of the restriction Z[M]. Finally, we defne the expansion of nested FSMs or graphs. On graphs this operation has previously been called X-join or substitution [22]. We demonstrate FSM expansion (Defnition 4.8) in Figure 3. 
+Defnition 4.7 (Graph Expansion, [22]). Let G and H be graphs, with v . G. The expansion of H at v, written G · v H, is the graph whose node set is (N(G) \{v}) . N(H) where edges within G or H are unchanged and there is an edge (g, h) between g . G and h . H if and only if there is an edge (g, v) in G. 
+Defnition 4.8 (FSM expansion). 
+
+
+Let G and H be FSMs, and let v be a state of G. Then, the sH ,v = sG
+expansion of H at v, written G · v H is the FSM (QG \{v}) . QH , G . H ,d ' , 
+sG,v =6 sG 
+where 
+d ' (q, a)= 
+...........
+dG(q, a),q . QG . dG(q, a)=6 v sH,q . QG . dG(q, a)= v 
+dH (q, a),q . QH . dH (q, a)=Ø dG(v, a),q . QH . dH (q, a)= Ø 
+Having defned expansion, restriction, contraction and equivalence on FSMs, we can justify Defnition 4.2 by showing that modules in graphs and FSMs are characterised by these operations. 
+
+Figure 4: This FSM has two non-trivial modules, {1, 2, 3} and {2, 3, 4} (represented by grey rect­angles), neither of which are thin; they both contain an x-cycle and have an x-exit. These modules overlap, but neither their union {1, 2, 3, 4} nor their intersection {2, 3} are modules. 
+This provides an alternative abstract defnition of modules which is similar to a universal property in algebra, in that it characterises the role of a module with respect to the operations of contraction, restriction and expansion, independent of the defnitions of these operations for each class of objects. 
+Theorem 4.9. Let Z be a graph/FSM. A non-empty set M . Z is a module if and only if Z/M · M Z[M] ~= Z. 
+Modules in FSMs share important properties with modules of graphs. First, in any FSM the singleton sets and the whole state set Q are modules, which in graphs are called the trivial modules (Lemma 4.10). An FSM with only trivial modules we call prime, following the convention for graphs [22]. Second, we can reason hierarchically about modules because ‘modules of modules are modules’ (Theorem 4.11). This is the FSM analogue of an important theorem on graph modules [14]. 
+Lemma 4.10. For any FSM Z, Q(Z) is a module and {v} is a module for any state v . Q(Z). 
+Theorem 4.11. Let Z be an FSM, X a module, and Y . X a subset of X. Then Y is a module of Z if and only if it is a module of Z[X]. 
+4.1 Thin modules 
+Unfortunately, the defnition of FSM modules in Theorem 4.2 is too broad, and the resultant mod­ules are not as algebraically well-behaved as we would hope. For example, while overlapping graph modules are closed under union, intersection, di erence and symmetric di erence, FSM modules are closed under none of these (see the counterexample in Figure 4). Similarly, Theorem 4.14, which is the analogue of Theorem 4.11 for contractions rather than restrictions, holds for graph modules but not FSM modules. However, we now introduce a slight restriction of the defnition of an FSM module, which we call a thin module, which does satisfy Theorem 4.14 and is closed under overlapping unions and intersections (Lemma 4.13). 
+Defnition 4.12 (Thin Modules of FSMs). A module M of an FSM Z is thin if for every x . , either M has no x-exit or M contains no x-cycles. 
+Thin modules are a rather natural restriction—for instance, all the trivial modules are thin modules. To motivate the defnition of thinness, recall Defnition 4.2. There we required that for each module M with an x-exit k, for every state v in M must have an x-arc, and so either there is an x-path v
+k , all of whose states except k are contained in M, or the x-path out of v leads to an x-cycle, with the path and cycle entirely contained within M. Requiring that M is thin prohibits the latter case, enforcing that all states v in M must have an x-path to k. If M has no x-exit, however, there can be an x-cycle within M. As claimed, this is suÿcient to obtain closure under overlapping union and intersection. 
+Lemma 4.13. If A and B are overlapping thin modules, then A . B and A n B are both thin modules. 
+Theorem 4.14. Let Z be an FSM and X a module, and Y a superset of X. If X is thin, then Y is a thin module of Z if and only if Y/X is a thin module of Z/X. 
+From here, we will restrict our attention to HFSMs which arise from thin modules. 
+Defnition 4.15. An HFSM Z =(X, T ) is thin if Q(Xi) is a thin module of ZF for each Xi. 
+
+
+The Modular Decomposition of FSMs 
+Because thin modules can overlap, there can be exponentially many, and so an FSM may have many decompositions into HFSMs, depending on choices of modules. In this section we defne a structure called the modular decomposition, and prove the main theorem of our paper, which shows that the modular decomposition represents all thin modules, and hence allows to eÿciently construct and search the space of equivalent (thin) HFSMs. Our representation is built on overlapping unions of modules, using Lemma 4.13. Specifcally, we identify the thin modules which are indecomposable under overlapping unions, and use these to generate all other thin modules. 
+Defnition 5.1 (Decomposable and Indecomposable Sets). Let F be a family of subsets of a fnite set X. An element M . F is decomposable if there exists an overlapping collection D1,...,Dn of sets in F such that M = D1 .··· . Dn. Otherwise, we call an element indecomposable. 
+Defnition 5.2 (Modular Decomposition of an HFSM). Let Z be an HFSM. Let D be the dag whose nodes are the indecomposable thin modules of Z, with an arc from modules K to M in D if and only if M . K. Then the modular decomposition TZ of Z is the transitive reduction [1] of D. We call the non-singleton indecomposable modules the basis of the modular decomposition. 
+Some properties of the modular decomposition are easy to establish. Firstly, it is unique because the transitive reduction of a dag is unique. Secondly, the sinks of the modular decomposition are the singletons (which are trivially indecomposable), and non-sink nodes are basis modules. It follows that the union of sinks that are descendants of a given node form the module assigned to that node, so we don’t need to label non-sink nodes by the associated module5 
+(see Figure 1f). In general, any module is recovered as an overlapping union of basis modules, and so is an overlapping set of descendants of basis modules in the modular decomposition. The name ‘basis’ is by analogy with linear algebra: basis modules cannot be formed as overlapping unions of other modules (they are ‘independent’) and every thin module can be uniquely formed as an overlapping union of indecomposable ones (they ‘span’ the set of thin modules). We refer to the size of the basis as the dimension of an HFSM. Like the dimension of a vector space, it is an invariant of equivalent HFSMs. We have one crucial tool for proving results about the basis, which will also prove useful when computing it (Theorem 6.2). This tool is that each basis module has a ‘representative’ state. 
+Theorem 5.3 (Representative Theorem). Let q be a state in an FSM Z that is not the start state. Defne reprZ (q) as the intersection of all thin modules M which contain q but where q is not the start state. Then reprZ (q) is a basis module, and for each basis module H there exists a q such that reprZ (q)= H. 
+5 This assumption is important to ensure the tree is linear-space, and we apply the same solution as for the graph modular decomposition [22]. 
+Showing that reprZ (q) is a module, and is indecomposable, follows from closure under overlap­ping intersections (Lemma 4.13). The main novelty of Theorem 5.3 is that each basis module can be represented this way. It follows easily that T has a linear number of nodes, because there are at most n - 1 distinct representatives for basis modules. More precisely, every accessible n-state FSM with n> 1, has between n +1 and 2n - 1 indecomposable modules (Lemma A.14).6 
+
+There is one more ingredient we must add to the modular decomposition. In the graph modular decomposition, each non-sink node is labelled by a graph (Figure 1e), and this is what allows us to reconstruct the original graph from the modular decomposition. Each module M is labelled by the restriction G[M], with smaller modules K1,K2, ··· . M contracted. We call this the contracted form of M. We do the same in our modular decomposition, so each basis module is labelled by its contracted form, leading to Figure 1f. Formally: 
+Defnition 5.4 (Contracted Form). Let Z be an FSM and M a module. The contracted form of M is the FSM Z[M]/K1,...,Kn, where Ki are the maximal thin modules contained in M, that is for each i there is no thin module H such that Ki . H . M. 
+This is well-defned and unique because each maximal thin module is disjoint from all others; this follows from Lemma 4.13. As a result, the order of contraction does not matter. 
+Theorem 5.5 (Properties of the Modular Decomposition). Let Z be an accessible HFSM, and T its modular decomposition. Then, 
+1. 
+T is small: T has a linear number of nodes and arcs compared to Z; 
+
+2. 
+T represents all thin modules: a set M . Q(Z) is a thin module of Z if and only if it is a union of overlapping basis modules, and each thin module is an overlapping union of a unique smallest set of basis modules; 
+
+3. 
+T represents HFSM equivalence: if Z and Y are equivalent HFSMs then reprZ (q) . reprY (q) is a one-to-one correspondence between basis modules, and the contracted forms of reprZ (q) and reprY (q) are equal up to state relabelling. 
+
+
+We will sketch the proof here—the full version is in the Appendix. First, Theorem 5.3 ensures there are a linear number of basis modules7 
+, establishing the frst claim. Second, we show that in any family of sets that is closed under overlapping unions, every set can be constructed as an overlapping union of indecomposable ones (Proposition A.12). Using the fact that they are also closed under intersection, we further prove that each thin module is a union of a unique smallest set of overlapping basis modules (Proposition A.13), proving the second claim. For the third claim we use induction, showing that for two HFSMs Z and Y which di er by a single nesting, reprZ (q) . reprY (q) is well-defned in both directions. 
+To understand Theorem 5.5, let’s consider the concrete example of Z (Figure 1b), and its modular decomposition (Figure 1f). We can contruct an equivalent HFSM by repeatedly selecting a thin module M and nesting Z[M] at M in Z/M. Where Z’s modules are properly nested, such as {4, 5, 6} and {4, 5}, there is no choice for how to decompose these modules into nested FSMs. However, where Z’s modules overlap, such as {1, 2}, {1, 3} and {3, 4, 5, 6}, selecting a module to nest removes the overlap, and hence di erent choices of module can lead to HFSMs with di erent nesting 
+6 These bounds are tight. Any prime FSM has n+ 1 trivial indecomposable modules, and one FSM with 2n- 1 indecomposable modules is that consisting of a single x-path of length n beginning at the start state. 
+7 A dag with O(n) nodes could still potentially have a quadratic number of arcs. However, we show that if a node tM in T representing a basis module M has many arcs out of it in T , then these modules overlap M in a specifc branching structure in Z, and this implies the existence of a proportional number of arcs in Z (Proposition A.15) 
+
+
+
+4
+5 
+4
+5 
+(a) HFSM W1 (b) HFSM W2 
+Figure 5: Two HFSMs equivalent to Z (Figure 1b), constructed by contracting di erent choices of modules from Z. Comparing to Figure 1f, the modular decomposition of Z, we see that W1 and W2 represent di erent ways to extend the modular decomposition to a tree form. 
+trees. For instance, Figure 5 shows two HFSMs W1 and W2, both equivalent to Z from Figure 1b. However, because basis modules are in a one-to-one correspondence, equivalent HFSMs have the same dimension. Repeating this process, we fnd that the number of times we can recursively nest FSMs is always exactly the dimension, which in the case of Z is seven. At that point, regardless of choice of modules, we arrive at an HFSM whose modular decomposition is exactly the same as its nesting tree (such as W1 and W2 in Figure 5, which have seven component FSMs). These HFSMs are maximal, in that they can’t be further decomposed. Theorem 5.5 implies that all maximal HFSMs have the same amount of nesting, and so fnding maximal HFSMs is easy. Further, all maximal HFSMs have the same set of component FSMs, which is exactly the contracted forms of the basis modules, possibly in di erent orders. We can verify this by comparing Figure 5 to Figure 1f. Looking at a specifc state, such as 3, we see it is contained in di erent nested FSMs in W1 and W2, with reprW1 (3) = {1, 2, 3, 4, 5, 6} and reprW2 (3) = {1, 3}. However, the contracted forms of reprW1 (3) and reprW2 (3) are equal up to state labels. 
+6 Computing the Modular Decomposition 
+In the previous section we defned the modular decomposition of an HFSM and discussed its proper­ties. However, we have yet to discuss how to compute it. In this section we give an algorithm which takes a n-state k-symbol accessible FSM and constructs the modular decomposition in O(n2k) time. We focus on FSMs because the modular decomposition of an HFSM can easily be constructed from the modular decompositions of its component FSMs. Computing the modular decomposition comes in two main steps. The frst involves computing the basis modules (Algorithms 1 and 2), and the second constructs the modular decomposition by ordering the basis by containment (Algorithm 3). The second part (Algorithm 3) is comparatively straightforward8 
+and we defer it to the Appendix. 
+8 Algorithm 3 uses a variant of breadth-frst-search on the modular decomposition which, given a basis module M to add to T , eÿciently locates the nodes tH representing modules H which are immediate successors of K in the inclusion order on basis modules. 
+Here we focus on computing the basis modules. Given that every module has a unique start state, we begin our search by fxing a state v, and identifying the modules for which this is the start state. In the following, we will call a module with start state v a v-module. The next step is to formalise the following relationship: if a given state u is in a given v-module, then which states w must also be in this module? This relationship is a preorder on Q(Z) for each fxed v. Algorithm 1 computes this preorder as the reachability preorder of a graph Gv. We want Gv to satisfy two properties: (1) for any states u and w, there is a path u
+w in Gv if and only if u is contained in every v-module containing w; and (2) every state in Gv is contained in some v-module. 
+Algorithm 1: Constructing Gv 
+Input  :  Accessible FSM Z, state v . Q(Z)  
+Output:  A digraph Gv  
+1  Create an empty digraph Gv  with state set Q(Z);  
+2  Given x . , let qx be the state with the longest x-path  v  x  qx  ;  
+3  for each state u in Q(Z) do  
+
+4  for each symbol x in  do  
+5  if there is an arc  u  x  w  in Z then  
+6  if w = v then  
+7  (a) Add  u  w  to Gv;  
+8  if there is a path  v  w  in Z then  
+9  (c) Add  t  u  to Gv  (if t = u);  
+10  else  
+11  (b) Add  w  u  to Gv;  
+12  else  
+13  (d) Add  qx  u  to Gv  (if qx = u);  
+
+
+14 If v =6 s (Z’s start state), remove from Gv any state which is reachable from s in Gv; 15 return Gv; 
+
+Algorithm 1 begins with an empty graph whose node set in Q(Z). We then visit each arc of Z, 
+
+x
+and add arcs to Gv in four cases, called (a), (b), (c) and (d). Let uw be some transition in Z. Firstly, if w is contained in some v-module H, and w =6 v, then w is not H’s unique start state. Consequently it cannot be an entrance of H, and so u is also in the v-module H, so we add the arc u
+w to Gv (a) (line 7 of Alg. 1). Now suppose u is in a v-module H but not also 
+w. For this to be true, w must be the unique x-exit of H. By thinness, w is on the unique x-path out of v, so vw . Now, if u is on this path it must be t, but if u is not on this 
+x
+path then the entire subpath v
+t must be in H. We enforce this by the arc t
+u ((c), line 9 of Alg. 1). Otherwise, u and w must be contained in all the same v-modules, so we also add an w
+u to Gv ((b), line 11). Finally, if a state u in a v-module H has no x-arc, then H must have no x-exits, and so all states on the unique x-path out of v must be in H. This is (d) (line 13 of Alg. 1). By the end of the outer loop of Algorithm 1, property (1) is satisfed. However, we must still remove states which are not in any v-module. If v = s, then every state is in at least one v-module (the trivial module Q(Z)). If v = s, then s is in no v-module, and if there is a path 
+s
+u in Gv then every v-module containing u contains s, and so u can’t be contained in a v-module. As a result, we remove all such states from Gv (line 14 of Alg. 1). Theorem 6.1 proves that this is suÿcient for Gv to satisfy our criteria. 
+Theorem 6.1. For q . Q(Z), we write .v q to denote the ancestors of q in Gv. Then .v q is a module, and a subset H . Z is a thin v-module if and only if there exist states q1,...,qm . Q(Z)
+
+where H = .vqi.
+i.1,...,m Having constructed Gv, fnding the basis modules can now be done using Algorithm 2. 
+Algorithm 2: Constructing the Modular Decomposition 
+Input : Accessible FSM Z, with start state s 
+Output: Z’s modular decomposition T 1 Create a digraph T with node set Q(Z); 2 used .Ø; 
+3 for state v in any reversed breadth-frst-search of Z from s do 
+4 Construct Gv, using Algorithm 1; 5 for each strongly connected component M = {v} of Gv in topological order do 6 Choose an arbitrary q . M \ used; 7 Add the module .vq to T using Algorithm 3; 8 used . used . (.vq \{v}); 
+9 return T 
+Theorem 6.2. Algorithm 2 works, i.e. the sets .vq added to T are exactly the basis modules of Z. 
+Proof sketch; full proof in Appendix. First, observe that indecomposable v-modules must have the form .v q for some q. This is because each of these is a module (Theorem 6.1), and indecompos­able modules cannot be a union of multiple overlapping modules. Unfortunately, not all .v q are indecomposable. To fnd those that are, we use Theorem 5.3. It turns out that .v q is indecom­posable if and only if reprZ(q)=.vq. We can fnd only the desired q by choosing the states v in a specifc order—this is where the reverse breadth-frst-search comes in. If .vq is decomposable, then reprZ (q) ..vq, and so there is a state w ..vq with reprZ(q)=.wq. Because .wq ..vq, we show that all paths from s to w must pass through v. Equivalently, w follows v on any breadth-frst-search order from s; so w precedes v in the reverse order. Using induction in reverse breadth-frst-search order, we show that each q is added to used precisely as reprZ(q) is added to T . Fix some v and q. Either reprZ(q) is a proper subset of .vq, in which case reprZ (q)=.wq, and since w has already been visited, we conclude q is in used by the inductive hypothesis. Otherwise, .v q is indecomposable, and we add it to the modular decomposition while adding q to used. By searching through Gv in topological order for fxed v we ensure that q is not in used until we construct .vq. Consequently, by induction, we add precisely the basis modules to T . 
+Theorem 6.3. Algorithm 2 constructs the modular decomposition of an FSM Z in O(n2k) time. 
+Proof. Firstly, observe that Z has O(nk) arcs. To begin, we perform a BFS of Z, and then reverse this order; BFS takes O(nk) steps. Algorithm 1 constructs Gv with an outer loop of size n and inner loop of size k (with some additional pre-and post-processing), and so overall takes O(nk). At most two arcs are added to Gv on each inner loop iteration, so |A(Gv)|. O(nk). Topologically ordering Gv takes O(n + nk)= O(nk) [25]. Now, we add states to used every time we add a module to T . By Theorem 6.2, we add precisely the basis modules to T , and by Lemma A.14 there are at most n - 1 of these. Since Algorithm 3 visits every arc of T at most once, and |A(T )|. O(|A(Z)|) . O(nk) by Theorem 5.5, it takes O(nk) operations to add a module to the modular decomposition. Constructing .v q takes also O(nk) time, but this is performed at most n - 1 times, so the algorithm runs in O(n2k) time. 
+
+7 Conclusions and Open Problems 
+In this paper we defned modules and the modular decomposition of FSMs, and showed how it can be computed. With these new concepts, there is naturally a number of unresolved questions which require further thought. 
+• 
+(Thinness) Almost all results in this paper required the modules to be thin. How much can be recovered when modules are not thin? Is there another refnement of the module concept other than thinness which broadens the applicability of these results? 
+
+• 
+(Modules and languages) Because we did not consider ‘accepting sets’ in this paper, we did not answer the question of how the modular decomposition relates to the language recognised by an automaton. This would be interesting to explore. 
+
+• 
+(Compressing HFSMs) In this paper, we assumed all states in an FSM were distinct. If we have an equivalence relation on states (such as membership in an accepting set, like that on DFAs) then HFSMs can be ‘compressed’ by merging identical nested HFSMs. As shown in [5], this allows HFSMs to be represented in logarithmic size, and model checking on such HFSMs can be done on the compressed representation. ‘Compressing’ an HFSM consists of merging identically labelled subtrees in the nesting tree. By Theorem 5.5, each basis module is associated with a contracted form FSM, so the modular decomposition could provide a starting point for compressing HFSMs by merging contracted forms. While we suspect (via a reduction to the smallest grammar problem [10]) that fnding the ‘most compressed’ HFSM is NP-hard, heuristic approaches may be useful in practice. 
+
+
+Acknowledgements 
+This work is partially supported by Defence Science and Technology Group, through agreement MyIP: ID10266 entitled “Hierarchical Verifcation of Autonomy Architectures” and the Australian Government, via grant AUSMURIB000001 associated with ONR MURI grant N00014-19-1-2571. 
+
+
+A Proofs 
+Theorem A.1 (Theorem 3.9). If Z and Y are accessible HFSMs, ZF and Y F are unique and Z ~= Y if and only if ZF = Y F . 
+Proof. Claim: for accessible FSMs U and V , U ~= V .. U = V . 
+If U = V , then clearly U ~= V . Now suppose U =6 V . There must exist a state q and symbol x .  such that dU (q, x) = dV (q, x). Let w . * be a word such that .U (w)= q or .V (w)= q. Such a w exists because both U and V are accessible. Assume w.l.o.g that .U (w)= q. If .V (w) = q, 
+~~
+then we are done and U = V . Otherwise .U (wx)= dU (q, x)=6 dV (q, x)= .V (wx), so U = V . Claim: let Z be an HFSM with an FSM Y nested in it. Then the HFSM Zˆ given by expanding Y in Z is equivalent to Z. 
+w
+Specifcally, if Z =(X, T ), Zˆ := ((X \{Y }) .{W · w Y },T ' ), where W
+Y is the arc to 
+' 
+Y in T . The nesting tree T of Zˆ is defned by 
+
+v 
+a = W · w Y, W b . A(T ) 
+
+v
+v 
+ab . A(T ' ) .. a = W · w Y, Y b . A(T ) 
+
+v 
+a = W · w Y, a b . A(T ) 
+.....
+We show that the hierarchical transition function .Z and .Zˆ are equal. Let x be a symbol and ˆ
+q a state of Z and Z (noting frst that they have the same state set). First, suppose q . Q(Y ). There exists a sequence of FSMs K1,...,Kn in Z and Zˆ such that q, Y, W, K1,...,Kn and q, W · w 
+' 
+Y, K1,...,Kn is the sequence of FSMs from q to the root in T and T respectively. If dY (q, x) exists, then dW · wY (q, x)= dY (q, x) by Def. 4.8 and so .Z (q, x) = start(dY (q, x)) = start(dWY (q, x)) = 
+· w 
+(q, x). If dY (q, x) does not exist but dW (w, x) does, then by Def. 4.8 dWY (q, x)= dW (w, x) and 
+.Zˆ · w so again .Z(q, x) = start(dW (w, x)) = .Zˆ (q, x). If neither exists, then dY (q, x) and dWY (q, x) do 
+· w 
+not exist and so .Z (q, x)= .Zˆ (q, x). 
+Now suppose that q . Q(Y ). If W is not on the path from the root to q in Z then .Z(q, x)= .Zˆ (q, x). Assume it is, and we fnd that again there are FSMs K1,...,Kn in Z and Zˆ such that 
+q 
+q K1 
+... 
+µ W or W · w Y 
+... 
+Kn
+k1 kn 
+where the only di erence in these paths is that the j-th item on this path is either W or W · w Y for Z and Zˆ respectively. If dKi (ki-1,x) exists for any i<j, then .Z (q, x)= . ˆ (q, x). Otherwise, 
+Z observe that by Def. 4.8 dW (µ, x) exists if and only if dWY (µ, x) exists, and if neither exists then 
+· w 
+.Z (q, x) cannot di er from .Zˆ (q, x). If they exist, then either dW (µ, x) = v =. dW · wY (µ, x)= dW (µ, x)=. .Z (q, x) = start(dW (µ, x)) = . ˆ or dW (µ, x)= v =. · wY (µ, x)= sY . But then 
+Z dW .Z (q, x) = start(v) = start(sY ) = start(dWY (µ, x)) = .Zˆ (q, x) by the recursive defnition of the 
+· w 
+start function. 
+Claim: For an HFSM Z, ZF ~= Z, and ZF is unique. 
+There exists a sequence of expansions of FSMs in Z which take Z to ZF . By the previous claim, it follows that ZF ~= Z. Then because fat FSMs are unique up to equivalence (the frst claim) ZF is unique. Claim: For HFSMs Z and Y , Z ~= Y .. ZF = Y F . 
+Since Z ~= ZF and Y ~= Y F , then Z =~ Y =. ZF =~ Z ~= Y =~ Y F =. ZF = Y F . Likewise, Z ~= Y =. ZF =~ Z =~6 Y ~= Y F =. ZF =6 Y F . 
+Theorem A.2 (Theorem 4.9). Let Z be a graph/FSM. A non-empty set M . Z is a module if and only if Z/M · M Z[M] ~= Z. 
+Proof. First, we prove this for graphs. Observe frst that the node sets of Z and Z/M · M Z[M] are the same. Suppose M is a module. We show that for any node v . Z, its neighbourhood in Z and Z/M · M Z[M] is the same, so these graphs are isomorphic. For any v, let NZ (v) be its neighbourhood in Z, NM (v) be its neighbourhood in Z[M], and let NMC (v) be its neighbourhood in Z \ M. If v . M is not adjacent to any nodes in M, then its neighbourhood is the same in Z and Z/M· M Z[M]. Now suppose v . M. By Defnition 4.3, NZ/M (M)= NMC (v), and NZ/M· M Z[M](v)= NZ/M (M). NZ[M](v) by defnition of expansion, so NZ/M· M Z[M](v)= NMC (v). NZ[M](v)= NZ (v) as required. Finally, suppose v is adjacent to a node in M. Then by Defnition 4.3, v is adjacent to all of M. Now, NZ(v)= NMC (v).NM (v). Then NZ/M (v)= NMC (v).{M} and NZ/M· M Z[M](v)= NMC (v) . M = NZ (v), again by defnition of expansion. Now we show that if M is not a module, then these graphs are not isomorphic. If M is not a module, then there exists a k which is adjacent to u . M and nonadjacent to v . M. However, as k is adjacent to some of u is it adjacent to M 
+~
+in Z/M, and so is adjacent to all of M in Z/M · M Z[M], and thus Z/M · M Z[M]=6 Z. 
+Second, we prove this for FSMs. We call this property (‡). First observe that the state sets Q(Z) and Q(Z/M · M Z[M]) are the same. (M is a module =. Z/M · M Z[M] ~= Z) 
+Let a be the start state of M. 
+
+x
+x
+• u, v . M: uv is an arc in Z/M · M Z[M]i uv is an arc in Z/M i 
+
+x 
+uv is an arc in Z. 
+
+x
+• u . M, v . M: Then v = a as M is a module. Thus, if uv is an arc in Z then 
+
+x 
+x
+x 
+uM is an arc in Z/M and thus ua = uv is an arc in Z/M · M Z[M]. 
+
+x
+x 
+x
+Similarly, uv = ua in Z/M · M Z[M] means that uM in Z/M, which implies there is an x-arc from u into M in Z, but all such arcs go to a = v. 
+
+x
+• u . M, v . M: Let uv be in Z. The state u has only one x-arc out of it in Z, 
+x 
+so it has no x-arc in Z[M] as v . M. Since M
+v is an arc in Z/M, we know in Z/M · M Z[M] all states in Z[M] without x-arcs now have arcs to v (defnition of expansion), 
+
+x
+x 
+so there is an arc uv . If uv is in Z/M · M Z[M], then there is an arc 
+
+x
+x
+Mv in Z/M and u cannot have an x-arc in Z[M]. Now Mv implies that 
+
+x
+there is a state k . M with kv in Z. If so, by Defnition 4.2 every state in M has an x-arc, including u, which is either internal to M or to v. u has no x-arc in Z[M] so its 
+
+x 
+x-arc in Z must be outside of M, so there is an arc uv in Z. 
+
+x
+x 
+x
+• u . M, v . M: If uv in Z, then uv in Z[M], and so uv in 
+
+x 
+x
+x
+Z/M · M Z[M]. If uv in Z/M · M Z[M], then uv in Z[M], and so uv in Z. 
+~
+(M is not a module =. Z/M · M Z[M] = Z) 
+Let M be a set with two distinct entrances. These cannot both be the start state of Z[M], so assume w.l.o.g. that v is not the start state of Z[M]. No arcs into M in Z/M · M Z[M] from outside M can go to v, as by defnition of expansion they all go to the start state of Z[M]. Thus the arc 
+
+x 
+~
+uv cannot exist in Z/M · M Z[M] and thus Z/M · M Z[M]=6 Z. Similarly suppose M has two distinct x-exits v and w. But then in Z/M the state M has two x-arcs, so this is not an FSM, 
+~
+and certainly Z/M · M Z[M]=6 Z. 
+Theorem A.3 (Theorem 4.11). Let Z be an FSM, X a module, and Y . X a subset of X. Then Y is a module of Z if and only if it is a module of Z[X]. 
+
+z
+Proof. Suppose Y is a module of Z. In Z[X] there is still one start state. Let ab be an arc in Z[X] with a . Y and b . X \ Y . Then this arc exists in Z and so as Y is a module we conclude every state in Y has a z-arc within Y or to b. All of these arcs exist in Z[X], so Y is a module of Z[X]. For the converse, observe frst that any arc into X from Z \ X goes to X’s start state. If this is also the start state of Y in Z[X], then all arcs into Y in Z go to a single state. Otherwise, all arcs into Y must come from X \ Y , and all such arcs go to Y ’s start state in Z[X], 
+
+z 
+so Y must have one start state in Z. Now consider an arc ac out of Y in Z. If c . X \ Y , then all states in Y have z-arcs to x or within Y , as Y is a module of Z[X]. If x . Z \ X, then as X is a module every state in X has an z-arc either within X or to c. Thus all states in Y have an z-arc either to c or within Y , and so Y is a module of Z. 
+Theorem A.4 (Theorem 4.14). Let Z be an FSM and X a module, and Y a superset of X. If X is thin, then Y is a thin module of Z if and only if Y/X is a thin module of Z/X. 
+Proof. Suppose Y is a thin module of Z. Y/X must still contain at most one entrance. Similarly, suppose Y has a z-exit. Then Y/X also has exactly one z-exit. In this case every state in Y has 
+an z-arc and Y has no z-cycles, by thinness. Thus X has no z-cycles and every state has an z-arc, so it has an z-exit, and so Y/X also has every state with a z-arc and has no z-cycles. Thus Y/X is a thin module. Now suppose Y/X is a thin module of Z/X. Again Y must have a single entrance, because Y/X and X both must have no more than a single entrance. Now, any z-exit of Y is a z-exit of Y/X, so Y has at most one. If there is a z-exit in Y/X, then every state has a z-arc, and so the state X has a z-arc. This means X has a z-exit in Z, and as a thin module we again have all states with a z-arc and there are no z-cycles. Thus all states in Y have z-arcs, and Y has no 
+z-cycles because neither Y/X nor X have z-cycles. Thus Y is a thin module of Z. Lemma A.5. Let M be a module with start state s in a FSM Z, with m . M and v . M. Every 
+
+
+Lemma A.6. If M is a module of an accessible FSM Z. All states in M are reachable from M’s start state s. 
+Proof. Z is accessible, so there is a path g
+m from the start state g of Z to any m . M. If g . M, then g = s and we are done. If g . M, then s is on any path g
+m by Lemma A.5, 
+so we have a subpath s
+m . 
+
+Lemma A.7. If M is a thin module in an FSM Z with v an x-exit of M, then every state in M has an x-path to v. 
+Proof. Every state in M has an x-arc, and M has a unique x-exit. The x-path out of any state is unique. Start at a state q . M. Let qx be the x-successor of q. If this is outside M, then qx = v as there is only one x-exit. If qx is in M, then repeat the argument. Because there are no x-cycles 
+in M, the x-path out of every state must take fnitely many steps to reach an x-exit of M. 
+
+Lemma A.8. Let Z be an FSM, and A and B overlapping thin modules. Then A . B is a thin module. 
+Proof. Let a and ß be the start states of A and B respectively, and let v be in A n B. Then there is a path a
+v within A. If a . B, then by Lemma A.5 this path passes through ß, so ß . A. Likewise, if ß . A then every path into A n B passes through a, and so we conclude that either a or ß is in A n B. One of these must receive an arc from outside A . B or must be the start state of Z, by accessibility, and so if both a and ß are in A n B then a = ß. Now assume w.l.o.g. that ß is the start state of A n B. Any arc into A . B goes to a or ß, and since ß . A all arcs must 
+
+x 
+go to a (a and ß may be the same state). Now consider an arc uw , with u . A . B and w . A . B. If u . A n B then by Lemma A.7 all x-arcs out of both A and B go to w. If u . A \ B 
+
+x
+then all x-arcs out of A go to w by Lemma A.7. The state v is in A, so there is a path vw 
+
+x
+within A. However v . B, so again by Lemma A.7 every state b . B has a path bw which is within A . B, and so all x-arcs out of A . B must go to w. The B \ A case is similar. Thus A . B 
+is a module. 
+
+Lemma A.9. Let A1,A2,...,An be an overlapping (Def. 3.1) collection of thin modules. Then H = A1 . ··· . An is a thin module and the start state of H is the unique state in H that is the start state of every Ai which contains it. 
+Proof. Suppose A overlaps B. By Lemma A.8, A . B is a module and its start state is either the start state of both modules or is only contained in one. This is the base case. Now assume that the overlapping union A1 . ··· . Am is a thin module, and B is a thin module overlapping Ai in this union. Let a and ß be the start states of A1 .··· . Am and B respectively. By the inductive hypothesis, a is the only state in A1 . ··· . Am which is the start state of all Ai which contain it in this union. Suppose that ß . A1 . ··· . Am. Then by Lemma A.8, B overlaps this module, and B . A1 .···. Am is a thin module whose start state is ß, which is contained in only B, while a must be in B but not the start state, so now ß is the only state that is the start state of all modules which contain it. Otherwise, ß . B . A1 .···. Am. In this case, if a . B then a = ß, and otherwise ß is contained in some Ai where it is not the start state, by the inductive hypothesis. In both cases, B . A1 .···. Am because if B doesn’t overlap A1 .···. Am it is contained within it. a is the start state of B . A1 .···. Am and is the only state that is the start state of all modules which contain it in this union. By the defnition of overlapping sets, for any Ai and Aj there is a path Aa1 ,Aa2 ,...,Aan where each overlaps the next pairwise, so we can iteratively add all modules to this union, completing the proof by induction. 
+Lemma A.10. Let A and B be overlapping thin modules in an accessible FSM Z. Then A n B is a module. 
+Proof. Suppose v . A n B, and let a and ß be the start states of A and B. By Lemma A.9 one of these is in the intersection, so assume w.l.o.g. that ß is in A n B. Any arc into A n B is in arc into 
+x
+B, so must go to ß. Any arc A n B
+v is either an arc out of A . B, in which case every state in A . B has an x-arc and v is the unique x-exit, or v . B \ A or A \ B. In the frst case, this is an arc out of A, and A is thin, so by Lemma A.7 A n B is thin and there is an x-arc from every state and v is the only x-exit. The second case is identical. Thus A n B is a module. 
+Theorem A.11 (Theorem 5.3). Let q be a state in an FSM Z that is not the start state. Defne reprZ (q) as the intersection of all thin modules M which contain q but where q is not the start state. Then reprZ (q) is a basis module, and for each basis module H there exists a q such that reprZ (q)= H. 
+Proof. We begin by proving the statement for an FSM Z, then we extend it to HFSMs. First, observe that for a given q, Q(Z) is a module containing q where it is not the start state, so this intersection is always non-empty. For any two modules A, B containing q as the start state of neither, by Lemma A.9 we know that q is not the start state of A n B. Thus repr(q) is a thin module by Lemma A.10 and is not a singleton because q is not its start state. Claim: repr(q) is indecomposable. 
+Suppose for contradiction that A1,...,An are overlapping modules with repr(q)= A1 .···.An. By Lemma A.9, the start state of repr(q) is the unique state which is the start state of every Ai which contains it. q is not the start state of repr(q), so there exists an Aj which contains q with q not its start state, but then by defnition of repr(q), repr(q) . Aj, which contradicts our assumption that A1,...,An are overlapping. Claim: For every basis module M, there exists a q such that repr(q)= M. 
+Let a be the start state of a basis module M, and let G1,...,Gm be those modules whose start state is in M but is not a, and let H1,...,Hn be all the indecomposable modules with start state a that do not properly contain M (and are not equal to M). If there is a state q = a in M but not any Hi or Gj , then M must be the smallest indecomposable module containing it where it is 
+not the start state, so repr(q)= M and we are done. If no such state exists, then 
+
+M . Hi . Gj ij 
+but then 
+
+M =(M n Hi) . (M n Gj ) 
+ij 
+Every M n Hi contains a, so they all overlap each other. However, as M is indecomposable, there is a collection of overlapping modules M n Gj1 ,...,M n Gjm which do not contain a and do not overlap any other M n Hi or M n Gj . The union of these are a module by Lemma A.8, and its start state (we call q) is the start state of any M n Gji which contains it (Lemma A.9). As q is also contained in no Hi we conclude that repr(q)= M. 
+For the HFSM case, observe that every HFSM module M corresponds to a module H in some constituent FSM Xi. Hence a module in an HFSM Z is a basis module if the associated module is a basis module of Xi. Let H be a basis module in Xi, with M the associated module of Z, and let q . Q(Xi) be a state with reprXi (q)= H. If q does not contain a nested FSM in Z, then it is a state of Z and any module in Z containing q where it is not the start state either contains all of Q(Xi) or corresponds to a module of Xi which contains q not the start state. Because reprXi (q)= H we get reprZ (q)= M. Otherwise, if an FSM Xj is nested in Xi at q. Then start(Xj ) is a state of Z, and as the start state of Xj it is the start state of all modules which contain it in Xj , and so reprZ (q) is equal to the intersection of modules of Xi which contain q, so again reprZ(q)= M. 
+Proposition A.12. Let F be a family of subsets of a fnite set X. If F is closed under unions of overlapping elements, then a set is in F if and only if it is a union of overlapping indecomposable elements of F . 
+Proof. One direction is trivial: by closure, overlapping unions of indecomposable elements are in F . For the other direction, we only need to show that decomposable elements can be formed as unions of only indecomposable ones. Suppose that A overlaps B and A . B overlaps C. Without loss of generality, A n B = Ø, so either A . C, in which case C overlaps B, or A overlaps B. In either case, {A, B, C} is an overlapping collection. If a set is decomposable it is a union of strictly smaller sets, and so by induction we can form each M as a union of indecomposable elements. Using the above argument inductively, this collection of sets must be overlapping, completing the proof. 
+Proposition A.13 (Unique decomposition). Let M be a thin module. Then there exists a unique set of overlapping basis modules A1,...,An where M = A1 .···. An and Ai . Aj for any i and j. 
+Proof. Let M be a thin module. We call a basis module H a maximal M-module if H . M and there does not exist a basis module K with H . K . M. By Proposition A.12 and Lemma A.8, M is the union of all the maximal M-modules. We show that these are an overlapping collection, and any other overlapping collection whose union is M must include all maximal M-modules. Claim: if K, H1,...,Hn are basis modules, and K . H1 . ··· . Hn, then K . Hi for some i. Suppose K . H1 . ··· . Hn. Then (H1 n K) . ··· . (Hn n K)= K. If Hi n K is non-empty, then it is a thin module (Lemma A.10). We show this is an overlapping collection of modules. Let a be the start state of H1 . ··· . Hn (Lemma A.8) and µ be the start state of K. Let m be in K, and let a
+m be a non-repeating path from a to m within K, which must exist by Lemma A.6. By 
+Lemma A.5, there exists a subpath µ
+m within K. Consider any arc a
+b on this path. By Lemma A.9, there exists a module Hk containing b of which b is not the start state. As 
+there is an arc from a to b, a must be in Hk. We conclude then that H1 n K, . . . , Hn n K must be overlapping, as every path from µ to any state in K passes through only overlapping modules. However, because K is indecomposable, we conclude that this union is trivial, that is K = Hi for some i. 
+Claim: If {H1,...,Hn,K1,...Km,M} is an overlapping collection, and Ki . M for all i and Hi . M for all i, then {H1,...,Hn,M} is also overlapping. For any Hi, Hj, there is a sequence Xi,Y1,...,Yn,Xj of pairwise overlapping sets with Yi .{H1,...,Hn,K1,...Km,M}. We want to show there exists such a sequence with Yi .{H1,...,Hn,M}. If Ki does not appear, we are done. Otherwise, let a and b be the indices of the frst and last sets in the sequence which are contained in 
+M. Because Ya-1 . M and overlaps Ya . M, we conclude that Ya-1 overlaps M and similarly Yb+1 overlaps M. Then the sequence Xi,Y1,...,Ya-1,Ya, M, Yb,Yb+1,...,Yn,Xj is pairwise overlapping and doesn’t contain any Ki. 
+Finally, suppose M = A1 . ··· . An. By the frst clain, if H is a maximal M-module, then H = Ai for some i, so this union contains all maximal M-modules. If it also contains some non-maximal M-modules, we can delete them while remaining an overlapping set whose union is M, so the set of maximal M-modules is the unique minimal overlapping set of basis modules whose union is M. 
+Propositions A.13 and A.12 together establish the second claim in Theorem 5.5. Lemma A.14 and Proposition A.15 establish the frst claim, which is that the modular decomposition is small. 
+Lemma A.14. In any accessible n-state FSM with n> 1, there are between n +1 and 2n - 1 indecomposable modules. 
+Proof. Firstly, Q(Z) is always a thin module and it has at least two nodes, and so either there is at least one basis module contained in it, or it is itself indecomposable. Also, each singleton is always trivially indecomposable. This gives the lower bound. By Theorem 5.3, each basis module H has a representative node q where repr(q)= H. This representative is not the start node of Z, so there are only n - 1 possible representatives and so at most 2n - 1 possible distinct indecomposable modules, proving the result. 
+Proposition A.15. If Z is an HFSM, then the modular decomposition T of Z has a linear number of nodes and arcs compared to Z. 
+Proof. Let K be an indecomposable module in Z, k the node of T corresponding to K, and d the in-degree of k. Claim: If d> 2, then there exist a collection of d symbols x1,...,xd in  such that every state in K has an x1-arc, an x2-arc, ... , an xd-arc. 
+Firstly, let M1,...,Md be indecomposable modules whose respective nodes in T are predecessors of k. By defnition of T , we know K . Mi for each i, and so K . id =1 Mi, and these modules are pairwise overlapping because (1) each contains K and (2) T is transitively reduced. By Lemma A.5, 
+
+there is a path g
+a1 
+µ where g is the start state of Z, a1 is the start state of Mi 
+
+and M1 (w.l.o.g) and µ is in Mi. The start states a2,...,ad of M2,...,Md must be on the path a1 
+µ . We show they are all the same state, a1. Because each Mi are basis modules which don’t contain each other, for each i .{2,...,d} there must be a symbol xi where the xi-path of µ goes to a state mi which is contained in Mi exclusively (and all states on this path are in Mi). 
+But since µ is in Mi, for any j, k in 1,...,d there is a xj-path mj
+xj mk . ak . M1, but 
+if ak = a1, then the path mj
+xj mk contains a1 (Lemma A.5) but a1 . Mk, which is a 
+
+contradiction. Thus a1 = a2 = ··· = ad. Also, as for the other xi, since a1 . Mi, there exists a state m1 in M1 exclusively, and a respective symbol x1 where the x1-path out of µ goes to m1. 
+
+K . Mi, so each state in K has a xi-arc for i .{1,...,d}. This proves the claim. 
+We call a module which doesn’t overlap any others a strong module, and for each state q, let S(q) denote the largest non-trivial strong thin module of which q is the start state. This is unique because strong modules do not overlap. Now, to each indecomposable K we will associate a set K of arcs of Z, as follows. If d = 2, then we defne K = Ø. If d> 2 and K is a singleton {r}, defne K as the x1,...,xd-arcs out of r, which exist by the previous claim. Otherwise d> 2 and K is a basis module, and we defne 
+
+
+xi
+K := ab | a . S(q),b . S(q),i .{1,...,d} 
+where q is a representative of K, so repr(q)= K (Theorem 5.3), and we fx a representative for each basis module. Di erent choices of representative q may lead to di erent sets K, but this won’t matter for the lower bound we seek to establish on the arcs of Z. Because S(q) doesn’t overlap K, by defnition, and q . S(q) n K, either K . S(q) or S(q) . K. If K . S(q), then by Lemma A.8 q would be the start state of K, which it isn’t because repr(q)= K (Theorem 5.3). Hence S(q) . K, and because S(q) is a thin module and q has x1,...,xd-arcs, S(q) must have x1,...,xd-exits by the previous claim, so K is well-defned. 
+We note two important facts from this defnition. Firstly, because S(q) . K, the tail of any 
+
+arc in K is always in K. Secondly, because S(q) . K . Mi, and the xi-path out of q goes to a node mi . Mi exclusively, the head of the xi-arc in K is always in Mi. Claim: If K and L are distinct indecomposable modules, then K n L = Ø. 
+This is trivially true if either K or L is empty, so we assume otherwise. If K and L are disjoint the result holds, since the tails of the arcs must be disjoint. Now suppose K and L overlap, which means that both are basis modules. Let q and l be representatives of K and L respectively. By defnition, S(q) and S(l) do not overlap. If S(q) . S(l), then because q . S(l) but not the start state we have K = repr(q) . S(l) . L, which contradicts the fact that K and L overlap, so we must have S(q) n S(l)= Ø, and so K n L = Ø. 
+If K and L are both singletons, then clearly K and L are disjoint. Now assume w.l.o.g. that L is a basis module with repr(l)= L, and K is either a basis module with representative q or q is its sole element. In the latter case we will also write S(q) for the singleton {q} to simplify the presentation. Now if S(q) and S(l) are disjoint we are done. By defnition, S(q) and S(l) do not overlap. If S(q) . S(l), then because q . S(l) but not the start state we have S(q) . K = repr(q) . S(l) . L. Since d = in-degree(K) > 2, we know there exists basis modules M1,...,Md containing K. Because these are the smallest basis modules containing K, we know that Mi . L for some i. If l . Mi, then l = a (start state of all Mi) because otherwise L = repr(l) . Mi. Because S(l) is the largest overlapping module with start state l, Mi . S(l) for all i. If l . Mi then because K . S(l) we must again have Mi . S(l) because S(l) does not overlap any modules and l . Mi. However, we established earlier that the head of each xi-arc in K is contained in Mi, and so is contained in S(l), and hence K and L are disjoint. 
+Finally we can prove the main claim of the theorem. For any K, d = 2+ |K | because either d = 2 or d> 2, in which case |K | = d, by defnition. Then 
+
+|A(T )| = in-degree(v) = (2 + |M |) = 2dim Z + |M |= 2 dim Z + |A(Z)| 
+v.N(T ) M in basis M in basis 
+by the fact that all the M s are disjoint sets of arcs in Z. By Lemma A.14, the dimension of Z is linear in the number of nodes and hence the number of arcs of Z, which completes the proof. 
+Finally, Lemma A.16 establishes the third claim of Theorem 5.5. 
+Lemma A.16. The map reprZ (q) . reprW (q) is a bijection between the bases of equivalent HFSMs Z and W , and the contracted forms of reprZ (q) and reprW (q) are equal up to state labels. 
+Proof. Let Z be an HFSM, and M a module. Let W be the HFSM where Z[M] is nested at M in Z/M. We demonstrate that reprZ(q) . reprW (q) is a one-to-one correspondence between the bases of Z and W . This is suÿcient to prove the whole theorem, because the equivalence between Z and ZF can be broken into a chain of such individual nestings, so by induction we obtain a one-to-one correspondence between Z and ZF , and hence between any two equivalent HFSMs, by Theorem 3.9. 
+The result is easy for basis modules which are subsets of M. A set H . M is a module of Z if and only if it is a module of Z[M] (by Theorem 4.11), and hence W , giving reprZ (q)= reprZ[M](q) = reprW (q). Likewise, if H . M, then by Theorem 4.14, H is a module of Z if and only if H/M is a module of Z/M. As an HFSM module H is a module of W if and only if H/M is a module of Z/M. Notice that the start states of these modules are also the same. (Claim: If reprW (q) contains M, then reprW (q) = reprZ (q) . M.) If reprW (q) contains M, all modules K in W with q . K but not the start state must contain M. Hence, each such K is also a module of Z, and again q is not the start state. By Theorem 5.3 and the claim above, 
+
+reprW (q)= H =(H . M)= M . H = reprZ (q) . M 
+H module of WH module of ZH module of Z q.Hq.Hq.H q not start state HnM=Ø q not start state q not start state 
+To show that reprZ (q) . reprW (q) is a bijection, it is suÿcient to show it is well-defned as a function in both directions, that is, if reprZ(q) = reprZ (h) then reprW (q) = reprW (h), and vice versa. Let q and h be distinct states. First, suppose reprZ (q) = reprZ(h). If reprZ (q) doesn’t overlap M, then reprZ (q) = reprW (q) = reprW (h) = reprZ(q). If reprZ (q) overlaps M, then reprW (q) = reprZ (q) . M = reprZ (h) . M = reprW (h). For the converse, suppose reprW (q)= reprW (h). If reprW (q) doesn’t contain M, then reprW (q) = reprW (h) = reprZ (h) = reprZ(q). Otherwise, reprZ (q) . M = reprZ (h) . M. Suppose for contradiction that reprZ(q)=6 reprZ (h). By Theorem 5.5, M = B1 . ··· . Bn, where Bi are basis modules, no two of which are contained in each other, by uniqueness. However, then reprZ (q) . B1 .···. Bn = reprZ (h) . B1 .···. Bn but this violates uniqueness (Theorem 5.5) because these are two distinct unions of overlapping basis modules, and no two contain each other. 
+Finally, we need to show that the contracted forms of reprZ (q) and reprW (q) are the same up to state labelling. We denote the contracted form of a module M by cf(M). As before, this is easy to prove if they are contained in M, because then reprZ(q) = reprW (q) = reprZ[M](q), and so cf(reprZ (q)) = cf(reprW (q)) = cf(reprZ[M](q)). Similarly, it is trivially true if they are disjoint from M. Now assume that reprW (q) contains M, and denote by H1,...Hn the maximal thin mod­ules contained in reprW (q), and these are disjoint, and cf(reprW (q)) = Z[reprW (q)]/H1,...,Hn. If reprZ (q) also contains M, then reprZ (q) = reprW (q) and so cf(reprW (q)) = Z[reprW (q)]/H1,...,Hn = cf(reprZ(q)) (up to state labels). Suppose instead that reprZ(q) overlaps M, in which case reprW (q)= reprZ (q) . M. However, observe that if H is a module which contains M, then Z[reprZ(q)]/H = Z[reprZ .M]/H and so by extension cf(reprW (q)) = Z[reprW (q)]/H1,...,Hn = Z[reprZ (q) . M]/H1,...,Hn = Z[reprZ(q)]/H1,...,Hn = cf(reprZ (q)) (again, up to state labels). 
+Theorem A.17 (Theorem 6.1). For q . Q(Z), we write .v q to denote the ancestors of q in Gv. Then .v q is a module, and a subset H . Z is a thin v-module if and only if there exist states 
+
+q1,...,qm . Q(Z) where H = .vqi.
+i.1,...,m 
+
+Proof. Claim: for any v-module H with b . H, if a
+b in Gv then a . H. 
+If b = v, then b has no predecessors in Gv, so this is true trivially. Now assume b = v. We can assume without loss of generality that there is an arc a
+b in Gv. As a result, either: 
+
+x
+• (a)( ab in Z): in this case a . H because b is not the start state of H. 
+
+x
+x
+• (b)( ba in Z, but there is no path va ): if a . H, then a would be the x-exit 
+
+x
+of H, but the lack of an x-path va contradicts Lemma A.7. Thus a . H. 
+
+x 
+x
+x
+• 
+(c)( bq in Z, q = v, and there is a path vaq ): if q . H, then a . H 
+
+as q = v. If q . H, then it is the x-exit of H, and by Lemma A.7 v’s x-path goes to q within H, and so a . H. 
+
+• 
+(d)(a = qx for some x, and b has no x-arc): b . H, so H must have no x-exits. As a result, all states q with an x-path vq must be within H. 
+
+
+By repeating this argument, we deduce that for any b . H, .vb . H. Let s be the start state of 
+Z. Using this claim, we see that if s = v and there is a path s
+b , then every v-module containing b contains s, but none contain s so b is in no v-modules. Thus all states removed from Gv on line 14 of Alg. 1 are in no v-modules. Claim: .v q is a thin module. 
+First we show v is the only entrance of .v q. If v = s we are trivially done. Otherwise, suppose for contradiction that l =6 v was an entrance of .v q. Then l has a predecessor p in Z that is not in .v q, but then there is a path to l which does not contain v, but then l is removed from G, so cannot be in .v q. 
+then the arc p
+l still exists in Gv (as l = v) and so p ..v q, which is a contradiction. 
+
+x
+Now let a ..v q, and let ab be an arc in Z, with b ..v q. Clearly b = v. Because 
+
+x
+x
+b ..v q, by Algorithm 1 there must be a path vtb in Z. By (c), either a = t or 
+x
+there is an arc t
+a in Gv, so all states on the path v
+t are in .v q. Hence any x-exit of .v q must be on the x-path out of v, and have all its predecessors on that path be within .v q. This proves that b is the unique x-exit, and so .v q is a thin module. 
+
+Since .v q is always a thin module, i .v qi is a collection of overlapping thin modules (they all contain v) and so is a thin module by Lemma A.8. For the converse, suppose H is a thin v-module. All states in H must be in Gv as the removed states are in no v-modules. Thus for every q . H, 
+
+.v q is a module contained in H, and so H = .v q. 
+q.H 
+Algorithm 3 is responsible for constructing the modular decomposition as a graph from the basis modules, iteratively. It uses a variant of breadth-frst-search on the modular decomposition which, given a basis module K to add to T , eÿciently locates the nodes tH representing modules H which are immediate successors of K in the inclusion order on indecomposable modules. It works by maintaining a queue Q with the invariant that each node in Q represents a module wholly contained in M. The queue is initialised with the singleton subsets of K, and the invariant is maintained by adding nodes to Q only once all of their predecessors have been visited (which guarantees that the modules they represent are subsets of K). We store the nodes tH visited which have no successors added to the queue in a set apices. These H are the immediate successors of K in the inclusion order, so we add arcs tK 
+tH to T . 
+Lemma A.18. Algorithm 3 works; given M, the arcs added out of tM are exactly those in the modular decomposition of Z. 
+Algorithm 3: AddModule 
+Input : An indecomposable module K, and a digraph T . Output: Modifes T to contain a node representing the module K. 1 Create new node tK, queue Q and set apices .Ø; 
+// Here tq is the node of T corresponding to state q of Z 2 Q . [tq for q in K]; 
+// value stores an integer for each node of T 3 value .{node . in-degree(node) for node in T }; 4 while Q is non-empty do 
+5 v . Q.pop(), flag . T rue; 6 for each predecessor p of v do 7 value[p] . value[p] - 1; 
+8 if index = 0 then 
+9 Q.push(p); 10 flag . F alse; 11 If flag is true, add v to apices; 
+12 For each apex in apices, add an arc tK 
+apex in T ; 
+Proof. In this proof, we write tK,tH ,tM to represent nodes of T corresponding to indecomposable modules K, H and M respectively. Recall that given indecomposable modules K and M, there is an arc tK 
+tM in T if K covers M, that is K . M and there is no indecomposable module H with K . H . M. Claim: When adding K to T , then for any module M covered by K, tM is already in T . 
+This follows from Theorem 6.2 where we proved that modules are constructed in an order compatible with the inclusion order. Claim: tM appears in Q if and only if M . K. 
+We proceed by induction on the length of the longest path from a sink of T to the node tM . The base case is the nodes tv corresponding to individual nodes of Z, and the claim holds for this case as Q is initialised to contain precisely these nodes. Now assume that for all nodes up to n steps from a sink, a node tM is added to Q if and only if M . K. Then let tH be a node which is n steps from a sink. H is the union of the modules corresponding to successors of tH , which are all at most n - 1 steps from a sink. If H . K, then all of its predecessors are added to Q, and as each is processed value[tH ] decreases by one, from its initial value which is equal to the number of predecessors of tH . Thus as the last predecessor of tH is processed, value[tH ] reaches zero and so tH is added to Q. Conversely, if H . K, then at least one of its predecessors is not in Q, so value[tH ] > 0 for the duration of the algorithm, so tH is never added to Q. This proves the claim. 
+It follows that every tM where K covers M is eventually visited, and these are precisely the nodes visited which have no predecessors added to Q, and so the flag variable remains true and so these nodes are exactly those added to apices. 
+Theorem A.19 (Theorem 6.2). Algorithm 2 works, i.e. the sets .v q added to T are exactly the basis modules of Z. 
+Proof. Let s be the start state of Z. Consider .v q, for any v and q, noting that either s ..v q or v = s. Let M be a v-module that contains q. By Theorem 6.1, M is the union of .v qi for some q1,...,qn. However, q . M implies that there exists an i with q ..v qi. By transitivity, 
+.vq ..vqi . M, and so 
+
+.vq = M 
+M thin module q.M v start state 
+Combining this result with Theorem 5.3, we deduce that for any state w = s, ] repr(w)= ..w, where s is the start state of repr(w). Similarly, every basis module H with start state v has a representative h with H = repr(h)=.vh. 
+Let v be the state on the current iteration of the outer loop of Algorithm 2, and let M = {v} be the strongly connected component of Gv on the current iteration of the inner loop. We will show by induction that for every q . M, q . used if and only if .v q is a basis module. It will follow that the sets we add to the modular decomposition are exactly the basis modules. Assume true for all iterations up to this point. 
+Firstly, suppose q . used. If repr(q)=.v q, then repr(q)=.u q for some u ..v q by the above. But then by Lemma A.5 every path from s to u contains v, and so u must precede v in every reverse breadth-frst-search of Z from s. By the inductive hypothesis, the basis module .u q has already been constructed, and q is already in used. Hence repr(q)=.v q, so .v q is indecomposable. 
+For the converse, suppose that q . M and .v q is indecomposable. For any other thin module H containing q where q is not the start state, repr(q) . H. If H has start state a = v, then H is constructed later in the reverse breadth-frst-search order. If M is a v-module, then either M = repr(q) or repr(q) . M, in which case M =.v h ..v q = repr(q), and so M is constructed after repr(q) as q precedes h in the topological order. Since q is added to used only when we add a basis module containing it to the modular decomposition, we conclude that q . used on this iteration. 
+
+References 
+[1] Alfred V. Aho, Michael R Garey, and Je rey D. Ullman. The transitive reduction of a directed graph. SIAM Journal on Computing, 1(2):131–137, 1972. 
+[2] Rajeev Alur, Michael Benedikt, Kousha Etessami, Patrice Godefroid, Thomas Reps, and Mi­halis Yannakakis. Analysis of recursive state machines. ACM Transactions on Programming Languages and Systems (TOPLAS), 27(4):786–818, 2005. 
+[3] Rajeev Alur, Thao Dang, Joel Esposito, Yerang Hur, Franjo Ivancic, Vijay Kumar, P Mishra, GJ Pappas, and Oleg Sokolsky. Hierarchical modeling and analysis of embedded systems. Proceedings of the IEEE, 91(1):11–28, 2003. 
+[4] Rajeev Alur, Radu Grosu, and Michael McDougall. Eÿcient reachability analysis of hierar­chical reactive machines. In International Conference on Computer Aided Verifcation, pages 280–295. Springer, 2000. 
+[5] Rajeev Alur and Mihalis Yannakakis. Model checking of hierarchical state machines. ACM SIGSOFT Software Engineering Notes, 23(6):175–188, 1998. 
+[6] Oliver Biggar, Mohammad Zamani, and Iman Shames. On modularity in reactive control architectures, with an application to formal verifcation. ACM Transactions on Cyber-Physical Systems (TCPS), 6(2):1–36, 2022. 
+[7] John Adrian Bondy, Uppaluri Siva Ramachandra Murty, et al. Graph theory with applications, volume 290. Macmillan London, 1976. 
+[8] Grady Booch, James Rumbaugh, and Ivar Jacobson. The Unifed Modeling Language User Guide. 
+[9] Binh-Minh Bui-Xuan. Tree-representation of set families in graph decompositions and eÿcient algorithms. PhD thesis, Universit´e Montpellier II-Sciences et Techniques du Languedoc, 2008. 
+[10] Moses Charikar, Eric Lehman, Ding Liu, Rina Panigrahy, Manoj Prabhakaran, Amit Sahai, and Abhi Shelat. The smallest grammar problem. IEEE Transactions on Information Theory, 51(7):2554–2576, 2005. 
+[11] Edmund M Clarke and Wolfgang Heinle. Modular translation of statecharts to smv. Technical report, Citeseer, 2000. 
+[12] Samuel Eilenberg. Automata, languages, and machines. Academic press, 1974. 
+[13] Harold N Gabow. Centroids, representations, and submodular fows. Journal of Algorithms, 18(3):586–628, 1995. 
+[14] Tibor Gallai. Transitiv orientierbare graphen. Acta Mathematica Hungarica, 18(1-2):25–66, 1967. 
+[15] Michel Habib and Christophe Paul. A survey of the algorithmic aspects of modular decompo­sition. Computer Science Review, 4(1):41–59, 2010. 
+[16] David Harel. Statecharts: A visual formalism for complex systems. Science of computer programming, 8(3):231–274, 1987. 
+[17] Juris Hartmanis. Algebraic structure theory of sequential machines. Prentice-Hall, Inc., 1966. 
+[18] Richard M Karp. Some techniques of state assignment for synchronous sequential machines. IEEE Transactions on Electronic Computers, (5):507–518, 1964. 
+[19] Zvi Kohavi and Edward J Smith. Decomposition of sequential machines. In 6th Annual Symposium on Switching Circuit Theory and Logical Design (SWCT 1965), pages 52–61. IEEE, 1965. 
+[20] Kenneth Krohn and John Rhodes. Algebraic theory of machines. i. prime decomposition theorem for fnite semigroups and machines. Transactions of the American Mathematical Society, 116:450–464, 1965. 
+[21] Karen Laster and Orna Grumberg. Modular model checking of software. In International Conference on Tools and Algorithms for the Construction and Analysis of Systems, pages 20–35. Springer, 1998. 
+[22] Ross M McConnell and Jeremy P Spinrad. Modular decomposition and transitive orientation. Discrete Mathematics, 201(1-3):189–241, 1999. 
+[23] Rolf H M¨ohring and Franz J Radermacher. Substitution decomposition for discrete structures and connections with combinatorial optimization. In North-Holland mathematics studies, vol­ume 95, pages 257–355. Elsevier, 1984. 
+[24] Edward F Moore. Gedanken-experiments on sequential machines. In Automata Studies.(AM­34), Volume 34, pages 129–154. Princeton University Press, 2016. 
+[25] Robert Tarjan. Depth-frst search and linear graph algorithms. SIAM journal on computing, 1(2):146–160, 1972. 
+[26] Peter Weiner and John E Hopcroft. Modular decomposition of synchronous sequential ma­chines. In 8th Annual Symposium on Switching and Automata Theory (SWAT 1967), pages 233–239. IEEE, 1967. 
+
+
