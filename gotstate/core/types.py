@@ -13,58 +13,61 @@ Design:
 """
 
 from enum import Enum, auto
-from typing import TypeVar, Dict, Any, Optional, Union, Callable
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, TypeVar, Union
 
 
 class StateType(Enum):
     """Defines the different types of states in the hierarchical state machine.
-    
+
     Used to distinguish between regular states, pseudostates, and special state types
     for proper behavioral implementation and validation.
     """
-    SIMPLE = auto()          # Leaf state with no substates
-    COMPOSITE = auto()       # State containing substates
-    SUBMACHINE = auto()      # Reference to another state machine
-    INITIAL = auto()         # Initial pseudostate
-    FINAL = auto()          # Final state
-    CHOICE = auto()         # Dynamic conditional branching
-    JUNCTION = auto()       # Static conditional branching
-    SHALLOW_HISTORY = auto() # Remembers only direct substate
-    DEEP_HISTORY = auto()    # Remembers full substate configuration
-    ENTRY_POINT = auto()    # Named entry point
-    EXIT_POINT = auto()     # Named exit point
-    TERMINATE = auto()      # Terminates entire state machine
+
+    SIMPLE = auto()  # Leaf state with no substates
+    COMPOSITE = auto()  # State containing substates
+    SUBMACHINE = auto()  # Reference to another state machine
+    INITIAL = auto()  # Initial pseudostate
+    FINAL = auto()  # Final state
+    CHOICE = auto()  # Dynamic conditional branching
+    JUNCTION = auto()  # Static conditional branching
+    SHALLOW_HISTORY = auto()  # Remembers only direct substate
+    DEEP_HISTORY = auto()  # Remembers full substate configuration
+    ENTRY_POINT = auto()  # Named entry point
+    EXIT_POINT = auto()  # Named exit point
+    TERMINATE = auto()  # Terminates entire state machine
 
 
 class TransitionKind(Enum):
     """Defines the different types of transitions in the state machine.
-    
+
     Used to determine the execution semantics and state exit/entry behavior
     for each transition type.
     """
+
     EXTERNAL = auto()  # Exits source state(s), enters target state(s)
     INTERNAL = auto()  # No state exit/entry, source must equal target
-    LOCAL = auto()     # Minimizes state exit/entry within composite state
+    LOCAL = auto()  # Minimizes state exit/entry within composite state
     COMPOUND = auto()  # Multiple segments with intermediate pseudostates
 
 
 class TransitionPriority(Enum):
     """Defines priority levels for transition conflict resolution.
-    
+
     Used to determine which transition takes precedence when multiple
     transitions are enabled simultaneously.
     """
-    HIGH = auto()    # Takes precedence over lower priorities
+
+    HIGH = auto()  # Takes precedence over lower priorities
     NORMAL = auto()  # Default priority level
-    LOW = auto()     # Yields to higher priority transitions
+    LOW = auto()  # Yields to higher priority transitions
 
 
-# Type variables for generic type hints
-State = TypeVar('State', bound='BaseState')
-Transition = TypeVar('Transition', bound='BaseTransition')
-Region = TypeVar('Region', bound='BaseRegion')
+# Type variables for generic type hints - using string literals for forward refs
+StateT = TypeVar("StateT")
+TransitionT = TypeVar("TransitionT")
+RegionT = TypeVar("RegionT")
 
 # Type aliases for common types
 StateData = Dict[str, Any]
 GuardFunction = Callable[[Dict[str, Any]], bool]
-EffectFunction = Callable[[Dict[str, Any]], None] 
+EffectFunction = Callable[[Dict[str, Any]], None]
