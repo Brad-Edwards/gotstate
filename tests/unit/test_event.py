@@ -333,6 +333,26 @@ class TestTimeEvent(unittest.TestCase):
         event.consume()
         self.assertFalse(event.can_consume())  # Non-repeating events can only be consumed once
 
+    def test_time_event_can_consume_expired(self):
+        """Test that expired time events cannot be consumed."""
+        event = TimeEvent(
+            event_id=self.event_id,
+            priority=self.event_priority,
+            data={"type": "after", "time": 100},
+        )
+        event.expire()
+        self.assertFalse(event.can_consume())
+
+    def test_time_event_can_consume_consumed(self):
+        """Test that consumed time events cannot be consumed again."""
+        event = TimeEvent(
+            event_id=self.event_id,
+            priority=self.event_priority,
+            data={"type": "after", "time": 100},
+        )
+        event.consume()
+        self.assertFalse(event.can_consume())
+
 
 class TestChangeEvent(unittest.TestCase):
     """Test cases for the ChangeEvent class."""
@@ -413,6 +433,24 @@ class TestChangeEvent(unittest.TestCase):
         self.assertTrue(event.can_consume())
         event.consume()
         self.assertFalse(event.can_consume())  # Change events can only be consumed once
+
+    def test_change_event_record_change_validation(self):
+        """Test change event history recording with validation."""
+        event = ChangeEvent(
+            event_id=self.event_id,
+            priority=self.event_priority,
+            data={"condition": "value_changed", "target": "test_var"},
+        )
+
+        # Record valid change
+        event.record_change(old_value=1, new_value=2)
+        self.assertEqual(len(event.history), 1)
+        self.assertEqual(event.history[0]["old_value"], 1)
+        self.assertEqual(event.history[0]["new_value"], 2)
+
+        # Record another change
+        event.record_change(old_value="old", new_value="new")
+        self.assertEqual(len(event.history), 2)
 
 
 class TestCompletionEvent(unittest.TestCase):
@@ -496,6 +534,22 @@ class TestCompletionEvent(unittest.TestCase):
             data={"state_id": "test_state", "region_id": "test_region", "completion_type": "do_activity"},
         )
         self.assertIsNone(event.result)
+
+    def test_completion_event_can_consume_consumed(self):
+        """Test that consumed completion events cannot be consumed again."""
+        event = CompletionEvent(
+            event_id=self.event_id,
+            priority=self.event_priority,
+            data={
+                "type": "do_activity",
+                "state_id": "test_state",
+                "region_id": "test_region",
+                "completion_type": "do_activity",
+                "result": None,
+            },
+        )
+        event.consume()
+        self.assertFalse(event.can_consume())
 
 
 class TestEventQueue(unittest.TestCase):
@@ -588,6 +642,50 @@ class TestEventQueue(unittest.TestCase):
         call_events = self.queue.filter(lambda e: e.kind == EventKind.CALL)
         self.assertEqual(len(call_events), 1)
         self.assertEqual(call_events[0], call_event)
+
+    def test_event_queue_clear(self):
+        """Test clearing the event queue."""
+        queue = EventQueue(max_size=5)
+        events = [Event(f"event_{i}", EventKind.SIGNAL, EventPriority.NORMAL) for i in range(3)]
+
+        # Add events to queue
+        for event in events:
+            queue.enqueue(event)
+        self.assertEqual(len(queue), 3)
+
+        # Clear queue
+        queue.clear()
+        self.assertEqual(len(queue), 0)
+        self.assertEqual(queue.dequeue(), None)
+
+    def test_event_queue_processing_state(self):
+        """Test event queue processing state management."""
+        queue = EventQueue()
+        self.assertFalse(queue.is_processing)
+
+        queue.start_processing()
+        self.assertTrue(queue.is_processing)
+
+        queue.stop_processing()
+        self.assertFalse(queue.is_processing)
+
+    def test_event_queue_full(self):
+        """Test behavior when event queue is full."""
+        queue = EventQueue(max_size=2)
+
+        # Fill queue
+        event1 = Event("event1", EventKind.SIGNAL, EventPriority.NORMAL)
+        event2 = Event("event2", EventKind.SIGNAL, EventPriority.NORMAL)
+        event3 = Event("event3", EventKind.SIGNAL, EventPriority.NORMAL)
+
+        queue.enqueue(event1)
+        queue.enqueue(event2)
+
+        # Try to enqueue to full queue
+        with self.assertRaises(ValueError):
+            queue.enqueue(event3)  # Should raise ValueError when queue is full
+
+        self.assertEqual(len(queue), 2)
 
 
 if __name__ == "__main__":

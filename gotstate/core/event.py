@@ -67,7 +67,11 @@ import time
 from dataclasses import dataclass
 from enum import Enum, auto
 from queue import PriorityQueue
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, Final, Generic, List, Optional, Protocol, Set, TypeVar, cast
+
+# Type variables for generic type parameters
+T = TypeVar("T", bound="Event")
+D = TypeVar("D", bound=Dict[str, Any])
 
 
 class EventKind(Enum):
@@ -89,10 +93,17 @@ class EventPriority(Enum):
     Used to determine event processing order in the queue.
     """
 
-    HIGH = auto()  # Processed before normal priority
-    NORMAL = auto()  # Default processing priority
-    LOW = auto()  # Processed after normal priority
-    DEFER = auto()  # Deferred until state exit
+    HIGH: Final = auto()  # Processed before normal priority
+    NORMAL: Final = auto()  # Default processing priority
+    LOW: Final = auto()  # Processed after normal priority
+    DEFER: Final = auto()  # Deferred until state exit
+
+
+# Protocol for event data validation
+class EventData(Protocol):
+    """Protocol defining the structure of event data."""
+
+    def copy(self) -> "EventData": ...
 
 
 class Event:
@@ -156,6 +167,15 @@ class Event:
     4. Limited concurrent processing
     5. Automatic timeout cleanup
     """
+
+    _id: str
+    _kind: EventKind
+    _priority: EventPriority
+    _data: Dict[str, Any]
+    _timeout: Optional[int]
+    _consumed: bool
+    _cancelled: bool
+    _creation_time: float
 
     def __init__(
         self,
@@ -286,6 +306,9 @@ class SignalEvent(Event):
     3. O(1) consumption status
     """
 
+    _broadcast: bool
+    _listeners: Set[str]
+
     def __init__(
         self,
         event_id: str,
@@ -303,7 +326,7 @@ class SignalEvent(Event):
         """
         super().__init__(event_id=event_id, kind=EventKind.SIGNAL, priority=priority, data=data, timeout=timeout)
         self._broadcast = True
-        self._listeners: Set[str] = set()
+        self._listeners = set()
 
     def can_consume(self) -> bool:
         """Check if the signal can be consumed.
@@ -367,6 +390,8 @@ class CallEvent(Event):
     2. O(p) parameter validation where p is parameter count
     3. O(1) return value handling
     """
+
+    _return_value: Any
 
     def __init__(
         self,
@@ -469,6 +494,9 @@ class TimeEvent(Event):
     3. O(1) cancellation
     """
 
+    _expired: bool
+    VALID_TIME_TYPES: Final[Set[str]] = {"after", "at"}
+
     def __init__(
         self,
         event_id: str,
@@ -494,7 +522,7 @@ class TimeEvent(Event):
         if "type" not in data:
             raise ValueError("Time event data must include 'type' parameter")
 
-        if data["type"] not in ["after", "at"]:
+        if data["type"] not in self.VALID_TIME_TYPES:
             raise ValueError("Time event type must be 'after' or 'at'")
 
         if "time" not in data:
@@ -571,7 +599,8 @@ class ChangeEvent(Event):
     3. O(h) history tracking where h is history size
     """
 
-    VALID_CONDITIONS = {"value_changed", "threshold_crossed", "state_changed", "range_violation"}
+    _history: List[Dict[str, Any]]
+    VALID_CONDITIONS: Final[Set[str]] = {"value_changed", "threshold_crossed", "state_changed", "range_violation"}
 
     def __init__(
         self,
@@ -608,7 +637,7 @@ class ChangeEvent(Event):
         data.setdefault("track_history", True)
 
         super().__init__(event_id=event_id, kind=EventKind.CHANGE, priority=priority, data=data, timeout=timeout)
-        self._history: List[Dict[str, Any]] = []
+        self._history = []
 
         # Record initial change if old and new values are provided
         if "old_value" in data and "new_value" in data:
@@ -671,7 +700,7 @@ class CompletionEvent(Event):
     3. O(1) status updates
     """
 
-    VALID_COMPLETION_TYPES = {"do_activity", "final"}
+    VALID_COMPLETION_TYPES: Final[Set[str]] = {"do_activity", "final"}
 
     def __init__(
         self,
@@ -728,7 +757,7 @@ class CompletionEvent(Event):
         return self.data.get("result")
 
 
-class EventQueue:
+class EventQueue(Generic[T]):
     """Manages event queuing and processing.
 
     EventQueue implements a priority-based event queue with
@@ -787,6 +816,11 @@ class EventQueue:
     5. Load shedding
     """
 
+    _queue: PriorityQueue[T]
+    _max_size: int
+    _processing: bool
+    _events: Dict[str, T]
+
     def __init__(self, max_size: int = 1000) -> None:
         """Initialize an EventQueue instance.
 
@@ -796,7 +830,7 @@ class EventQueue:
         self._queue = PriorityQueue()
         self._max_size = max_size
         self._processing = False
-        self._events: Dict[str, Event] = {}  # For O(1) lookup by ID
+        self._events = {}
 
     def __len__(self) -> int:
         """Get the number of events in the queue.
@@ -824,7 +858,7 @@ class EventQueue:
         """Stop event processing."""
         self._processing = False
 
-    def enqueue(self, event: Event) -> bool:
+    def enqueue(self, event: T) -> bool:
         """Add an event to the queue.
 
         Args:
@@ -849,7 +883,7 @@ class EventQueue:
         self._events[event.id] = event
         return True
 
-    def dequeue(self) -> Optional[Event]:
+    def dequeue(self) -> Optional[T]:
         """Remove and return the highest priority event.
 
         Returns:
@@ -873,7 +907,7 @@ class EventQueue:
 
         return None
 
-    def filter(self, predicate: Callable[[Event], bool]) -> List[Event]:
+    def filter(self, predicate: Callable[[T], bool]) -> List[T]:
         """Filter events using a predicate.
 
         Args:

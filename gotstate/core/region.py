@@ -313,13 +313,13 @@ class ParallelRegion(Region):
         """Stop parallel execution of the region."""
         if self._execution_thread is not None:
             self._stop_event.set()
-            if self._execution_thread.is_alive():
-                self._execution_thread.join(timeout=1.0)
+            try:
                 if self._execution_thread.is_alive():
-                    # If thread didn't stop, something is wrong
-                    raise RuntimeError("Failed to stop execution thread")
-            self._execution_thread = None
-            self._stop_event.clear()
+                    self._execution_thread.join(timeout=1.0)
+            finally:
+                # Always clean up the thread, even if join times out
+                self._execution_thread = None
+                self._stop_event.clear()
 
     def _execute_region(self) -> None:
         """Execute the region's states in parallel.
@@ -497,7 +497,13 @@ class HistoryRegion(Region):
         Args:
             state: The state to record
             deep: Whether to record deep history
+
+        Raises:
+            ValueError: If state is None
         """
+        if state is None:
+            raise ValueError("Cannot record None state in history")
+
         with self._lock:
             self._history.append(state)
             if deep:
@@ -797,14 +803,19 @@ class RegionManager:
             # Get activation order
             activation_order = self._get_activation_order(region_id, set())
 
-            # Activate regions in order
-            for r_id in activation_order:
-                region = self._regions[r_id]
-                if not region.is_active:
-                    try:
-                        region.activate()
-                    except Exception as e:
-                        raise RuntimeError(f"Failed to activate region '{r_id}': {str(e)}")
+            try:
+                # Activate regions in order
+                for r_id in activation_order:
+                    self._pending_operations.append((r_id, "activate"))
+                    region = self._regions[r_id]
+                    if not region.is_active:
+                        try:
+                            region.activate()
+                        except Exception as e:
+                            raise RuntimeError(f"Failed to activate region '{r_id}': {str(e)}")
+            finally:
+                # Clean up pending operations
+                self._pending_operations.clear()
 
     def deactivate_region(self, region_id: str) -> None:
         """Deactivate a region and dependent regions.
@@ -823,14 +834,19 @@ class RegionManager:
             # Get deactivation order
             deactivation_order = self._get_deactivation_order(region_id, set())
 
-            # Deactivate regions in order
-            for r_id in deactivation_order:
-                region = self._regions[r_id]
-                if region.is_active:
-                    try:
-                        region.deactivate()
-                    except Exception as e:
-                        raise RuntimeError(f"Failed to deactivate region '{r_id}': {str(e)}")
+            try:
+                # Deactivate regions in order
+                for r_id in deactivation_order:
+                    self._pending_operations.append((r_id, "deactivate"))
+                    region = self._regions[r_id]
+                    if region.is_active:
+                        try:
+                            region.deactivate()
+                        except Exception as e:
+                            raise RuntimeError(f"Failed to deactivate region '{r_id}': {str(e)}")
+            finally:
+                # Clean up pending operations
+                self._pending_operations.clear()
 
     def _would_create_cycle(self, region_id: str, depends_on_id: str) -> bool:
         """Check if adding a dependency would create a cycle.

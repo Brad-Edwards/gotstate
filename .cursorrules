@@ -35,7 +35,71 @@ The goal is to help you maintain a big picture as well as the progress of the ta
 
 # Scratchpad
 
-## Current Task: Fix Clippy Warnings
+## Current Task: Improve machine.py Test Coverage
+
+Current coverage: 79%
+Target: As close to 100% as possible
+Required: At least 95% (critical core component)
+
+Areas needing coverage:
+[ ] Initialization and configuration (lines 188-207)
+[ ] Error handling paths (468, 496, 503, 505, etc.)
+[ ] Component management (757-760, 771-780)
+[ ] State transitions and validations (862-863, 878)
+[ ] Resource management (1172-1176)
+[ ] Error recovery paths (1252-1258, 1265-1279)
+
+Strategy:
+
+1. Add tests for initialization edge cases
+   - Test abstract base class behavior
+   - Test invalid state transitions
+   - Test configuration validation failures
+
+2. Test error handling scenarios
+   - Component initialization failures
+   - Validation failures
+   - State transition errors
+   - Resource allocation failures
+
+3. Verify component lifecycle
+   - Component initialization sequence
+   - Component cleanup on failure
+   - Resource management during transitions
+
+4. Test state transition edge cases
+   - Invalid state transitions
+   - Concurrent transition attempts
+   - Transition rollbacks
+
+5. Validate resource management
+   - Resource allocation/deallocation
+   - Resource cleanup on errors
+   - Resource limits and constraints
+
+6. Test error recovery scenarios
+   - Cleanup after initialization failure
+   - Recovery from invalid states
+   - Component failure handling
+   - Resource leak prevention
+
+Progress tracking:
+[ ] Reach 85% coverage
+[ ] Reach 90% coverage
+[ ] Reach 95% coverage
+[ ] Review remaining uncovered paths
+
+## Previous Tasks
+
+### Fix Test Failures
+
+[X] Fixed test_validation_error_handling
+[X] Fixed test_protocol_error_handling
+[X] Fixed test_submachine_validation
+
+All tests passed but machine.py coverage needs improvement.
+
+### Fix Clippy Warnings
 
 [X] Fixed documentation indentation in blowfish.rs
 

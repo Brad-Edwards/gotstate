@@ -4,8 +4,12 @@ Tests the region management and parallel execution functionality.
 """
 
 import logging
+import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
+
+import pytest
 
 from gotstate.core.region import (
     HistoryRegion,
@@ -128,6 +132,19 @@ class TestRegion(unittest.TestCase):
         # Verify region is in a consistent state
         self.assertIn(self.region.status, [RegionStatus.ACTIVE, RegionStatus.INACTIVE])
 
+    def test_region_invalid_parent(self):
+        """Test region creation with invalid parent state."""
+        with pytest.raises(ValueError):
+            Region("test_region", None)
+
+    def test_region_invalid_id(self):
+        """Test region creation with invalid ID."""
+        mock_state = Mock()
+        with pytest.raises(ValueError):
+            Region("", mock_state)
+        with pytest.raises(ValueError):
+            Region(None, mock_state)
+
 
 class TestParallelRegion(unittest.TestCase):
     """Test cases for the ParallelRegion class."""
@@ -169,6 +186,35 @@ class TestParallelRegion(unittest.TestCase):
 
             # Verify thread was started
             mock_start.assert_called_once()
+
+    def test_parallel_region_execution_error(self):
+        """Test error handling during parallel region execution."""
+        mock_state = Mock()
+        region = ParallelRegion("test_region", mock_state)
+
+        with patch.object(region, "_start_execution") as mock_start:
+            mock_start.side_effect = RuntimeError("Execution failed")
+
+            with self.assertRaises(RuntimeError):
+                region.activate()
+
+            self.assertEqual(region.status, RegionStatus.ACTIVE)
+
+    def test_parallel_region_deactivation_during_execution(self):
+        """Test parallel region deactivation while executing."""
+        mock_state = Mock()
+        region = ParallelRegion("test_region", mock_state)
+
+        def mock_execute():
+            while not region._stop_event.is_set():
+                time.sleep(0.01)  # Shorter sleep and check stop event
+
+        with patch.object(region, "_execute_region", side_effect=mock_execute):
+            region.activate()
+            time.sleep(0.02)  # Give thread time to start
+            region.deactivate()  # Should stop cleanly now
+            assert region.status == RegionStatus.INACTIVE
+            assert region._execution_thread is None  # Verify thread cleanup
 
 
 class TestSynchronizationRegion(unittest.TestCase):
@@ -228,6 +274,26 @@ class TestSynchronizationRegion(unittest.TestCase):
 
         point.reset()
         self.assertFalse(point.is_complete)
+
+    def test_sync_point_invalid_participant(self):
+        """Test marking completion for invalid participant."""
+        mock_state = Mock()
+        region = SynchronizationRegion("test_region", mock_state)
+        sync_point = region.add_sync_point("test_point", ["state1", "state2"])
+
+        # Try to mark invalid participant as complete
+        region.mark_sync_complete("test_point", "invalid_state")
+        assert not sync_point.is_complete
+
+    def test_sync_point_duplicate_completion(self):
+        """Test marking same participant complete multiple times."""
+        mock_state = Mock()
+        region = SynchronizationRegion("test_region", mock_state)
+        sync_point = region.add_sync_point("test_point", ["state1", "state2"])
+
+        region.mark_sync_complete("test_point", "state1")
+        region.mark_sync_complete("test_point", "state1")  # Duplicate
+        assert len(sync_point._completed) == 1
 
 
 class TestHistoryRegion(unittest.TestCase):
@@ -299,6 +365,31 @@ class TestHistoryRegion(unittest.TestCase):
         self.region.clear_history()
         history = self.region.get_history()
         self.assertEqual(len(history), 0)
+
+    def test_history_state_recording_validation(self):
+        """Test history state recording validation."""
+        mock_state = Mock()
+        mock_substate = Mock()
+        region = HistoryRegion("test_region", mock_state)
+
+        # Test with valid state
+        mock_state.id = "test_state"
+        region.record_state(mock_state)
+        self.assertEqual(len(region._history), 1)
+
+        # Test with None state (should raise ValueError)
+        with self.assertRaises(ValueError):
+            region.record_state(None)  # Implementation should reject None states
+        self.assertEqual(len(region._history), 1)  # History length should not change
+
+    def test_deep_history_restoration_empty(self):
+        """Test deep history restoration when no history exists."""
+        mock_state = Mock()
+        region = HistoryRegion("test_region", mock_state)
+
+        state, substates = region.restore_deep_history()
+        assert state is None
+        assert len(substates) == 0
 
 
 class TestRegionManager(unittest.TestCase):
@@ -525,6 +616,75 @@ class TestRegionManager(unittest.TestCase):
 
         # Cleanup after thread test
         self.manager.cleanup()
+
+    def test_region_manager_resource_handling(self):
+        """Test region manager resource allocation and deallocation."""
+        manager = RegionManager()
+
+        # Allocate resource
+        resource = "test_resource"
+        manager.allocate_resource("res1", resource)
+        self.assertEqual(manager.get_resource("res1"), resource)
+
+        # Try to allocate duplicate
+        with self.assertRaises(ValueError):
+            manager.allocate_resource("res1", "another_resource")
+
+        # Deallocate
+        manager.deallocate_resource("res1")
+        with self.assertRaises(ValueError):  # Changed from KeyError to ValueError
+            manager.get_resource("res1")
+
+    def test_region_manager_dependency_validation(self):
+        """Test region manager dependency validation."""
+        manager = RegionManager()
+        mock_state = Mock()
+
+        region1 = Region("region1", mock_state)
+        region2 = Region("region2", mock_state)
+        region3 = Region("region3", mock_state)
+
+        manager.add_region(region1)
+        manager.add_region(region2)
+        manager.add_region(region3)
+
+        # Add valid dependencies
+        manager.add_dependency("region2", "region1")
+        manager.add_dependency("region3", "region2")
+
+        # Try to create cycle (should raise ValueError)
+        with self.assertRaises(ValueError):
+            manager.add_dependency("region1", "region3")
+
+        # Remove dependency
+        manager.remove_dependency("region2", "region1")
+
+        # Remove non-existent dependency (should raise ValueError)
+        with self.assertRaises(ValueError):
+            manager.remove_dependency("region1", "non_existent")
+
+    def test_region_manager_cleanup(self):
+        """Test region manager cleanup."""
+        manager = RegionManager()
+        mock_state = Mock()
+
+        # Add regions and resources
+        region1 = Region("region1", mock_state)
+        region2 = Region("region2", mock_state)
+        manager.add_region(region1)
+        manager.add_region(region2)
+        manager.allocate_resource("res1", "resource1")
+
+        # Add some dependencies
+        manager.add_dependency("region2", "region1")
+
+        # Cleanup
+        manager.cleanup()
+
+        # Verify everything is cleaned up
+        self.assertEqual(len(manager.active_regions), 0)
+        self.assertEqual(len(manager._resource_pool), 0)
+        self.assertEqual(len(manager._dependencies), 0)
 
 
 if __name__ == "__main__":
