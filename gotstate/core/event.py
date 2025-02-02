@@ -85,6 +85,7 @@ class EventKind(Enum):
     TIME = auto()  # Time-based events
     CHANGE = auto()  # Change notification events
     COMPLETION = auto()  # State completion events
+    STATE_CHANGE = auto()  # State transition events
 
 
 class EventPriority(Enum):

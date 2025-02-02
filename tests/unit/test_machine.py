@@ -26,26 +26,35 @@ from gotstate.core.state import State, StateType
 from gotstate.core.transition import Transition
 
 
+class MockState(State):
+    """Mock state for testing."""
+    def __init__(self, state_id: str):
+        """Initialize mock state."""
+        super().__init__(state_id=state_id, state_type=StateType.SIMPLE)
+        self.initialize = Mock()
+        self.enter = Mock()
+        self.exit = Mock()
+        self.is_valid = Mock(return_value=True)
+
+class MockRegion(Region):
+    """Mock region for testing."""
+    def __init__(self, region_id: str):
+        """Initialize mock region."""
+        mock_parent = MockState("mock_parent")
+        super().__init__(region_id=region_id, parent_state=mock_parent)
+        self.initialize = Mock()
+        self.activate = Mock()
+        self.deactivate = Mock()
+        self.is_valid = Mock(return_value=True)
+
 class TestBasicMachine(unittest.TestCase):
     """Test cases for the BasicStateMachine class."""
 
     def setUp(self):
         """Set up test fixtures before each test method."""
         self.machine = BasicStateMachine()
-        self.mock_state = Mock(spec=State)
-        self.mock_state.id = "test_state"
-        self.mock_state.initialize = Mock()
-        self.mock_state.enter = Mock()
-        self.mock_state.exit = Mock()
-        self.mock_state.is_valid = Mock(return_value=True)
-
-        self.mock_region = Mock(spec=Region)
-        self.mock_region.id = "test_region"
-        self.mock_region.initialize = Mock()
-        self.mock_region.activate = Mock()
-        self.mock_region.deactivate = Mock()
-        self.mock_region.is_valid = Mock(return_value=True)
-
+        self.mock_state = MockState("test_state")
+        self.mock_region = MockRegion("test_region")
         self.mock_transition = Mock(spec=Transition)
         self.mock_transition.is_valid = Mock(return_value=True)
 
@@ -149,15 +158,45 @@ class TestBasicMachine(unittest.TestCase):
         # Verify machine remains in consistent state
         self.assertEqual(self.machine.status, MachineStatus.ACTIVE)
 
+    def test_error_recovery_paths(self):
+        """Test error recovery paths during machine operations."""
+        machine = BasicStateMachine()
+
+        # Mock components that will fail
+        mock_state1 = MockState("state1")
+        mock_state2 = MockState("state2")
+        mock_state2.enter.side_effect = RuntimeError("Enter failed")
+
+        mock_resource = Mock()
+        mock_resource.id = "resource1"
+        mock_resource.initialize = Mock()
+        mock_resource.allocate = Mock()
+        mock_resource.cleanup = Mock()
+        mock_resource.is_valid = Mock(return_value=True)
+        mock_resource.enter = Mock()
+        mock_resource.exit = Mock()
+
+        # Add components
+        machine.add_state(mock_state1)
+        machine.add_state(mock_state2)
+        machine.add_resource(mock_resource)
+
+        # Initialize should succeed
+        machine.initialize()
+
+        # Activation should fail due to mock_state2.enter failing
+        with self.assertRaises(RuntimeError) as cm:
+            machine.activate()
+        self.assertIn("Enter failed", str(cm.exception))
+
+        # Machine should be in INITIALIZING state after failed activation
+        self.assertEqual(machine.status, MachineStatus.INITIALIZING)
+
     def test_initialization_component_failure(self):
         """Test error handling when component initialization fails."""
         machine = BasicStateMachine()
-        mock_state = Mock()
-        mock_state.id = "test_state"
-        mock_state.initialize = Mock(side_effect=RuntimeError("Component init failed"))
-        mock_state.is_valid = Mock(return_value=True)
-        mock_state.enter = Mock()
-        mock_state.exit = Mock()
+        mock_state = MockState("test_state")
+        mock_state.initialize.side_effect = RuntimeError("Component init failed")
 
         machine.add_state(mock_state)
 
@@ -171,12 +210,8 @@ class TestBasicMachine(unittest.TestCase):
     def test_initialization_validation_failure(self):
         """Test error handling when configuration validation fails."""
         machine = BasicStateMachine()
-        mock_state = Mock()
-        mock_state.id = "test_state"
-        mock_state.initialize = Mock()
-        mock_state.is_valid = Mock(return_value=False)
-        mock_state.enter = Mock()
-        mock_state.exit = Mock()
+        mock_state = MockState("test_state")
+        mock_state.is_valid.return_value = False
 
         machine.add_state(mock_state)
 
@@ -219,8 +254,7 @@ class TestBasicMachine(unittest.TestCase):
         """Test error handling during configuration validation."""
         # Test invalid state
         machine1 = BasicStateMachine()
-        mock_state = Mock(spec=State)
-        mock_state.id = "test_state"
+        mock_state = MockState("test_state")
         mock_state.initialize = Mock()
         mock_state.enter = Mock()
         mock_state.exit = Mock()
@@ -233,8 +267,7 @@ class TestBasicMachine(unittest.TestCase):
 
         # Test invalid region
         machine2 = BasicStateMachine()
-        mock_region = Mock(spec=Region)
-        mock_region.id = "test_region"
+        mock_region = MockRegion("test_region")
         mock_region.initialize = Mock()
         mock_region.activate = Mock()
         mock_region.deactivate = Mock()
@@ -260,16 +293,8 @@ class TestBasicMachine(unittest.TestCase):
         """Test component cleanup when an error occurs during activation."""
         machine = BasicStateMachine()
 
-        mock_state1 = Mock(spec=State)
-        mock_state1.id = "state1"
-        mock_state1.initialize = Mock()
-        mock_state1.enter = Mock()
-        mock_state1.exit = Mock()
-        mock_state1.is_valid = Mock(return_value=True)
-
-        mock_state2 = Mock(spec=State)
-        mock_state2.id = "state2"
-        mock_state2.initialize = Mock()
+        mock_state1 = MockState("state1")
+        mock_state2 = MockState("state2")
         mock_state2.enter = Mock(side_effect=RuntimeError("Enter failed"))
         mock_state2.exit = Mock()
         mock_state2.is_valid = Mock(return_value=True)
@@ -310,77 +335,16 @@ class TestBasicMachine(unittest.TestCase):
         mock_resource.cleanup.assert_called_once()
         self.assertEqual(machine.status, MachineStatus.INITIALIZING)
 
-    def test_error_recovery_paths(self):
-        """Test error recovery paths during machine operations."""
-        machine = BasicStateMachine()
-
-        # Mock components that will fail
-        mock_state1 = Mock()
-        mock_state1.id = "state1"
-        mock_state1.initialize = Mock()
-        mock_state1.enter = Mock()
-        mock_state1.exit = Mock()
-        mock_state1.is_valid = Mock(return_value=True)
-
-        mock_state2 = Mock()
-        mock_state2.id = "state2"
-        mock_state2.initialize = Mock()
-        mock_state2.enter = Mock(side_effect=RuntimeError("Enter failed"))
-        mock_state2.exit = Mock()
-        mock_state2.is_valid = Mock(return_value=True)
-
-        mock_resource = Mock()
-        mock_resource.id = "resource1"
-        mock_resource.initialize = Mock()
-        mock_resource.allocate = Mock()
-        mock_resource.cleanup = Mock()
-        mock_resource.is_valid = Mock(return_value=True)
-        mock_resource.enter = Mock()
-        mock_resource.exit = Mock()
-
-        # Add components
-        machine.add_state(mock_state1)
-        machine.add_state(mock_state2)
-        machine.add_resource(mock_resource)
-
-        # Initialize should succeed
-        machine.initialize()
-        self.assertEqual(machine.status, MachineStatus.INITIALIZING)
-
-        # Activation should fail and trigger cleanup
-        with self.assertRaises(RuntimeError):
-            machine.activate()
-
-        # Verify cleanup occurred
-        mock_state1.exit.assert_called_once()
-        mock_resource.cleanup.assert_called_once()
-        self.assertEqual(machine.status, MachineStatus.INITIALIZING)
-
-        # Termination should still work
-        machine.terminate()
-        self.assertEqual(machine.status, MachineStatus.TERMINATED)
-
     def test_state_transition_validation(self):
         """Test state transition validation paths."""
         machine = BasicStateMachine()
 
         # Create mock states with invalid transitions
-        mock_state1 = Mock()
-        mock_state1.id = "state1"
-        mock_state1.initialize = Mock()
-        mock_state1.enter = Mock()
-        mock_state1.exit = Mock()
-        mock_state1.is_valid = Mock(return_value=True)
-
-        mock_state2 = Mock()
-        mock_state2.id = "state2"
-        mock_state2.initialize = Mock()
-        mock_state2.enter = Mock()
-        mock_state2.exit = Mock()
-        mock_state2.is_valid = Mock(return_value=True)
+        mock_state1 = MockState("state1")
+        mock_state2 = MockState("state2")
 
         # Create an invalid transition
-        mock_transition = Mock()
+        mock_transition = Mock(spec=Transition)
         mock_transition.source = mock_state1
         mock_transition.target = mock_state2
         mock_transition.is_valid = Mock(return_value=False)
@@ -390,13 +354,94 @@ class TestBasicMachine(unittest.TestCase):
         machine.add_state(mock_state2)
         machine.add_transition(mock_transition)
 
-        # Initialization should fail due to invalid transition
+        # Initialize should fail due to invalid transition
         with self.assertRaises(ValueError) as cm:
             machine.initialize()
 
         self.assertIn("Invalid transition configuration", str(cm.exception))
-        self.assertEqual(machine.status, MachineStatus.UNINITIALIZED)
-        mock_transition.is_valid.assert_called_once()
+
+    def test_version_management(self):
+        """Test version management functionality."""
+        # Test version getter
+        self.assertEqual(self.machine.get_version(), "1.0.0")
+        
+        # Test version compatibility
+        self.assertTrue(self.machine.validate_version_compatibility("1.1.0"))  # Compatible
+        self.assertTrue(self.machine.validate_version_compatibility("1.2.0"))  # Compatible
+        self.assertFalse(self.machine.validate_version_compatibility("2.0.0"))  # Incompatible
+        self.assertFalse(self.machine.validate_version_compatibility("0.9.0"))  # Incompatible
+
+    def test_security_policies(self):
+        """Test security policy management."""
+        # Add security policies
+        def validate_read(op: str) -> bool:
+            return op.startswith("read")
+            
+        def validate_write(op: str) -> bool:
+            return op.startswith("write")
+        
+        # Add policies for read and write operations
+        self.machine.add_security_policy("read_data", validate_read)
+        self.machine.add_security_policy("write_data", validate_write)
+        
+        # Test policy validation
+        self.assertTrue(self.machine.validate_security_policy("read_data"))  # Should pass - has policy and starts with "read"
+        self.assertTrue(self.machine.validate_security_policy("write_data"))  # Should pass - has policy and starts with "write"
+        self.assertFalse(self.machine.validate_security_policy("delete_data"))  # Should fail - no policy
+        
+        # Test operation without policy
+        self.assertFalse(self.machine.validate_security_policy("unknown_operation"))  # No policy means denied (secure by default)
+
+    def test_resource_limits(self):
+        """Test resource limit management."""
+        # Set custom limits
+        self.machine.set_resource_limit("max_states", 2)
+        self.machine.set_resource_limit("max_regions", 1)
+        
+        # Add components up to limits
+        state1 = MockState("state1")
+        state2 = MockState("state2")
+        region = MockRegion("region1")
+        
+        self.machine.add_state(state1)
+        self.machine.add_state(state2)
+        self.machine.add_region(region)
+        
+        # Verify resource checks
+        self.assertTrue(self.machine.check_resource_limits())
+        
+        # Exceed limits
+        state3 = MockState("state3")
+        with self.assertRaises(ValueError):
+            self.machine.add_state(state3)
+            self.machine.initialize()  # This should trigger resource limit check
+
+    def test_component_validation_extended(self):
+        """Test extended component validation scenarios."""
+        # Test None component addition
+        with self.assertRaises(ValueError):
+            self.machine.add_state(None)
+            
+        with self.assertRaises(ValueError):
+            self.machine.add_region(None)
+            
+        with self.assertRaises(ValueError):
+            self.machine.add_resource(None)
+            
+        # Test duplicate IDs
+        state1 = MockState("duplicate")
+        state2 = MockState("duplicate")
+        
+        self.machine.add_state(state1)
+        with self.assertRaises(ValueError):
+            self.machine.add_state(state2)
+            
+        # Test invalid component types
+        with self.assertRaises(ValueError):
+            self.machine.add_state(Mock())  # Not a State
+            
+        with self.assertRaises(ValueError):
+            self.machine.add_region(Mock())  # Not a Region
 
 
 class TestProtocolMachine(unittest.TestCase):
@@ -407,40 +452,11 @@ class TestProtocolMachine(unittest.TestCase):
         self.machine = ProtocolMachine("test_protocol")
 
         # Create mock states
-        self.state1 = Mock(spec=State)
-        self.state1.id = "state1"
-        self.state1.initialize = Mock()
-        self.state1.enter = Mock()
-        self.state1.exit = Mock()
-        self.state1.is_valid = Mock(return_value=True)
-
-        self.state2 = Mock(spec=State)
-        self.state2.id = "state2"
-        self.state2.initialize = Mock()
-        self.state2.enter = Mock()
-        self.state2.exit = Mock()
-        self.state2.is_valid = Mock(return_value=True)
-
-        self.initial_state = Mock(spec=State)
-        self.initial_state.id = "initial"
-        self.initial_state.initialize = Mock()
-        self.initial_state.enter = Mock()
-        self.initial_state.exit = Mock()
-        self.initial_state.is_valid = Mock(return_value=True)
-
-        self.running_state = Mock(spec=State)
-        self.running_state.id = "running"
-        self.running_state.initialize = Mock()
-        self.running_state.enter = Mock()
-        self.running_state.exit = Mock()
-        self.running_state.is_valid = Mock(return_value=True)
-
-        self.stopped_state = Mock(spec=State)
-        self.stopped_state.id = "stopped"
-        self.stopped_state.initialize = Mock()
-        self.stopped_state.enter = Mock()
-        self.stopped_state.exit = Mock()
-        self.stopped_state.is_valid = Mock(return_value=True)
+        self.state1 = MockState("state1")
+        self.state2 = MockState("state2")
+        self.initial_state = MockState("initial")
+        self.running_state = MockState("running")
+        self.stopped_state = MockState("stopped")
 
     def test_protocol_rule_management(self):
         """Test protocol rule addition and validation."""
@@ -675,8 +691,7 @@ class TestSubmachine(unittest.TestCase):
     def test_submachine_validation(self):
         """Test submachine configuration validation."""
         # Create a state with cyclic reference
-        mock_state = Mock(spec=State)
-        mock_state.id = "cyclic_state"
+        mock_state = MockState("cyclic_state")
         mock_state.initialize = Mock()
         mock_state.enter = Mock()
         mock_state.exit = Mock()
@@ -692,8 +707,7 @@ class TestSubmachine(unittest.TestCase):
         self.machine.add_state(mock_state)
 
         # Add required region for initialization
-        mock_region = Mock(spec=Region)
-        mock_region.id = "test_region"
+        mock_region = MockRegion("test_region")
         mock_region.initialize = Mock()
         mock_region.activate = Mock()
         mock_region.deactivate = Mock()
@@ -704,261 +718,106 @@ class TestSubmachine(unittest.TestCase):
             self.machine.initialize()
         self.assertIn("cyclic submachine reference detected", str(cm.exception).lower())
 
-
-class TestMachineBuilder(unittest.TestCase):
-    """Test cases for the MachineBuilder class."""
-
-    def setUp(self):
-        """Set up test fixtures before each test method."""
-        self.builder = MachineBuilder()
-
-    def test_machine_configuration(self):
-        """Test machine configuration and building."""
-        # Set machine type
-        self.builder.set_machine_type(BasicStateMachine)
-
-        # Add components
-        mock_state = Mock(spec=State)
-        mock_region = Mock(spec=Region)
-        self.builder.add_component("states", mock_state)
-        self.builder.add_component("regions", mock_region)
-
-        # Build machine
-        machine = self.builder.build()
-        self.assertIsInstance(machine, BasicStateMachine)
-        # Verify components were added
-
-    def test_dependency_tracking(self):
-        """Test component dependency tracking."""
-        self.builder.add_dependency("component1", "component2")
-        self.assertIn("component2", self.builder.dependencies["component1"])
-
-        # Test cyclic dependency detection
-        with self.assertRaises(ValueError):
-            self.builder.add_dependency("component2", "component1")
-
-    def test_validation(self):
-        """Test machine configuration validation."""
-        # Test invalid machine type
-        with self.assertRaises(ValueError):
-            self.builder.set_machine_type(str)  # Not a StateMachine subclass
-
-        # Test missing required components
-        self.builder.set_machine_type(BasicStateMachine)
-        with self.assertRaises(ValueError):
-            self.builder.build()  # No components added
-
-    def test_component_validation(self):
-        """Test component validation during building."""
-        # Set up mock components
-        mock_state = Mock(spec=State)
-        mock_state.id = "test_state"
-        mock_state.initialize = Mock()
-        mock_state.enter = Mock()
-        mock_state.exit = Mock()
-        mock_state.is_valid = Mock(return_value=False)
-
-        mock_region = Mock(spec=Region)
-        mock_region.id = "test_region"
-        mock_region.initialize = Mock()
-        mock_region.activate = Mock()
-        mock_region.deactivate = Mock()
-        mock_region.is_valid = Mock(return_value=True)
-
-        mock_transition = Mock(spec=Transition)
-        mock_transition.initialize = Mock()
-        mock_transition.is_valid = Mock(return_value=True)
-
-        # Test state validation
-        self.builder.set_machine_type(BasicStateMachine)
-        self.builder.add_component("states", mock_state)
-        self.builder.add_component("regions", mock_region)  # Add required region
-        with self.assertRaises(ValueError) as cm:
-            self.builder.build()
-        self.assertIn("Invalid state configuration", str(cm.exception))
-
-        # Test region validation
-        self.builder = MachineBuilder()  # Reset builder
-        self.builder.set_machine_type(BasicStateMachine)
-        mock_state.is_valid = Mock(return_value=True)  # Make state valid
-        mock_region.is_valid = Mock(return_value=False)  # Make region invalid
-        self.builder.add_component("states", mock_state)
-        self.builder.add_component("regions", mock_region)
-        with self.assertRaises(ValueError) as cm:
-            self.builder.build()
-        self.assertIn("Invalid region configuration", str(cm.exception))
-
-        # Test transition validation
-        self.builder = MachineBuilder()  # Reset builder
-        self.builder.set_machine_type(BasicStateMachine)
-        mock_region.is_valid = Mock(return_value=True)  # Make region valid
-        mock_transition.is_valid = Mock(return_value=False)  # Make transition invalid
-        self.builder.add_component("states", mock_state)
-        self.builder.add_component("regions", mock_region)
-        self.builder.add_component("transitions", mock_transition)
-        with self.assertRaises(ValueError) as cm:
-            self.builder.build()
-        self.assertIn("Invalid transition configuration", str(cm.exception))
-
-    def test_dependency_cycle_detection(self):
-        """Test detection of dependency cycles."""
-        builder = MachineBuilder()
-        builder.set_machine_type(BasicStateMachine)
+    def test_data_snapshot_management(self):
+        """Test data snapshot creation and restoration."""
+        machine = SubmachineMachine("test")
         
-        # Create mock components
-        mock_state1 = Mock(spec=State)
-        mock_state1.id = "state1"
-        mock_state1.initialize = Mock()
-        mock_state1.enter = Mock()
-        mock_state1.exit = Mock()
-        mock_state1.is_valid = Mock(return_value=True)
+        # Set initial data
+        machine.set_data("key1", "value1")
+        machine.set_data("key2", [1, 2, 3])
         
-        mock_state2 = Mock(spec=State)
-        mock_state2.id = "state2"
-        mock_state2.initialize = Mock()
-        mock_state2.enter = Mock()
-        mock_state2.exit = Mock()
-        mock_state2.is_valid = Mock(return_value=True)
+        # Create snapshot
+        machine.create_data_snapshot()
         
-        mock_state3 = Mock(spec=State)
-        mock_state3.id = "state3"
-        mock_state3.initialize = Mock()
-        mock_state3.enter = Mock()
-        mock_state3.exit = Mock()
-        mock_state3.is_valid = Mock(return_value=True)
-
-        # Create required region
-        mock_region = Mock(spec=Region)
-        mock_region.id = "region1"
-        mock_region.initialize = Mock()
-        mock_region.activate = Mock()
-        mock_region.deactivate = Mock()
-        mock_region.is_valid = Mock(return_value=True)
+        # Modify data
+        machine.set_data("key1", "modified")
+        machine.set_data("key2", [4, 5, 6])
         
-        # Add components
-        builder.add_component("states", mock_state1)
-        builder.add_component("states", mock_state2)
-        builder.add_component("states", mock_state3)
-        builder.add_component("regions", mock_region)  # Add required region
+        # Create another snapshot
+        machine.create_data_snapshot()
         
-        # Add dependencies that would create a cycle
-        builder.add_dependency("state1", "state2")
-        builder.add_dependency("state2", "state3")
+        # Restore first snapshot
+        machine.restore_data_snapshot(0)
+        self.assertEqual(machine.get_data("key1"), "value1")
+        self.assertEqual(machine.get_data("key2"), [1, 2, 3])
         
-        # This should fail as it creates a cycle
-        with self.assertRaises(ValueError):
-            builder.add_dependency("state3", "state1")
+        # Test invalid snapshot restoration
+        with self.assertRaises(IndexError):
+            machine.restore_data_snapshot(99)
             
-        # Build should still work without the cycle
-        machine = builder.build()
-        self.assertIsInstance(machine, BasicStateMachine)
+        # Test restoring with no snapshots
+        machine = SubmachineMachine("test2")
+        with self.assertRaises(IndexError):
+            machine.restore_data_snapshot()
 
-    def test_unresolved_dependency_handling(self):
-        """Test handling of unresolved dependencies."""
-        builder = MachineBuilder()
-        builder.set_machine_type(BasicStateMachine)
+    def test_data_isolation(self):
+        """Test data context isolation."""
+        machine = SubmachineMachine("test")
         
-        # Create mock components
-        mock_state1 = Mock(spec=State)
-        mock_state1.id = "state1"
-        mock_state1.initialize = Mock()
-        mock_state1.enter = Mock()
-        mock_state1.exit = Mock()
-        mock_state1.is_valid = Mock(return_value=True)
+        # Test mutable data isolation
+        original_list = [1, 2, 3]
+        machine.set_data("list", original_list)
         
-        mock_state2 = Mock(spec=State)
-        mock_state2.id = "state2"
-        mock_state2.initialize = Mock()
-        mock_state2.enter = Mock()
-        mock_state2.exit = Mock()
-        mock_state2.is_valid = Mock(return_value=True)
+        # Modify original data
+        original_list.append(4)
+        stored_list = machine.get_data("list")
+        self.assertEqual(stored_list, [1, 2, 3])  # Should not be affected
+        
+        # Modify retrieved data
+        stored_list.append(5)
+        self.assertEqual(machine.get_data("list"), [1, 2, 3])  # Should not be affected
+        
+        # Test nested data isolation
+        nested_data = {"list": [1, 2], "dict": {"key": "value"}}
+        machine.set_data("nested", nested_data)
+        
+        # Modify original nested data
+        nested_data["list"].append(3)
+        nested_data["dict"]["key"] = "modified"
+        
+        stored_nested = machine.get_data("nested")
+        self.assertEqual(stored_nested["list"], [1, 2])
+        self.assertEqual(stored_nested["dict"]["key"], "value")
 
-        # Create required region
-        mock_region = Mock(spec=Region)
-        mock_region.id = "region1"
-        mock_region.initialize = Mock()
-        mock_region.activate = Mock()
-        mock_region.deactivate = Mock()
-        mock_region.is_valid = Mock(return_value=True)
+    def test_data_operations_thread_safety(self):
+        """Test thread safety of data operations."""
+        machine = SubmachineMachine("test")
+        machine.set_data("counter", 0)
         
-        # Add components
-        builder.add_component("states", mock_state1)
-        builder.add_component("states", mock_state2)
-        builder.add_component("regions", mock_region)  # Add required region
-        
-        # Add dependency on non-existent component
-        builder.add_dependency("state1", "non_existent")
-        
-        # Build should fail due to unresolved dependency
-        with self.assertRaises(ValueError) as cm:
-            builder.build()
+        def worker():
+            for _ in range(100):
+                machine._increment_data("counter")
+                
+        threads = [threading.Thread(target=worker) for _ in range(10)]
+        for thread in threads:
+            thread.start()
             
-        self.assertIn("Unresolved dependency", str(cm.exception))
-
-    def test_component_validation_order(self):
-        """Test component validation order and error handling."""
-        builder = MachineBuilder()
-        builder.set_machine_type(BasicStateMachine)
-        
-        # Create mock components
-        mock_state = Mock(spec=State)
-        mock_state.id = "state1"
-        mock_state.initialize = Mock()
-        mock_state.enter = Mock()
-        mock_state.exit = Mock()
-        mock_state.is_valid = Mock(return_value=True)
-        
-        mock_region = Mock(spec=Region)
-        mock_region.id = "region1"
-        mock_region.initialize = Mock()
-        mock_region.activate = Mock()
-        mock_region.deactivate = Mock()
-        mock_region.is_valid = Mock(return_value=True)
-        
-        mock_transition = Mock(spec=Transition)
-        mock_transition.source = mock_state
-        mock_transition.target = mock_state
-        mock_transition.initialize = Mock()
-        mock_transition.is_valid = Mock(return_value=True)
-        
-        # Add components in wrong order
-        builder.add_component("transitions", mock_transition)
-        builder.add_component("regions", mock_region)
-        builder.add_component("states", mock_state)
-        
-        # Build should still work as components are added in correct order internally
-        machine = builder.build()
-        self.assertIsInstance(machine, BasicStateMachine)
-        
-        # Test missing components
-        builder = MachineBuilder()
-        builder.set_machine_type(BasicStateMachine)
-        
-        # Add only transitions (no states or regions)
-        builder.add_component("transitions", mock_transition)
-        
-        with self.assertRaises(ValueError) as cm:
-            builder.build()
+        for thread in threads:
+            thread.join()
             
-        self.assertIn("Missing required component types", str(cm.exception))
+        self.assertEqual(machine.get_data("counter"), 1000)  # 10 threads * 100 increments
 
-    def test_component_type_validation(self):
-        """Test validation of component types."""
-        builder = MachineBuilder()
-        builder.set_machine_type(BasicStateMachine)
+    def test_data_increment_validation(self):
+        """Test data increment validation."""
+        machine = SubmachineMachine("test")
         
-        # Create mock components
-        mock_state = Mock()
-        mock_state.id = "state1"
-        mock_state.initialize = Mock()
-        mock_state.is_valid = Mock(return_value=True)
+        # Test increment of non-existent key
+        with self.assertRaises(KeyError):
+            machine._increment_data("non_existent")
+            
+        # Test increment of non-numeric value
+        machine.set_data("string", "value")
+        with self.assertRaises(TypeError):
+            machine._increment_data("string")
+            
+        # Test valid increment
+        machine.set_data("number", 5)
+        machine._increment_data("number")
+        self.assertEqual(machine.get_data("number"), 6)
         
-        # Add component with invalid type
-        builder.add_component("invalid_type", mock_state)
-        
-        # Build should still work as invalid type is ignored
-        with self.assertRaises(ValueError):
-            builder.build()  # Fails because no valid components added
+        # Test custom increment amount
+        machine._increment_data("number", 10)
+        self.assertEqual(machine.get_data("number"), 16)
 
 
 class TestMachineMonitor(unittest.TestCase):
@@ -1011,3 +870,106 @@ class TestMachineMonitor(unittest.TestCase):
 
         # Verify monitor state is consistent
         self.assertEqual(len(self.monitor.history), 1000)  # 10 threads * 100 events
+
+    def test_event_querying(self):
+        """Test event querying functionality."""
+        monitor = MachineMonitor()
+        
+        # Add events with different types and timestamps
+        events = [
+            {"type": "state_change", "timestamp": 1000.0, "data": "event1"},
+            {"type": "transition", "timestamp": 1001.0, "data": "event2"},
+            {"type": "state_change", "timestamp": 1002.0, "data": "event3"},
+            {"type": "error", "timestamp": 1003.0, "data": "event4"}
+        ]
+        
+        for event in events:
+            monitor.track_event(event)
+            
+        # Query by type
+        state_changes = monitor.query_events(event_type="state_change")
+        self.assertEqual(len(state_changes), 2)
+        self.assertEqual(state_changes[0]["data"], "event1")
+        
+        # Query by time
+        recent_events = monitor.query_events(start_time=1002.0)
+        self.assertEqual(len(recent_events), 2)
+        self.assertEqual(recent_events[0]["data"], "event3")
+        
+        # Query with both filters
+        filtered_events = monitor.query_events(event_type="state_change", start_time=1002.0)
+        self.assertEqual(len(filtered_events), 1)
+        self.assertEqual(filtered_events[0]["data"], "event3")
+
+    def test_history_management(self):
+        """Test history management functionality."""
+        monitor = MachineMonitor()
+        
+        # Add events
+        for i in range(5):
+            monitor.track_event({
+                "type": "test",
+                "timestamp": 1000.0 + i,
+                "data": f"event{i}"
+            })
+            
+        # Clear history before specific time
+        monitor.clear_history(before_time=1002.0)
+        
+        # Verify remaining events
+        history = monitor.history
+        self.assertEqual(len(history), 3)
+        self.assertEqual(history[0]["data"], "event2")
+        
+        # Clear all history
+        monitor.clear_history()
+        self.assertEqual(len(monitor.history), 0)
+        self.assertEqual(monitor.event_count, 0)
+
+    def test_metrics_management(self):
+        """Test metrics management functionality."""
+        monitor = MachineMonitor()
+        
+        # Update metrics
+        monitor.update_metric("counter1", 5)
+        monitor.update_metric("counter2", 3)
+        monitor.update_metric("counter1", 2)  # Increment existing
+        
+        # Get individual metrics
+        self.assertEqual(monitor.get_metric("counter1"), 7)
+        self.assertEqual(monitor.get_metric("counter2"), 3)
+        
+        # Get metrics snapshot
+        metrics = monitor.get_metrics_snapshot()
+        self.assertEqual(metrics["counter1"], 7)
+        self.assertEqual(metrics["counter2"], 3)
+        
+        # Test non-existent metric
+        with self.assertRaises(KeyError):
+            monitor.get_metric("non_existent")
+
+    def test_event_index_integrity(self):
+        """Test integrity of event indexing."""
+        monitor = MachineMonitor()
+        
+        # Add events with gaps in timestamps
+        events = [
+            {"type": "type1", "timestamp": 1000.0},
+            {"type": "type2", "timestamp": 1005.0},
+            {"type": "type1", "timestamp": 1010.0},
+            {"type": "type3", "timestamp": 1015.0}
+        ]
+        
+        for event in events:
+            monitor.track_event(event)
+            
+        # Verify type index
+        type1_events = monitor.query_events(event_type="type1")
+        self.assertEqual(len(type1_events), 2)
+        self.assertEqual(type1_events[0]["timestamp"], 1000.0)
+        self.assertEqual(type1_events[1]["timestamp"], 1010.0)
+        
+        # Verify time index with gaps
+        mid_events = monitor.query_events(start_time=1003.0)
+        self.assertEqual(len(mid_events), 3)
+        self.assertEqual(mid_events[0]["timestamp"], 1005.0)

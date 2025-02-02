@@ -33,7 +33,128 @@ The goal is to help you maintain a big picture as well as the progress of the ta
 - Use 'gpt-4o' as the model name for OpenAI's GPT-4 with vision capabilities
 - When debugging, especially for tests, keep track of problems and solutions in the scratchpad so you do not make the same mistake again or go in circles.
 
+## Debugging and Testing
+
+- When debugging failing tests you MUST do a step by step analysis of the code under tests
+- You MUST continue the step by step analysis even after you find a problem. There may be more.
+- You MUST articulate theory of the problem and the solution before you write a fix for a failing unit test.
+- You MUST consider knock-on effects of a fix.
+
 # Scratchpad
+
+## Current Task: Fix Test Failures in test_machine.py
+
+### Analysis of Test Failures (Updated)
+
+1. Event Queue Issues (7 failures):
+   - test_event_error_handling
+   - test_event_processing
+   - test_event_processing_extended
+   - test_event_processing_monitoring
+   - test_event_queue_processing
+   - test_monitor_integration
+   - test_protocol_event_handling
+   All failing with: "RuntimeError: Failed to queue event"
+
+2. Cleanup Issues (2 failures):
+   - test_base_cleanup
+   - test_base_cleanup_error_handling
+   Both failing with: "AssertionError: Expected 'cleanup' to have been called once. Called 0 times"
+
+### Root Cause Analysis
+
+1. Event Queue Failures:
+   - We've added mock event attributes but enqueue is still failing
+   - Need to check EventQueue implementation for additional requirements
+   - Need to verify event processing start/stop logic
+
+2. Cleanup Failures:
+   - Cleanup methods not being called on components
+   - Need to verify cleanup implementation in base class
+   - Need to check component lifecycle management
+
+### Action Plan
+
+[ ] Phase 1: Fix Event Queue Issues
+
+- Check EventQueue implementation
+- Verify event processing start/stop logic
+- Add debug logging to trace event flow
+
+[ ] Phase 2: Fix Cleanup Issues
+
+- Review cleanup implementation
+- Add proper component lifecycle management
+- Ensure cleanup is called in correct order
+
+### Progress Tracking
+
+Current Status: Analyzing Event Queue Issues
+Next Step: Check EventQueue implementation
+
+Let's first look at the EventQueue implementation to understand why events are failing to queue:
+
+## Current Task: Fix Validation in machine.py
+
+### Analysis of Test Failures
+
+1. Component Validation Issues:
+
+- Multiple tests failing due to "No components added to machine"
+- Tests expect different validation behavior for different scenarios
+- Resource management tests affected by validation
+
+2. Design Requirements:
+
+- Must maintain semantic consistency
+- Must enforce configuration
+- Must handle component coordination
+- Must manage resources properly
+
+3. Current Implementation Issues:
+
+- Component existence check too early
+- Resources not considered as components
+- Validation phases not properly ordered
+- Submachine cases not handled correctly
+
+4. Test Requirements:
+
+- Should fail with no components
+- Should require both states and regions
+- Should provide specific error messages
+- Should handle resources properly
+
+### Action Plan
+
+[ ] Phase 1: Restructure Validation
+
+- Move component existence check to appropriate phase
+- Consider resources in validation
+- Update error messages to be more specific
+
+[ ] Phase 2: Update Validation Order
+
+- Implement proper validation phases
+- Handle submachine specific cases
+- Maintain thread safety
+
+[ ] Phase 3: Fix Test Cases
+
+- Address each failing test
+- Verify error messages
+- Check edge cases
+
+[ ] Phase 4: Verify Design Requirements
+
+- Check semantic consistency
+- Verify component coordination
+- Validate resource management
+
+### Progress Tracking
+
+Current Status: Analysis Phase
+Next Step: Implement validation restructuring
 
 ## Current Task: Improve machine.py Test Coverage
 

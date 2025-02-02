@@ -1,0 +1,1064 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.8, pytest-8.3.4, pluggy-1.5.0 -- /home/atomik/src/gotstate/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/atomik/src/gotstate
+configfile: pytest.ini
+plugins: anyio-4.8.0, cov-6.0.0, asyncio-0.25.2
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function
+collecting ... collected 47 items
+
+tests/unit/test_machine.py::TestBasicMachine::test_activation_error_handling FAILED [  2%]
+tests/unit/test_machine.py::TestBasicMachine::test_component_cleanup_on_error FAILED [  4%]
+tests/unit/test_machine.py::TestBasicMachine::test_component_management FAILED [  6%]
+tests/unit/test_machine.py::TestBasicMachine::test_component_management_extended PASSED [  8%]
+tests/unit/test_machine.py::TestBasicMachine::test_error_recovery_extended PASSED [ 10%]
+tests/unit/test_machine.py::TestBasicMachine::test_error_recovery_paths FAILED [ 12%]
+tests/unit/test_machine.py::TestBasicMachine::test_event_processing FAILED [ 14%]
+tests/unit/test_machine.py::TestBasicMachine::test_event_processing_extended PASSED [ 17%]
+tests/unit/test_machine.py::TestBasicMachine::test_initialization_cleanup PASSED [ 19%]
+tests/unit/test_machine.py::TestBasicMachine::test_initialization_component_failure PASSED [ 21%]
+tests/unit/test_machine.py::TestBasicMachine::test_initialization_configuration PASSED [ 23%]
+tests/unit/test_machine.py::TestBasicMachine::test_initialization_validation_extended PASSED [ 25%]
+tests/unit/test_machine.py::TestBasicMachine::test_initialization_validation_failure PASSED [ 27%]
+tests/unit/test_machine.py::TestBasicMachine::test_invalid_lifecycle_transitions FAILED [ 29%]
+tests/unit/test_machine.py::TestBasicMachine::test_machine_lifecycle FAILED [ 31%]
+tests/unit/test_machine.py::TestBasicMachine::test_monitor_integration PASSED [ 34%]
+tests/unit/test_machine.py::TestBasicMachine::test_resource_allocation_failure FAILED [ 36%]
+tests/unit/test_machine.py::TestBasicMachine::test_resource_management FAILED [ 38%]
+tests/unit/test_machine.py::TestBasicMachine::test_resource_management_cleanup FAILED [ 40%]
+tests/unit/test_machine.py::TestBasicMachine::test_resource_management_extended FAILED [ 42%]
+tests/unit/test_machine.py::TestBasicMachine::test_state_transition_validation PASSED [ 44%]
+tests/unit/test_machine.py::TestBasicMachine::test_termination_error_handling FAILED [ 46%]
+tests/unit/test_machine.py::TestBasicMachine::test_thread_safety FAILED  [ 48%]
+tests/unit/test_machine.py::TestBasicMachine::test_validation_error_handling PASSED [ 51%]
+tests/unit/test_machine.py::TestProtocolMachine::test_protocol_error_handling PASSED [ 53%]
+tests/unit/test_machine.py::TestProtocolMachine::test_protocol_error_recovery PASSED [ 55%]
+tests/unit/test_machine.py::TestProtocolMachine::test_protocol_event_handling PASSED [ 57%]
+tests/unit/test_machine.py::TestProtocolMachine::test_protocol_operation_validation PASSED [ 59%]
+tests/unit/test_machine.py::TestProtocolMachine::test_protocol_operation_validation_extended PASSED [ 61%]
+tests/unit/test_machine.py::TestProtocolMachine::test_protocol_rule_management PASSED [ 63%]
+tests/unit/test_machine.py::TestProtocolMachine::test_protocol_sequence_validation PASSED [ 65%]
+tests/unit/test_machine.py::TestProtocolMachine::test_protocol_state_transitions PASSED [ 68%]
+tests/unit/test_machine.py::TestSubmachine::test_data_context PASSED     [ 70%]
+tests/unit/test_machine.py::TestSubmachine::test_lifecycle_coordination FAILED [ 72%]
+tests/unit/test_machine.py::TestSubmachine::test_parent_reference_management PASSED [ 74%]
+tests/unit/test_machine.py::TestSubmachine::test_submachine_validation PASSED [ 76%]
+tests/unit/test_machine.py::TestMachineBuilder::test_component_type_validation PASSED [ 78%]
+tests/unit/test_machine.py::TestMachineBuilder::test_component_validation PASSED [ 80%]
+tests/unit/test_machine.py::TestMachineBuilder::test_component_validation_order PASSED [ 82%]
+tests/unit/test_machine.py::TestMachineBuilder::test_dependency_cycle_detection PASSED [ 85%]
+tests/unit/test_machine.py::TestMachineBuilder::test_dependency_tracking PASSED [ 87%]
+tests/unit/test_machine.py::TestMachineBuilder::test_machine_configuration PASSED [ 89%]
+tests/unit/test_machine.py::TestMachineBuilder::test_unresolved_dependency_handling PASSED [ 91%]
+tests/unit/test_machine.py::TestMachineBuilder::test_validation PASSED   [ 93%]
+tests/unit/test_machine.py::TestMachineMonitor::test_event_tracking PASSED [ 95%]
+tests/unit/test_machine.py::TestMachineMonitor::test_metrics PASSED      [ 97%]
+tests/unit/test_machine.py::TestMachineMonitor::test_thread_safety PASSED [100%]
+
+=================================== FAILURES ===================================
+_______________ TestBasicMachine.test_activation_error_handling ________________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_activation_error_handling>
+
+    def test_activation_error_handling(self):
+        """Test error handling during activation."""
+        self.machine.add_state(self.mock_state)
+>       self.machine.initialize()
+
+tests/unit/test_machine.py:194: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c165f710>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+                    raise ValueError("No components added to machine")
+    
+                # Phase 2: Component-specific validation
+                # Validate states
+                invalid_states = [state for state in self._states.values() if not state.is_valid()]
+                if invalid_states:
+                    raise ValueError("Invalid state configuration")
+    
+                # Validate regions
+                invalid_regions = [region for region in self._regions.values() if not region.is_valid()]
+                if invalid_regions:
+                    raise ValueError("Invalid region configuration")
+    
+                # Validate transitions
+                invalid_transitions = [trans for trans in self._transitions if not trans.is_valid()]
+                if invalid_transitions:
+                    raise ValueError("Invalid transition configuration")
+    
+                # Phase 3: Component requirements validation
+                missing_components = []
+                if isinstance(self, (BasicStateMachine, SubmachineMachine)) and not isinstance(self, ProtocolMachine):
+                    if not self._states:
+                        missing_components.append("states")
+                    if not self._regions:
+                        missing_components.append("regions")
+                elif isinstance(self, ProtocolMachine) and not self._states:
+                    missing_components.append("states")
+    
+                if missing_components:
+>                   raise ValueError(f"Missing required component types: {', '.join(missing_components)}")
+E                   ValueError: Missing required component types: regions
+
+gotstate/core/machine.py:821: ValueError
+_______________ TestBasicMachine.test_component_cleanup_on_error _______________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_component_cleanup_on_error>
+
+    def test_component_cleanup_on_error(self):
+        """Test component cleanup when an error occurs during activation."""
+        machine = BasicStateMachine()
+    
+        mock_state1 = Mock(spec=State)
+        mock_state1.id = "state1"
+        mock_state1.initialize = Mock()
+        mock_state1.enter = Mock()
+        mock_state1.exit = Mock()
+        mock_state1.is_valid = Mock(return_value=True)
+    
+        mock_state2 = Mock(spec=State)
+        mock_state2.id = "state2"
+        mock_state2.initialize = Mock()
+        mock_state2.enter = Mock(side_effect=RuntimeError("Enter failed"))
+        mock_state2.exit = Mock()
+        mock_state2.is_valid = Mock(return_value=True)
+    
+        machine.add_state(mock_state1)
+        machine.add_state(mock_state2)
+>       machine.initialize()
+
+tests/unit/test_machine.py:279: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c168c560>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+                    raise ValueError("No components added to machine")
+    
+                # Phase 2: Component-specific validation
+                # Validate states
+                invalid_states = [state for state in self._states.values() if not state.is_valid()]
+                if invalid_states:
+                    raise ValueError("Invalid state configuration")
+    
+                # Validate regions
+                invalid_regions = [region for region in self._regions.values() if not region.is_valid()]
+                if invalid_regions:
+                    raise ValueError("Invalid region configuration")
+    
+                # Validate transitions
+                invalid_transitions = [trans for trans in self._transitions if not trans.is_valid()]
+                if invalid_transitions:
+                    raise ValueError("Invalid transition configuration")
+    
+                # Phase 3: Component requirements validation
+                missing_components = []
+                if isinstance(self, (BasicStateMachine, SubmachineMachine)) and not isinstance(self, ProtocolMachine):
+                    if not self._states:
+                        missing_components.append("states")
+                    if not self._regions:
+                        missing_components.append("regions")
+                elif isinstance(self, ProtocolMachine) and not self._states:
+                    missing_components.append("states")
+    
+                if missing_components:
+>                   raise ValueError(f"Missing required component types: {', '.join(missing_components)}")
+E                   ValueError: Missing required component types: regions
+
+gotstate/core/machine.py:821: ValueError
+__________________ TestBasicMachine.test_component_management __________________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_component_management>
+
+    def test_component_management(self):
+        """Test adding and managing machine components."""
+>       self.machine.initialize()
+
+tests/unit/test_machine.py:87: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c168e4e0>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+>                   raise ValueError("No components added to machine")
+E                   ValueError: No components added to machine
+
+gotstate/core/machine.py:792: ValueError
+__________________ TestBasicMachine.test_error_recovery_paths __________________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_error_recovery_paths>
+
+    def test_error_recovery_paths(self):
+        """Test error recovery paths during machine operations."""
+        machine = BasicStateMachine()
+    
+        # Mock components that will fail
+        mock_state1 = Mock()
+        mock_state1.id = "state1"
+        mock_state1.initialize = Mock()
+        mock_state1.enter = Mock()
+        mock_state1.exit = Mock()
+        mock_state1.is_valid = Mock(return_value=True)
+    
+        mock_state2 = Mock()
+        mock_state2.id = "state2"
+        mock_state2.initialize = Mock()
+        mock_state2.enter = Mock(side_effect=RuntimeError("Enter failed"))
+        mock_state2.exit = Mock()
+        mock_state2.is_valid = Mock(return_value=True)
+    
+        mock_resource = Mock()
+        mock_resource.id = "resource1"
+        mock_resource.initialize = Mock()
+        mock_resource.allocate = Mock()
+        mock_resource.cleanup = Mock()
+        mock_resource.is_valid = Mock(return_value=True)
+        mock_resource.enter = Mock()
+        mock_resource.exit = Mock()
+    
+        # Add components
+        machine.add_state(mock_state1)
+        machine.add_state(mock_state2)
+        machine.add_resource(mock_resource)
+    
+        # Initialize should succeed
+>       machine.initialize()
+
+tests/unit/test_machine.py:347: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c168fa10>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+                    raise ValueError("No components added to machine")
+    
+                # Phase 2: Component-specific validation
+                # Validate states
+                invalid_states = [state for state in self._states.values() if not state.is_valid()]
+                if invalid_states:
+                    raise ValueError("Invalid state configuration")
+    
+                # Validate regions
+                invalid_regions = [region for region in self._regions.values() if not region.is_valid()]
+                if invalid_regions:
+                    raise ValueError("Invalid region configuration")
+    
+                # Validate transitions
+                invalid_transitions = [trans for trans in self._transitions if not trans.is_valid()]
+                if invalid_transitions:
+                    raise ValueError("Invalid transition configuration")
+    
+                # Phase 3: Component requirements validation
+                missing_components = []
+                if isinstance(self, (BasicStateMachine, SubmachineMachine)) and not isinstance(self, ProtocolMachine):
+                    if not self._states:
+                        missing_components.append("states")
+                    if not self._regions:
+                        missing_components.append("regions")
+                elif isinstance(self, ProtocolMachine) and not self._states:
+                    missing_components.append("states")
+    
+                if missing_components:
+>                   raise ValueError(f"Missing required component types: {', '.join(missing_components)}")
+E                   ValueError: Missing required component types: regions
+
+gotstate/core/machine.py:821: ValueError
+____________________ TestBasicMachine.test_event_processing ____________________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_event_processing>
+
+    def test_event_processing(self):
+        """Test event processing and handling."""
+>       self.machine.initialize()
+
+tests/unit/test_machine.py:106: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c17883b0>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+>                   raise ValueError("No components added to machine")
+E                   ValueError: No components added to machine
+
+gotstate/core/machine.py:792: ValueError
+_____________ TestBasicMachine.test_invalid_lifecycle_transitions ______________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_invalid_lifecycle_transitions>
+
+    def test_invalid_lifecycle_transitions(self):
+        """Test invalid machine lifecycle state transitions."""
+        # Cannot activate uninitialized machine
+        with self.assertRaises(ValueError):
+            self.machine.activate()
+    
+        # Cannot initialize twice
+>       self.machine.initialize()
+
+tests/unit/test_machine.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c1509670>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+>                   raise ValueError("No components added to machine")
+E                   ValueError: No components added to machine
+
+gotstate/core/machine.py:792: ValueError
+___________________ TestBasicMachine.test_machine_lifecycle ____________________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_machine_lifecycle>
+
+    def test_machine_lifecycle(self):
+        """Test machine lifecycle state transitions."""
+        # Initial state
+        self.assertEqual(self.machine.status, MachineStatus.UNINITIALIZED)
+    
+        # Initialize
+>       self.machine.initialize()
+
+tests/unit/test_machine.py:58: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c1508f80>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+>                   raise ValueError("No components added to machine")
+E                   ValueError: No components added to machine
+
+gotstate/core/machine.py:792: ValueError
+______________ TestBasicMachine.test_resource_allocation_failure _______________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_resource_allocation_failure>
+
+    def test_resource_allocation_failure(self):
+        """Test error handling during resource allocation."""
+        machine = BasicStateMachine()
+    
+        # Add a resource that will fail to allocate
+        mock_resource = Mock()
+        mock_resource.id = "test_resource"
+        mock_resource.initialize = Mock()
+        mock_resource.allocate = Mock(side_effect=RuntimeError("Allocation failed"))
+        mock_resource.cleanup = Mock()
+        mock_resource.is_valid = Mock(return_value=True)
+        mock_resource.enter = Mock()
+        mock_resource.exit = Mock()
+    
+        machine.add_resource(mock_resource)
+>       machine.initialize()
+
+tests/unit/test_machine.py:303: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c155bbf0>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+                    raise ValueError("No components added to machine")
+    
+                # Phase 2: Component-specific validation
+                # Validate states
+                invalid_states = [state for state in self._states.values() if not state.is_valid()]
+                if invalid_states:
+                    raise ValueError("Invalid state configuration")
+    
+                # Validate regions
+                invalid_regions = [region for region in self._regions.values() if not region.is_valid()]
+                if invalid_regions:
+                    raise ValueError("Invalid region configuration")
+    
+                # Validate transitions
+                invalid_transitions = [trans for trans in self._transitions if not trans.is_valid()]
+                if invalid_transitions:
+                    raise ValueError("Invalid transition configuration")
+    
+                # Phase 3: Component requirements validation
+                missing_components = []
+                if isinstance(self, (BasicStateMachine, SubmachineMachine)) and not isinstance(self, ProtocolMachine):
+                    if not self._states:
+                        missing_components.append("states")
+                    if not self._regions:
+                        missing_components.append("regions")
+                elif isinstance(self, ProtocolMachine) and not self._states:
+                    missing_components.append("states")
+    
+                if missing_components:
+>                   raise ValueError(f"Missing required component types: {', '.join(missing_components)}")
+E                   ValueError: Missing required component types: states, regions
+
+gotstate/core/machine.py:821: ValueError
+__________________ TestBasicMachine.test_resource_management ___________________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_resource_management>
+
+    def test_resource_management(self):
+        """Test resource allocation and cleanup."""
+>       self.machine.initialize()
+
+tests/unit/test_machine.py:119: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c150b410>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+>                   raise ValueError("No components added to machine")
+E                   ValueError: No components added to machine
+
+gotstate/core/machine.py:792: ValueError
+______________ TestBasicMachine.test_resource_management_cleanup _______________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_resource_management_cleanup>
+
+    def test_resource_management_cleanup(self):
+        """Test resource cleanup during termination."""
+        machine = BasicStateMachine()
+    
+        # Create resources with different cleanup behaviors
+        mock_resource1 = Mock()
+        mock_resource1.cleanup = Mock()
+    
+        mock_resource2 = Mock()
+        mock_resource2.cleanup = Mock(side_effect=RuntimeError("Cleanup failed"))
+    
+        mock_resource3 = Mock()
+        # No cleanup method
+    
+        # Add resources
+        machine.add_resource(mock_resource1)
+        machine.add_resource(mock_resource2)
+        machine.add_resource(mock_resource3)
+    
+        # Initialize and activate
+>       machine.initialize()
+
+tests/unit/test_machine.py:801: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c1508050>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+                    raise ValueError("No components added to machine")
+    
+                # Phase 2: Component-specific validation
+                # Validate states
+                invalid_states = [state for state in self._states.values() if not state.is_valid()]
+                if invalid_states:
+                    raise ValueError("Invalid state configuration")
+    
+                # Validate regions
+                invalid_regions = [region for region in self._regions.values() if not region.is_valid()]
+                if invalid_regions:
+                    raise ValueError("Invalid region configuration")
+    
+                # Validate transitions
+                invalid_transitions = [trans for trans in self._transitions if not trans.is_valid()]
+                if invalid_transitions:
+                    raise ValueError("Invalid transition configuration")
+    
+                # Phase 3: Component requirements validation
+                missing_components = []
+                if isinstance(self, (BasicStateMachine, SubmachineMachine)) and not isinstance(self, ProtocolMachine):
+                    if not self._states:
+                        missing_components.append("states")
+                    if not self._regions:
+                        missing_components.append("regions")
+                elif isinstance(self, ProtocolMachine) and not self._states:
+                    missing_components.append("states")
+    
+                if missing_components:
+>                   raise ValueError(f"Missing required component types: {', '.join(missing_components)}")
+E                   ValueError: Missing required component types: states, regions
+
+gotstate/core/machine.py:821: ValueError
+______________ TestBasicMachine.test_resource_management_extended ______________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_resource_management_extended>
+
+    def test_resource_management_extended(self):
+        """Test extended resource management scenarios."""
+        machine = BasicStateMachine()
+    
+        # Create resources with different behaviors
+        mock_resource1 = Mock()
+        mock_resource1.id = "resource1"
+        mock_resource1.initialize = Mock()
+        mock_resource1.allocate = Mock()
+        mock_resource1.cleanup = Mock()
+        mock_resource1.is_valid = Mock(return_value=True)
+    
+        mock_resource2 = Mock()
+        mock_resource2.id = "resource2"
+        mock_resource2.initialize = Mock()
+        mock_resource2.allocate = Mock(side_effect=RuntimeError("Allocation failed"))
+        mock_resource2.cleanup = Mock()
+        mock_resource2.is_valid = Mock(return_value=True)
+    
+        mock_resource3 = Mock()
+        mock_resource3.id = "resource3"
+        mock_resource3.initialize = Mock()
+        mock_resource3.allocate = Mock()
+        mock_resource3.cleanup = Mock(side_effect=RuntimeError("Cleanup failed"))
+        mock_resource3.is_valid = Mock(return_value=True)
+    
+        # Add resources
+        machine.add_resource(mock_resource1)
+        machine.add_resource(mock_resource2)
+        machine.add_resource(mock_resource3)
+    
+        # Initialize machine
+>       machine.initialize()
+
+tests/unit/test_machine.py:521: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c168f2c0>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+                    raise ValueError("No components added to machine")
+    
+                # Phase 2: Component-specific validation
+                # Validate states
+                invalid_states = [state for state in self._states.values() if not state.is_valid()]
+                if invalid_states:
+                    raise ValueError("Invalid state configuration")
+    
+                # Validate regions
+                invalid_regions = [region for region in self._regions.values() if not region.is_valid()]
+                if invalid_regions:
+                    raise ValueError("Invalid region configuration")
+    
+                # Validate transitions
+                invalid_transitions = [trans for trans in self._transitions if not trans.is_valid()]
+                if invalid_transitions:
+                    raise ValueError("Invalid transition configuration")
+    
+                # Phase 3: Component requirements validation
+                missing_components = []
+                if isinstance(self, (BasicStateMachine, SubmachineMachine)) and not isinstance(self, ProtocolMachine):
+                    if not self._states:
+                        missing_components.append("states")
+                    if not self._regions:
+                        missing_components.append("regions")
+                elif isinstance(self, ProtocolMachine) and not self._states:
+                    missing_components.append("states")
+    
+                if missing_components:
+>                   raise ValueError(f"Missing required component types: {', '.join(missing_components)}")
+E                   ValueError: Missing required component types: states, regions
+
+gotstate/core/machine.py:821: ValueError
+_______________ TestBasicMachine.test_termination_error_handling _______________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_termination_error_handling>
+
+    def test_termination_error_handling(self):
+        """Test error handling during termination."""
+        self.machine.add_state(self.mock_state)
+>       self.machine.initialize()
+
+tests/unit/test_machine.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c1558860>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+                    raise ValueError("No components added to machine")
+    
+                # Phase 2: Component-specific validation
+                # Validate states
+                invalid_states = [state for state in self._states.values() if not state.is_valid()]
+                if invalid_states:
+                    raise ValueError("Invalid state configuration")
+    
+                # Validate regions
+                invalid_regions = [region for region in self._regions.values() if not region.is_valid()]
+                if invalid_regions:
+                    raise ValueError("Invalid region configuration")
+    
+                # Validate transitions
+                invalid_transitions = [trans for trans in self._transitions if not trans.is_valid()]
+                if invalid_transitions:
+                    raise ValueError("Invalid transition configuration")
+    
+                # Phase 3: Component requirements validation
+                missing_components = []
+                if isinstance(self, (BasicStateMachine, SubmachineMachine)) and not isinstance(self, ProtocolMachine):
+                    if not self._states:
+                        missing_components.append("states")
+                    if not self._regions:
+                        missing_components.append("regions")
+                elif isinstance(self, ProtocolMachine) and not self._states:
+                    missing_components.append("states")
+    
+                if missing_components:
+>                   raise ValueError(f"Missing required component types: {', '.join(missing_components)}")
+E                   ValueError: Missing required component types: regions
+
+gotstate/core/machine.py:821: ValueError
+_____________________ TestBasicMachine.test_thread_safety ______________________
+
+self = <tests.unit.test_machine.TestBasicMachine testMethod=test_thread_safety>
+
+    def test_thread_safety(self):
+        """Test thread-safe operations."""
+>       self.machine.initialize()
+
+tests/unit/test_machine.py:131: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.BasicStateMachine object at 0x7f88c1559070>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+>                   raise ValueError("No components added to machine")
+E                   ValueError: No components added to machine
+
+gotstate/core/machine.py:792: ValueError
+__________________ TestSubmachine.test_lifecycle_coordination __________________
+
+self = <tests.unit.test_machine.TestSubmachine testMethod=test_lifecycle_coordination>
+
+    def test_lifecycle_coordination(self):
+        """Test submachine lifecycle coordination with parent."""
+        self.machine.add_parent_reference(self.parent_machine)
+    
+        # Initialize
+>       self.machine.initialize()
+
+tests/unit/test_machine.py:1177: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+gotstate/core/machine.py:1239: in initialize
+    super().initialize()
+gotstate/core/machine.py:608: in initialize
+    self._validate_configuration()
+gotstate/core/machine.py:1280: in _validate_configuration
+    super()._validate_configuration()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gotstate.core.machine.SubmachineMachine object at 0x7f88c168d4f0>
+
+    def _validate_configuration(self) -> None:
+        """Validate machine configuration.
+    
+        Validation occurs in phases:
+        1. Component existence validation
+        2. Component-specific validation (states, regions, transitions)
+        3. Component requirements validation (initialization and activation)
+        4. Cross-component validation (relationships)
+    
+        During initialization:
+        - All components must be valid
+        - BasicStateMachine and SubmachineMachine require both states and regions
+        - ProtocolMachine requires states
+        - Resources are optional but count as components
+    
+        During activation:
+        - All required components must be present and valid
+        - Component relationships must be valid
+    
+        Raises:
+            ValueError: If configuration is invalid, with specific error message
+        """
+        with self._collection_lock:
+            if self.status == MachineStatus.INITIALIZING:
+                # Phase 1: Component existence validation
+                has_components = bool(self._states or self._regions or self._transitions or self._resources)
+                if not has_components:
+>                   raise ValueError("No components added to machine")
+E                   ValueError: No components added to machine
+
+gotstate/core/machine.py:792: ValueError
+=========================== short test summary info ============================
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_activation_error_handling
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_component_cleanup_on_error
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_component_management
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_error_recovery_paths
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_event_processing - ...
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_invalid_lifecycle_transitions
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_machine_lifecycle
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_resource_allocation_failure
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_resource_management
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_resource_management_cleanup
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_resource_management_extended
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_termination_error_handling
+FAILED tests/unit/test_machine.py::TestBasicMachine::test_thread_safety - Val...
+FAILED tests/unit/test_machine.py::TestSubmachine::test_lifecycle_coordination
+======================== 14 failed, 33 passed in 0.41s =========================

@@ -69,8 +69,10 @@ import weakref
 from dataclasses import dataclass
 from enum import Enum, auto
 from threading import Event, RLock
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import Any, Dict, List, Optional, Set, Type, Callable
 from weakref import ref
+import time
+import copy
 
 from gotstate.core.event import Event, EventKind, EventQueue
 from gotstate.core.region import Region
@@ -396,6 +398,22 @@ class BasicStateMachine(StateMachine):
 
         # Monitoring and metrics
         self._monitor = MachineMonitor()
+        self._monitor_lock = RLock()
+
+        # Version management
+        self._version = "1.0.0"
+        self._version_lock = RLock()
+
+        # Security and resources
+        self._security_policies: Dict[str, Callable[[str], bool]] = {}
+        self._resource_limits: Dict[str, int] = {
+            "max_states": 1000,
+            "max_regions": 100,
+            "max_transitions": 5000,
+            "max_events_queued": 10000,
+            "max_resources": 100
+        }
+        self._security_lock = RLock()
 
     @property
     def status(self) -> MachineStatus:
@@ -494,6 +512,10 @@ class BasicStateMachine(StateMachine):
         with self._collection_lock:
             if self.status == MachineStatus.ACTIVE:
                 raise ValueError("Cannot add states while machine is active")
+            if state is None:
+                raise ValueError("State cannot be None")
+            if not isinstance(state, State):
+                raise ValueError("Component must be a State instance")
             if state.id in self._states:
                 raise ValueError(f"State ID '{state.id}' already exists")
             self._states[state.id] = state
@@ -503,6 +525,10 @@ class BasicStateMachine(StateMachine):
         with self._collection_lock:
             if self.status == MachineStatus.ACTIVE:
                 raise ValueError("Cannot add regions while machine is active")
+            if region is None:
+                raise ValueError("Region cannot be None")
+            if not isinstance(region, Region):
+                raise ValueError("Component must be a Region instance")
             if region.id in self._regions:
                 raise ValueError(f"Region ID '{region.id}' already exists")
             self._regions[region.id] = region
@@ -519,6 +545,8 @@ class BasicStateMachine(StateMachine):
         with self._collection_lock:
             if self.status == MachineStatus.ACTIVE:
                 raise ValueError("Cannot add resources while machine is active")
+            if resource is None:
+                raise ValueError("Resource cannot be None")
             self._resources.add(resource)
 
     def process_event(self, event: Event) -> None:
@@ -527,22 +555,90 @@ class BasicStateMachine(StateMachine):
             raise RuntimeError("Machine must be ACTIVE to process events")
 
         with self._processing_lock:
-            self._event_queue.enqueue(event)
+            try:
+                self._track_event("event_processing", {
+                    "event_id": id(event),
+                    "event_kind": event.kind.name,
+                    "event_data": event.data
+                })
+                self._event_queue.enqueue(event)
+                self._track_event("event_queued", {
+                    "event_id": id(event),
+                    "queue_size": len(self._event_queue)
+                })
+            except Exception as e:
+                self._track_event("event_processing_failure", {
+                    "event_id": id(event),
+                    "error": str(e)
+                })
+                raise
 
+    def _track_event(self, event_type: str, details: Dict[str, Any]) -> None:
+        """Track a machine event with monitoring.
+        
+        Args:
+            event_type: Type of event
+            details: Event details
+        """
+        with self._monitor_lock:
+            event_data = {
+                "type": event_type,
+                "timestamp": time.time(),
+                "machine_status": self.status.name,
+                **details
+            }
+            self._monitor.track_event(event_data)
+            
     def _initialize_components(self) -> None:
         """Initialize all machine components."""
         with self._collection_lock:
             # Initialize states
             for state in self._states.values():
-                state.initialize()
+                try:
+                    self._track_event("component_init", {
+                        "component_type": "state",
+                        "component_id": state.id
+                    })
+                    state.initialize()
+                    self._track_event("component_init_success", {
+                        "component_type": "state",
+                        "component_id": state.id
+                    })
+                except Exception as e:
+                    self._track_event("component_init_failure", {
+                        "component_type": "state",
+                        "component_id": state.id,
+                        "error": str(e)
+                    })
+                    raise
 
             # Initialize regions
             for region in self._regions.values():
-                region.initialize()
+                try:
+                    self._track_event("component_init", {
+                        "component_type": "region",
+                        "component_id": region.id
+                    })
+                    region.initialize()
+                    self._track_event("component_init_success", {
+                        "component_type": "region",
+                        "component_id": region.id
+                    })
+                except Exception as e:
+                    self._track_event("component_init_failure", {
+                        "component_type": "region",
+                        "component_id": region.id,
+                        "error": str(e)
+                    })
+                    raise
 
     def _validate_configuration(self) -> None:
         """Validate machine configuration."""
         with self._collection_lock:
+            # Check resource limits first
+            if not self.check_resource_limits():
+                raise ValueError("Resource limits exceeded")
+
             # Validate states
             for state in self._states.values():
                 if not state.is_valid():
@@ -618,6 +714,98 @@ class BasicStateMachine(StateMachine):
                     resource.cleanup()
             self._resources.clear()
 
+    def get_version(self) -> str:
+        """Get the current machine version.
+
+        Returns:
+            The version string
+        """
+        with self._version_lock:
+            return self._version
+
+    def validate_version_compatibility(self, other_version: str) -> bool:
+        """Check version compatibility.
+
+        Args:
+            other_version: Version to check compatibility with
+
+        Returns:
+            True if versions are compatible
+        """
+        with self._version_lock:
+            # Simple semantic version comparison
+            current_parts = [int(x) for x in self._version.split(".")]
+            other_parts = [int(x) for x in other_version.split(".")]
+            
+            # Major version must match
+            return current_parts[0] == other_parts[0]
+
+    def add_security_policy(self, operation: str, validator: Callable[[str], bool]) -> None:
+        """Add a security policy for an operation.
+
+        Args:
+            operation: Operation to secure
+            validator: Validation function
+        """
+        with self._security_lock:
+            self._security_policies[operation] = validator
+            self._track_event("security_policy_added", {
+                "operation": operation
+            })
+
+    def validate_security_policy(self, operation: str) -> bool:
+        """Validate operation against security policy.
+
+        Args:
+            operation: Operation to validate
+
+        Returns:
+            True if operation is allowed
+        """
+        with self._security_lock:
+            # If no policy exists for this operation, it's not allowed
+            if operation not in self._security_policies:
+                return False
+            
+            # Validate using the operation's specific policy
+            try:
+                return self._security_policies[operation](operation)
+            except Exception:
+                return False
+
+    def set_resource_limit(self, resource: str, limit: int) -> None:
+        """Set a resource usage limit.
+
+        Args:
+            resource: Resource type
+            limit: Maximum allowed value
+        """
+        with self._security_lock:
+            self._resource_limits[resource] = limit
+            self._track_event("resource_limit_set", {
+                "resource": resource,
+                "limit": limit
+            })
+
+    def check_resource_limits(self) -> bool:
+        """Check if resource usage is within limits.
+
+        Returns:
+            True if within limits
+        """
+        with self._collection_lock, self._security_lock:
+            if len(self._states) > self._resource_limits["max_states"]:
+                return False
+            if len(self._regions) > self._resource_limits["max_regions"]:
+                return False
+            if len(self._transitions) > self._resource_limits["max_transitions"]:
+                return False
+            if len(self._resources) > self._resource_limits["max_resources"]:
+                return False
+            if len(self._event_queue) > self._resource_limits["max_events_queued"]:
+                return False
+            return True
+
 
 class ProtocolMachine(BasicStateMachine):
     """Represents a protocol state machine.
@@ -658,6 +846,9 @@ class ProtocolMachine(BasicStateMachine):
         self._protocol_rules: List[Dict[str, Any]] = []
         self._current_state: Optional[State] = None
         self._rule_lock = RLock()
+        self._operation_sequence: List[str] = []
+        self._sequence_lock = RLock()
+        self._sequence_rules: List[Dict[str, List[str]]] = []
 
     @property
     def protocol_name(self) -> str:
@@ -694,22 +885,80 @@ class ProtocolMachine(BasicStateMachine):
 
             self._protocol_rules.append(rule.copy())
 
-    def _validate_operation(self, operation: str) -> bool:
-        """Validate if an operation is allowed in the current state.
+    def add_sequence_rule(self, sequence_rule: Dict[str, List[str]]) -> None:
+        """Add a sequence validation rule.
+
+        Args:
+            sequence_rule: Dictionary mapping operation to allowed next operations
+
+        Raises:
+            ValueError: If rule is invalid
+        """
+        if not isinstance(sequence_rule, dict):
+            raise ValueError("Sequence rule must be a dictionary")
+        
+        with self._rule_lock:
+            self._sequence_rules.append(sequence_rule.copy())
+            self._track_event("sequence_rule_added", {
+                "rule": sequence_rule
+            })
+
+    def _validate_sequence(self, operation: str) -> bool:
+        """Validate if an operation is allowed in the current sequence.
 
         Args:
             operation: Operation to validate
 
         Returns:
-            bool: True if operation is valid, False otherwise
+            bool: True if operation is valid in current sequence
+        """
+        with self._sequence_lock:
+            if not self._operation_sequence:
+                # First operation is always allowed
+                return True
+
+            last_operation = self._operation_sequence[-1]
+            
+            # Check all sequence rules
+            for rule in self._sequence_rules:
+                if last_operation in rule:
+                    allowed_next = rule[last_operation]
+                    if operation not in allowed_next:
+                        return False
+
+            return True
+
+    def _validate_operation(self, operation: str) -> bool:
+        """Validate if an operation is allowed.
+
+        Args:
+            operation: Operation to validate
+
+        Returns:
+            bool: True if operation is valid
         """
         if not self._current_state:
             return False
 
+        # First validate sequence
+        if not self._validate_sequence(operation):
+            self._track_event("sequence_validation_failed", {
+                "operation": operation,
+                "current_sequence": self._operation_sequence.copy()
+            })
+            return False
+
+        # Then validate state transition
         with self._rule_lock:
             for rule in self._protocol_rules:
-                if rule["operation"] == operation and rule["source"] == self._current_state.id:
+                if (rule["operation"] == operation and 
+                    rule["source"] == self._current_state.id):
                     return True
+
+        self._track_event("state_validation_failed", {
+            "operation": operation,
+            "current_state": self._current_state.id
+        })
         return False
 
     def _apply_operation(self, operation: str) -> None:
@@ -719,10 +968,12 @@ class ProtocolMachine(BasicStateMachine):
 
         # Find matching rule
         rule = None
-        for r in self._protocol_rules:
-            if r["operation"] == operation and r["source"] == self._current_state.id:
-                rule = r
-                break
+        with self._rule_lock:
+            for r in self._protocol_rules:
+                if (r["operation"] == operation and 
+                    r["source"] == self._current_state.id):
+                    rule = r
+                    break
 
         if not rule:
             raise ValueError(f"No rule found for operation {operation} in state {self._current_state.id}")
@@ -735,25 +986,40 @@ class ProtocolMachine(BasicStateMachine):
         # Evaluate guard condition
         guard = rule.get("guard")
         if guard and not guard():
+            self._track_event("guard_condition_failed", {
+                "operation": operation,
+                "state": self._current_state.id
+            })
             raise ValueError("Guard condition failed")
 
-        # Execute effect
-        effect = rule.get("effect")
-        if effect:
-            effect()
+        try:
+            # Execute effect
+            effect = rule.get("effect")
+            if effect:
+                effect()
 
-        # Update current state
-        self._current_state = target_state
+            # Update current state
+            self._current_state = target_state
+
+            # Record operation in sequence
+            with self._sequence_lock:
+                self._operation_sequence.append(operation)
+
+            self._track_event("operation_applied", {
+                "operation": operation,
+                "from_state": rule["source"],
+                "to_state": rule["target"]
+            })
+
+        except Exception as e:
+            self._track_event("operation_failed", {
+                "operation": operation,
+                "error": str(e)
+            })
+            raise
 
     def process_event(self, event: Event) -> None:
-        """Process an event, validating protocol constraints.
-
-        Args:
-            event: Event to process
-
-        Raises:
-            ValueError: If event violates protocol constraints
-        """
+        """Process an event, validating protocol constraints."""
         if event.kind != EventKind.CALL:
             super().process_event(event)
             return
@@ -791,6 +1057,12 @@ class ProtocolMachine(BasicStateMachine):
             self._current_state.exit()
             self._current_state = None
         super().terminate()
+
+    def clear_sequence(self) -> None:
+        """Clear the current operation sequence."""
+        with self._sequence_lock:
+            self._operation_sequence.clear()
+            self._track_event("sequence_cleared", {})
 
 
 class SubmachineMachine(BasicStateMachine):
@@ -833,6 +1105,7 @@ class SubmachineMachine(BasicStateMachine):
         self._reference_lock = threading.Lock()
         self._data_context: Dict[str, Any] = {}
         self._data_lock = threading.Lock()
+        self._data_snapshots: List[Dict[str, Any]] = []
 
     @property
     def name(self) -> str:
@@ -913,13 +1186,15 @@ class SubmachineMachine(BasicStateMachine):
             key: The data key
 
         Returns:
-            The data value
+            The data value (deep copy)
 
         Raises:
             KeyError: If key not found
         """
         with self._data_lock:
-            return self._data_context[key]
+            if key not in self._data_context:
+                raise KeyError(f"Data key not found: {key}")
+            return copy.deepcopy(self._data_context[key])
 
     def set_data(self, key: str, value: Any) -> None:
         """Set data in the submachine context.
@@ -929,12 +1204,48 @@ class SubmachineMachine(BasicStateMachine):
             value: The data value
         """
         with self._data_lock:
-            self._data_context[key] = value
+            # Store a deep copy to ensure isolation
+            self._data_context[key] = copy.deepcopy(value)
+            self._track_event("data_modified", {
+                "key": key,
+                "operation": "set"
+            })
 
     def clear_data(self) -> None:
         """Clear all data from the submachine context."""
         with self._data_lock:
             self._data_context.clear()
+            self._track_event("data_cleared", {})
+
+    def create_data_snapshot(self) -> None:
+        """Create a snapshot of current data context."""
+        with self._data_lock:
+            snapshot = copy.deepcopy(self._data_context)
+            self._data_snapshots.append(snapshot)
+            self._track_event("data_snapshot_created", {
+                "snapshot_id": len(self._data_snapshots) - 1
+            })
+
+    def restore_data_snapshot(self, index: int = -1) -> None:
+        """Restore data from a snapshot.
+
+        Args:
+            index: Index of snapshot to restore (-1 for most recent)
+
+        Raises:
+            IndexError: If snapshot index is invalid
+        """
+        with self._data_lock:
+            if not self._data_snapshots:
+                raise IndexError("No snapshots available")
+            if index < -len(self._data_snapshots) or index >= len(self._data_snapshots):
+                raise IndexError("Invalid snapshot index")
+            
+            snapshot = self._data_snapshots[index]
+            self._data_context = copy.deepcopy(snapshot)
+            self._track_event("data_snapshot_restored", {
+                "snapshot_id": index
+            })
 
     def initialize(self) -> None:
         """Initialize the submachine and coordinate with parents."""
@@ -1001,6 +1312,30 @@ class SubmachineMachine(BasicStateMachine):
             self._parent_machines.clear()
 
         super()._cleanup_resources()
+
+    def _increment_data(self, key: str, increment: int = 1) -> None:
+        """Thread-safe increment of numeric data.
+
+        Args:
+            key: The data key
+            increment: Amount to increment by
+
+        Raises:
+            KeyError: If key not found
+            TypeError: If value is not numeric
+        """
+        with self._data_lock:
+            if key not in self._data_context:
+                raise KeyError(f"Data key not found: {key}")
+            value = self._data_context[key]
+            if not isinstance(value, (int, float)):
+                raise TypeError(f"Value for key '{key}' is not numeric")
+            self._data_context[key] = value + increment
+            self._track_event("data_modified", {
+                "key": key,
+                "operation": "increment",
+                "increment": increment
+            })
 
 
 class MachineBuilder:
@@ -1220,37 +1555,46 @@ class MachineBuilder:
 
 
 class MachineModifier:
-    """Manages dynamic state machine modifications.
-
-    MachineModifier implements safe runtime modifications while
-    preserving semantic consistency.
-
-    Class Invariants:
-    1. Must preserve semantics
-    2. Must maintain atomicity
-    3. Must handle rollback
-    4. Must validate changes
-
-    Design Patterns:
-    - Command: Encapsulates changes
-    - Memento: Preserves state
-    - Strategy: Implements policies
-
-    Threading/Concurrency Guarantees:
-    1. Thread-safe modifications
-    2. Atomic changes
-    3. Safe concurrent access
-
-    Performance Characteristics:
-    1. O(c) change application where c is change count
-    2. O(v) validation where v is validation count
-    3. O(r) rollback where r is change depth
-    """
+    """Manages dynamic state machine modifications."""
 
     def __init__(self):
         """Initialize a new machine modifier."""
         self._machine = None
         self._prev_status = None
+        self._snapshot = None
+        self._modification_lock = threading.Lock()
+
+    def _create_snapshot(self) -> Dict[str, Any]:
+        """Create a snapshot of machine state.
+
+        Returns:
+            Dictionary containing machine state snapshot
+        """
+        snapshot = {
+            'states': copy.deepcopy(self._machine._states),
+            'regions': copy.deepcopy(self._machine._regions),
+            'transitions': copy.deepcopy(self._machine._transitions),
+            'resources': copy.deepcopy(self._machine._resources),
+            'status': self._machine.status
+        }
+        
+        if isinstance(self._machine, SubmachineMachine):
+            snapshot['data_context'] = copy.deepcopy(self._machine._data_context)
+            
+        return snapshot
+
+    def _restore_snapshot(self) -> None:
+        """Restore machine state from snapshot."""
+        if not self._snapshot:
+            return
+            
+        self._machine._states = copy.deepcopy(self._snapshot['states'])
+        self._machine._regions = copy.deepcopy(self._snapshot['regions'])
+        self._machine._transitions = copy.deepcopy(self._snapshot['transitions'])
+        self._machine._resources = copy.deepcopy(self._snapshot['resources'])
+        
+        if isinstance(self._machine, SubmachineMachine) and 'data_context' in self._snapshot:
+            self._machine._data_context = copy.deepcopy(self._snapshot['data_context'])
 
     def modify(self, machine: StateMachine):
         """Start a modification session.
@@ -1275,14 +1619,26 @@ class MachineModifier:
         Sets machine status to MODIFYING and saves previous status.
 
         Raises:
-            RuntimeError: If no machine specified
+            RuntimeError: If no machine specified or modification in progress
         """
         if not self._machine:
             raise RuntimeError("No machine specified for modification")
 
-        with self._machine._status_lock:
-            self._prev_status = self._machine.status
-            self._machine._status = MachineStatus.MODIFYING
+        if not self._modification_lock.acquire(blocking=False):
+            raise RuntimeError("Another modification is in progress")
+
+        try:
+            with self._machine._status_lock:
+                self._prev_status = self._machine.status
+                self._machine._status = MachineStatus.MODIFYING
+                self._snapshot = self._create_snapshot()
+                self._machine._track_event("modification_started", {
+                    "prev_status": self._prev_status.name
+                })
+        except Exception as e:
+            self._modification_lock.release()
+            raise RuntimeError(f"Failed to start modification: {e}")
+
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -1290,21 +1646,30 @@ class MachineModifier:
 
         Restores previous machine status unless an error occurred.
         """
-        if not self._machine:
-            return
+        try:
+            if not self._machine:
+                return
 
-        with self._machine._status_lock:
-            if exc_type is None:
-                # Successful modification
+            with self._machine._status_lock:
+                if exc_type is not None:
+                    # Error during modification, restore snapshot
+                    self._restore_snapshot()
+                    self._machine._track_event("modification_failed", {
+                        "error": str(exc_val)
+                    })
+                else:
+                    # Successful modification
+                    self._machine._track_event("modification_completed", {
+                        "new_status": self._prev_status.name
+                    })
+                
                 self._machine._status = self._prev_status
-            else:
-                # Error during modification
-                self._machine._status = self._prev_status
-                return False  # Re-raise the exception
-
-        # Clear machine reference
-        self._machine = None
-        self._prev_status = None
+        finally:
+            # Clear state and release lock
+            self._machine = None
+            self._prev_status = None
+            self._snapshot = None
+            self._modification_lock.release()
 
 
 class MachineMonitor:
@@ -1342,6 +1707,8 @@ class MachineMonitor:
         self._event_count = 0
         self._metrics_lock = threading.Lock()
         self._history_lock = threading.Lock()
+        self._event_index = {}  # Type -> List[event indices]
+        self._time_index = []   # List of (timestamp, index) tuples
 
     @property
     def metrics(self) -> Dict[str, int]:
@@ -1380,8 +1747,24 @@ class MachineMonitor:
             event: Event data dictionary
         """
         with self._history_lock:
+            # Add event to history
+            event_index = len(self._history)
             self._history.append(event.copy())
             self._event_count += 1
+
+            # Update type index
+            event_type = event.get('type')
+            if event_type:
+                if event_type not in self._event_index:
+                    self._event_index[event_type] = []
+                self._event_index[event_type].append(event_index)
+
+            # Update time index
+            timestamp = event.get('timestamp')
+            if timestamp is not None:
+                self._time_index.append((timestamp, event_index))
+                # Keep time index sorted
+                self._time_index.sort(key=lambda x: x[0])
 
     def update_metric(self, name: str, value: int) -> None:
         """Update a metric value.
@@ -1408,8 +1791,10 @@ class MachineMonitor:
         with self._metrics_lock:
             return self._metrics[name]
 
-    def query_events(self, event_type: Optional[str] = None, start_time: Optional[int] = None) -> List[Dict[str, Any]]:
+    def query_events(self, event_type: Optional[str] = None, start_time: Optional[float] = None) -> List[Dict[str, Any]]:
         """Query events with optional filtering.
+
+        Uses indexed lookups for efficient querying.
 
         Args:
             event_type: Optional event type filter
@@ -1419,12 +1804,76 @@ class MachineMonitor:
             List of matching events
         """
         with self._history_lock:
-            events = self._history.copy()
+            # Start with all indices
+            matching_indices = set(range(len(self._history)))
 
-        # Apply filters
-        if event_type is not None:
-            events = [e for e in events if e["type"] == event_type]
-        if start_time is not None:
-            events = [e for e in events if e["timestamp"] >= start_time]
+            # Apply type filter if specified
+            if event_type is not None:
+                type_indices = set(self._event_index.get(event_type, []))
+                matching_indices &= type_indices
 
-        return events
+            # Apply time filter if specified
+            if start_time is not None:
+                # Binary search for start time
+                time_pos = self._binary_search_time(start_time)
+                time_indices = {idx for _, idx in self._time_index[time_pos:]}
+                matching_indices &= time_indices
+
+            # Return events in chronological order
+            return [self._history[i] for i in sorted(matching_indices)]
+
+    def _binary_search_time(self, target_time: float) -> int:
+        """Binary search for the first index >= target_time.
+
+        Args:
+            target_time: Target timestamp
+
+        Returns:
+            Index of first entry >= target_time
+        """
+        left, right = 0, len(self._time_index)
+        while left < right:
+            mid = (left + right) // 2
+            if self._time_index[mid][0] < target_time:
+                left = mid + 1
+            else:
+                right = mid
+        return left
+
+    def get_metrics_snapshot(self) -> Dict[str, int]:
+        """Get a snapshot of all current metrics.
+
+        Returns:
+            Dictionary of metric name to value
+        """
+        with self._metrics_lock:
+            return self._metrics.copy()
+
+    def clear_history(self, before_time: Optional[float] = None) -> None:
+        """Clear event history.
+
+        Args:
+            before_time: Optional timestamp to clear events before
+        """
+        with self._history_lock:
+            if before_time is None:
+                self._history.clear()
+                self._event_index.clear()
+                self._time_index.clear()
+                self._event_count = 0
+            else:
+                # Find cutoff index
+                cutoff = self._binary_search_time(before_time)
+                remove_indices = {idx for _, idx in self._time_index[:cutoff]}
+
+                # Update history
+                new_history = [e for i, e in enumerate(self._history) if i not in remove_indices]
+                self._history = new_history
+
+                # Update indices
+                self._event_index = {
+                    t: [i for i in indices if i not in remove_indices]
+                    for t, indices in self._event_index.items()
+                }
+                self._time_index = self._time_index[cutoff:]
+                self._event_count = len(self._history)
