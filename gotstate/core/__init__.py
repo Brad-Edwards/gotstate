@@ -27,13 +27,7 @@ Cross-cutting:
 """
 
 # Import order matters to avoid circular dependencies
-from .state import (
-    State,
-    StateType,
-    CompositeState,
-    PseudoState,
-    HistoryState
-)
+from .state import State, StateType, CompositeState, PseudoState, HistoryState
 from .event import (
     Event,
     EventKind,
@@ -43,11 +37,11 @@ from .event import (
     TimeEvent,
     ChangeEvent,
     CompletionEvent,
-    EventQueue
+    EventQueue,
 )
 from .transition import Transition
 from .region import Region
-from .machine import StateMachine
+from .machine.state_machine import StateMachine
 
 __all__ = [
     # State classes
@@ -56,7 +50,6 @@ __all__ = [
     "CompositeState",
     "PseudoState",
     "HistoryState",
-    
     # Event classes
     "Event",
     "EventKind",
@@ -67,9 +60,8 @@ __all__ = [
     "ChangeEvent",
     "CompletionEvent",
     "EventQueue",
-    
     # Other core classes
     "Transition",
     "Region",
-    "StateMachine"
+    "StateMachine",
 ]
