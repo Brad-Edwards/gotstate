@@ -1,6 +1,5 @@
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from sre_parse import State
 from threading import RLock
 from typing import Any, Callable, Dict, Set
 
