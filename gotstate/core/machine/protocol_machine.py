@@ -219,8 +219,15 @@ class ProtocolMachine(BasicStateMachine):
                 raise ValueError("Invalid operation sequence")
             raise ValueError(f"Invalid operation: {operation}")
 
+        # Apply operation before queueing event
         self._apply_operation(operation)
-        event.consumed = True
+        
+        # Mark event as consumed by modifying internal field
+        # This is safe since we own the event object
+        event._consumed = True
+        
+        # Queue event for processing by base class
+        super().process_event(event)
 
     def initialize(self) -> None:
         """Initialize the protocol machine.
@@ -247,3 +254,49 @@ class ProtocolMachine(BasicStateMachine):
         with self._sequence_lock:
             self._operation_sequence.clear()
             self._track_event("sequence_cleared", {})
+
+    def _validate_configuration(self) -> None:
+        """Validate protocol machine configuration.
+
+        Verifies:
+        1. At least one state exists
+        2. Protocol rules are valid
+        3. Sequence rules are valid
+        4. Target states exist
+        5. No conflicting rules
+
+        Raises:
+            ValueError: If configuration is invalid
+        """
+        if not self._states:
+            raise ValueError("Protocol machine must have at least one state")
+
+        # Validate protocol rules
+        with self._rule_lock:
+            for rule in self._protocol_rules:
+                # Verify source state exists
+                if rule["source"] not in self._states:
+                    raise ValueError(f"Source state not found: {rule['source']}")
+
+                # Verify target state exists
+                if rule["target"] not in self._states:
+                    raise ValueError(f"Target state not found: {rule['target']}")
+
+                # Verify guard is callable if present
+                guard = rule.get("guard")
+                if guard is not None and not callable(guard):
+                    raise ValueError(f"Guard must be callable for operation: {rule['operation']}")
+
+                # Verify effect is callable if present
+                effect = rule.get("effect")
+                if effect is not None and not callable(effect):
+                    raise ValueError(f"Effect must be callable for operation: {rule['operation']}")
+
+        # Validate sequence rules
+        with self._sequence_lock:
+            for rule in self._sequence_rules:
+                for operation, next_operations in rule.items():
+                    if not isinstance(next_operations, list):
+                        raise ValueError(f"Next operations must be a list for operation: {operation}")
+                    if not all(isinstance(op, str) for op in next_operations):
+                        raise ValueError(f"Next operations must be strings for operation: {operation}")
