@@ -63,10 +63,14 @@ Dependencies:
 - machine.py: Machine context
 """
 
-from typing import Optional, List, Set, Dict
+from typing import Optional, List, Set, Dict, Any
 from enum import Enum, auto
 from dataclasses import dataclass
 from threading import Lock, Event
+from uuid import uuid4
+
+from gotstate.types.common import RegionId, StateId, EventId, EventData
+from gotstate.core.exceptions import RegionError, StateNotFoundError
 
 
 class RegionStatus(Enum):
@@ -82,68 +86,225 @@ class RegionStatus(Enum):
 
 
 class Region:
-    """Represents a parallel region in a hierarchical state machine.
-    
-    The Region class implements concurrent execution of orthogonal
-    state configurations with proper synchronization and isolation.
-    
-    Class Invariants:
-    1. Must maintain state consistency
-    2. Must preserve event ordering
-    3. Must handle cross-region transitions
-    4. Must enforce isolation boundaries
-    5. Must coordinate initialization/termination
-    6. Must preserve history state
-    7. Must handle interruptions gracefully
-    8. Must maintain event scope
-    9. Must prevent race conditions
-    10. Must manage resources properly
-    
-    Design Patterns:
-    - Composite: Manages region hierarchy
-    - Observer: Notifies of region events
-    - Mediator: Coordinates between regions
-    - State: Manages region lifecycle
-    - Strategy: Implements execution policies
-    - Command: Encapsulates region operations
-    
-    Data Structures:
-    - Set for active states
-    - Queue for pending events
-    - Map for history states
-    - Tree for scope hierarchy
-    - Graph for transition paths
-    
-    Algorithms:
-    - Parallel execution scheduling
-    - Event propagation routing
-    - Synchronization point management
-    - Resource allocation
-    - Deadlock prevention
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe state access
-    2. Atomic region operations
-    3. Synchronized event processing
-    4. Safe cross-region transitions
-    5. Lock-free status inspection
-    6. Mutex protection for critical sections
-    
-    Performance Characteristics:
-    1. O(1) status updates
-    2. O(log n) event routing
-    3. O(p) parallel execution where p is active paths
-    4. O(s) synchronization where s is sync points
-    5. O(r) cross-region coordination where r is region count
-    
-    Resource Management:
-    1. Bounded thread usage
-    2. Controlled memory allocation
-    3. Resource pooling
-    4. Automatic cleanup
-    5. Load balancing
     """
-    pass
+    Represents a region in a state machine.
+    
+    Regions are containers for states that can be active in parallel.
+    They are used to implement orthogonal state configurations.
+    """
+    
+    def __init__(self, name: str, parent_state: Optional["State"] = None):
+        """
+        Initialize a new region.
+        
+        Args:
+            name: Name of the region, used as its identifier
+            parent_state: Optional parent state that contains this region
+        """
+        self._region_id = RegionId(name)
+        self._parent_state = parent_state
+        self._states: Set["State"] = set()
+        self._initial_state: Optional["State"] = None
+        self._active_state: Optional["State"] = None
+    
+    @property
+    def id(self) -> RegionId:
+        """Get the region ID."""
+        return self._region_id
+    
+    @property
+    def name(self) -> str:
+        """Get the region name."""
+        return str(self._region_id)
+    
+    @property
+    def parent_state(self) -> Optional["State"]:
+        """Get the parent state."""
+        return self._parent_state
+    
+    @property
+    def states(self) -> Set["State"]:
+        """Get the states in this region."""
+        return self._states.copy()
+    
+    @property
+    def initial_state(self) -> Optional["State"]:
+        """Get the initial state of this region."""
+        return self._initial_state
+    
+    @property
+    def active_state(self) -> Optional["State"]:
+        """Get the currently active state in this region."""
+        return self._active_state
+    
+    @property
+    def is_active(self) -> bool:
+        """Check if this region is active (has an active state)."""
+        return self._active_state is not None
+    
+    def add_state(self, state: "State", is_initial: bool = False) -> None:
+        """
+        Add a state to this region.
+        
+        Args:
+            state: The state to add
+            is_initial: Whether this state is the initial state of the region
+            
+        Raises:
+            RegionError: If the state already belongs to another region
+        """
+        from gotstate.core.state import State
+        
+        if not isinstance(state, State):
+            raise RegionError(f"State must be a State instance, got {type(state)}")
+        
+        self._states.add(state)
+        
+        if is_initial:
+            self._initial_state = state
+    
+    def remove_state(self, state: "State") -> None:
+        """
+        Remove a state from this region.
+        
+        Args:
+            state: The state to remove
+            
+        Raises:
+            StateNotFoundError: If the state is not in this region
+        """
+        if state not in self._states:
+            raise StateNotFoundError(f"State '{state.name}' not found in region '{self.name}'")
+        
+        self._states.remove(state)
+        
+        if self._initial_state is state:
+            self._initial_state = None
+            
+        if self._active_state is state:
+            self._active_state = None
+    
+    def set_initial_state(self, state: "State") -> None:
+        """
+        Set the initial state of this region.
+        
+        Args:
+            state: The state to set as initial
+            
+        Raises:
+            StateNotFoundError: If the state is not in this region
+        """
+        if state not in self._states:
+            raise StateNotFoundError(f"State '{state.name}' not found in region '{self.name}'")
+        
+        self._initial_state = state
+    
+    def enter(self, event_id: Optional[EventId] = None, event_data: Optional[EventData] = None) -> None:
+        """
+        Enter this region by activating its initial state.
+        
+        Args:
+            event_id: Optional event ID that triggered the entry
+            event_data: Optional data associated with the event
+            
+        Raises:
+            RegionError: If the region has no initial state
+        """
+        if self._initial_state is None:
+            raise RegionError(f"Region '{self.name}' has no initial state")
+        
+        self._active_state = self._initial_state
+        
+        # Execute entry actions if event information is provided
+        if event_id is not None and event_data is not None:
+            self._active_state.execute_entry_actions(event_id, event_data)
+    
+    def exit(self, event_id: Optional[EventId] = None, event_data: Optional[EventData] = None) -> None:
+        """
+        Exit this region by deactivating its active state.
+        
+        Args:
+            event_id: Optional event ID that triggered the exit
+            event_data: Optional data associated with the event
+        """
+        if self._active_state is not None:
+            # Execute exit actions if event information is provided
+            if event_id is not None and event_data is not None:
+                self._active_state.execute_exit_actions(event_id, event_data)
+            
+            self._active_state = None
+    
+    def activate_state(self, state: "State", event_id: Optional[EventId] = None, event_data: Optional[EventData] = None) -> None:
+        """
+        Activate a specific state in this region.
+        
+        Args:
+            state: The state to activate
+            event_id: Optional event ID that triggered the activation
+            event_data: Optional data associated with the event
+            
+        Raises:
+            StateNotFoundError: If the state is not in this region
+        """
+        if state not in self._states:
+            raise StateNotFoundError(f"State '{state.name}' not found in region '{self.name}'")
+        
+        # Exit the currently active state if any
+        if self._active_state is not None and event_id is not None and event_data is not None:
+            self._active_state.execute_exit_actions(event_id, event_data)
+        
+        self._active_state = state
+        
+        # Execute entry actions if event information is provided
+        if event_id is not None and event_data is not None:
+            self._active_state.execute_entry_actions(event_id, event_data)
+    
+    def __eq__(self, other: Any) -> bool:
+        """
+        Compare equality with another region.
+        
+        Args:
+            other: The other region to compare with
+            
+        Returns:
+            True if the regions have the same ID, False otherwise
+        """
+        if not isinstance(other, Region):
+            return False
+        return self._region_id == other._region_id
+    
+    def __hash__(self) -> int:
+        """
+        Generate a hash for the region.
+        
+        Returns:
+            Hash value for the region
+        """
+        return hash(self._region_id)
+    
+    def __repr__(self) -> str:
+        """
+        Generate a string representation of the region.
+        
+        Returns:
+            String representation of the region
+        """
+        return f"Region(id={self._region_id})"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the region to a dictionary for serialization.
+        
+        Returns:
+            Dictionary representation of the region
+        """
+        return {
+            "region_id": self._region_id,
+            "parent_state_id": self._parent_state.id if self._parent_state else None,
+            "state_ids": [state.id for state in self._states],
+            "initial_state_id": self._initial_state.id if self._initial_state else None,
+            "active_state_id": self._active_state.id if self._active_state else None
+        }
 
 
 class ParallelRegion(Region):

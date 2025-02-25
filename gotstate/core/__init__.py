@@ -26,10 +26,24 @@ Cross-cutting:
 - Testing boundaries for validation
 """
 
-from .state import State
-from .transition import Transition
-from .event import Event
-from .region import Region
-from .machine import StateMachine
+from gotstate.core.state import State
+from gotstate.core.statemachine import StateMachine
+from gotstate.core.transition import Transition
+from gotstate.core.event import Event
+from gotstate.core.guard import Guard
+from gotstate.core.action import Action
+from gotstate.core.pseudostate import PseudoState, InitialState, TerminateState
+from gotstate.core.region import Region
 
-__all__ = ["State", "Transition", "Event", "Region", "StateMachine"]
+__all__ = [
+    "State", 
+    "StateMachine", 
+    "Transition", 
+    "Event", 
+    "Guard", 
+    "Action",
+    "PseudoState",
+    "InitialState", 
+    "TerminateState",
+    "Region"
+]

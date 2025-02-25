@@ -29,7 +29,6 @@ Cross-cutting:
 - Thread safety
 """
 
-from .hooks import ExtensionHooks
-from .sandbox import ExtensionSandbox
+from gotstate.extensions.async_sm import AsyncStateMachine
 
-__all__ = ["ExtensionHooks", "ExtensionSandbox"]
+__all__ = ["AsyncStateMachine"]

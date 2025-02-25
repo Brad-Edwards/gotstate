@@ -63,9 +63,15 @@ Dependencies:
 - machine.py: Machine context
 """
 
-from typing import Optional, List, Callable, Any
+from typing import Optional, List, Callable, Any, Dict, Set, Union
 from enum import Enum, auto
 from dataclasses import dataclass
+from uuid import uuid4
+
+from gotstate.types.common import TransitionId, EventId, EventData
+from gotstate.core.action import Action
+from gotstate.core.guard import Guard
+from gotstate.core.exceptions import TransitionError
 
 
 class TransitionKind(Enum):
@@ -92,67 +98,202 @@ class TransitionPriority(Enum):
 
 
 class Transition:
-    """Represents a transition between states in a hierarchical state machine.
-    
-    The Transition class implements the Command pattern to encapsulate all aspects
-    of a state transition including guards, actions, and execution semantics.
-    
-    Class Invariants:
-    1. Source and target states must be valid and compatible
-    2. Guard conditions must be side-effect free
-    3. Actions must maintain state consistency
-    4. Transition kind must not change after initialization
-    5. Priority must be valid for conflict resolution
-    6. Trigger specifications must be well-formed
-    7. Cross-region transitions must be properly synchronized
-    8. Compound transitions must have valid segments
-    9. Protocol transitions must maintain protocol constraints
-    10. Time/change triggers must be properly scheduled
-    
-    Design Patterns:
-    - Command: Encapsulates transition execution
-    - Strategy: Implements transition type behavior
-    - Chain of Responsibility: Processes guard conditions
-    - Observer: Notifies of transition execution
-    - Template Method: Defines execution steps
-    - Memento: Preserves state for rollback
-    
-    Data Structures:
-    - List for compound transition segments
-    - Queue for pending actions
-    - Set for affected regions
-    - Tree for LCA computation
-    - Priority queue for conflict resolution
-    
-    Algorithms:
-    - LCA computation for transition scope
-    - Topological sort for execution order
-    - Priority-based conflict resolution
-    - Path computation for state changes
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe transition execution
-    2. Atomic guard evaluation
-    3. Synchronized action execution
-    4. Safe concurrent conflict resolution
-    5. Lock-free transition inspection
-    6. Mutex protection for state changes
-    
-    Performance Characteristics:
-    1. O(1) kind/priority checking
-    2. O(log n) conflict resolution
-    3. O(h) LCA computation where h is hierarchy depth
-    4. O(a) action execution where a is action count
-    5. O(g) guard evaluation where g is guard count
-    
-    Resource Management:
-    1. Bounded action execution time
-    2. Controlled guard evaluation scope
-    3. Limited concurrent transitions
-    4. Pooled transition objects
-    5. Cached computation results
     """
-    pass
+    Represents a transition between states in a state machine.
+    
+    Transitions connect source and target states and are triggered by events.
+    They can have guards (conditions) and actions (behaviors executed during the transition).
+    """
+    
+    def __init__(
+        self,
+        source: "State",
+        target: Optional["State"],
+        event_id: Optional[str] = None,
+        guard: Optional[Guard] = None,
+        actions: Optional[List[Action]] = None,
+        transition_id: Optional[str] = None,
+    ):
+        """
+        Initialize a new transition.
+        
+        Args:
+            source: Source state of the transition
+            target: Target state of the transition (None for internal transitions)
+            event_id: ID of the event that triggers the transition (None for completion transitions)
+            guard: Optional guard condition for the transition
+            actions: Optional list of actions to execute during the transition
+            transition_id: Optional unique identifier for the transition
+        """
+        from gotstate.core.state import State
+        
+        if not isinstance(source, State):
+            raise TransitionError(f"Source must be a State, got {type(source)}")
+        
+        if target is not None and not isinstance(target, State):
+            raise TransitionError(f"Target must be a State or None, got {type(target)}")
+        
+        self._source = source
+        self._target = target
+        self._event_id = None if event_id is None else EventId(event_id)
+        self._guard = guard
+        self._actions = actions or []
+        self._transition_id = TransitionId(transition_id or str(uuid4()))
+    
+    @property
+    def id(self) -> TransitionId:
+        """Get the transition ID."""
+        return self._transition_id
+    
+    @property
+    def source(self) -> "State":
+        """Get the source state."""
+        return self._source
+    
+    @property
+    def target(self) -> Optional["State"]:
+        """Get the target state."""
+        return self._target
+    
+    @property
+    def event_id(self) -> Optional[EventId]:
+        """Get the event ID that triggers this transition."""
+        return self._event_id
+    
+    @property
+    def guard(self) -> Optional[Guard]:
+        """Get the guard condition for this transition."""
+        return self._guard
+    
+    @property
+    def actions(self) -> List[Action]:
+        """Get the actions for this transition."""
+        return self._actions.copy()
+    
+    @property
+    def is_internal(self) -> bool:
+        """Check if this is an internal transition (no state change)."""
+        return self._target is None
+    
+    @property
+    def is_external(self) -> bool:
+        """Check if this is an external transition (state change)."""
+        return not self.is_internal
+    
+    @property
+    def is_completion(self) -> bool:
+        """Check if this is a completion transition (no event trigger)."""
+        return self._event_id is None
+    
+    def can_trigger(self, event_id: EventId, event_data: EventData) -> bool:
+        """
+        Check if this transition can be triggered by the given event.
+        
+        Args:
+            event_id: ID of the event to check
+            event_data: Data associated with the event
+            
+        Returns:
+            True if the transition can be triggered, False otherwise
+        """
+        # Check if event ID matches
+        if self._event_id is not None and self._event_id != event_id:
+            return False
+        
+        # Check if guard condition is satisfied
+        if self._guard is not None and not self._guard.evaluate(event_id, event_data):
+            return False
+        
+        return True
+    
+    def execute_actions(self, event_id: EventId, event_data: EventData) -> None:
+        """
+        Execute all transition actions.
+        
+        Args:
+            event_id: ID of the event that triggered the transition
+            event_data: Data associated with the event
+        """
+        for action in self._actions:
+            action.execute(event_id, event_data)
+    
+    def add_action(self, action: Action) -> None:
+        """
+        Add an action to this transition.
+        
+        Args:
+            action: The action to add
+        """
+        self._actions.append(action)
+    
+    def set_guard(self, guard: Guard) -> None:
+        """
+        Set the guard condition for this transition.
+        
+        Args:
+            guard: The guard condition to set
+        """
+        self._guard = guard
+    
+    def __eq__(self, other: Any) -> bool:
+        """
+        Compare equality with another transition.
+        
+        Args:
+            other: The other transition to compare with
+            
+        Returns:
+            True if the transitions have the same ID, False otherwise
+        """
+        if not isinstance(other, Transition):
+            return False
+        return self._transition_id == other._transition_id
+    
+    def __hash__(self) -> int:
+        """
+        Generate a hash for the transition.
+        
+        Returns:
+            Hash value for the transition
+        """
+        return hash(self._transition_id)
+    
+    def __repr__(self) -> str:
+        """
+        Generate a string representation of the transition.
+        
+        Returns:
+            String representation of the transition
+        """
+        source_name = self._source.name if self._source else "None"
+        target_name = self._target.name if self._target else "None"
+        event_str = str(self._event_id) if self._event_id else "completion"
+        return (
+            f"Transition(id={self._transition_id}, "
+            f"source={source_name}, "
+            f"target={target_name}, "
+            f"event={event_str})"
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the transition to a dictionary for serialization.
+        
+        Returns:
+            Dictionary representation of the transition
+            
+        Note:
+            This only serializes the structure, not the actual guard and action functions.
+            When deserializing, these must be re-added.
+        """
+        return {
+            "transition_id": self._transition_id,
+            "source_id": self._source.id,
+            "target_id": self._target.id if self._target else None,
+            "event_id": self._event_id,
+            "guard_id": self._guard.id if self._guard else None,
+            "action_ids": [action.id for action in self._actions]
+        }
 
 
 class ExternalTransition(Transition):

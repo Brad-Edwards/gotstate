@@ -67,6 +67,7 @@ from typing import Optional, Dict, List, Any, Set
 from enum import Enum, auto
 from dataclasses import dataclass
 from queue import PriorityQueue
+from gotstate.types.common import EventId, EventData
 
 
 class EventKind(Enum):
@@ -93,67 +94,89 @@ class EventPriority(Enum):
 
 
 class Event:
-    """Represents an event in the state machine.
-    
-    The Event class implements the Command pattern to encapsulate event
-    data and processing behavior. It supports various event types and
-    processing patterns.
-    
-    Class Invariants:
-    1. Event ID must be unique within its scope
-    2. Event kind must not change after creation
-    3. Event data must be immutable
-    4. Priority must be valid
-    5. Timeout must be non-negative if specified
-    6. Parameters must be serializable
-    7. Event scope must be well-defined
-    8. Processing status must be tracked
-    9. Cancellation must be handled gracefully
-    10. Resources must be properly managed
-    
-    Design Patterns:
-    - Command: Encapsulates event data and behavior
-    - Observer: Notifies of event processing
-    - Strategy: Implements processing patterns
-    - Memento: Preserves event state
-    - Chain of Responsibility: Handles event processing
-    
-    Data Structures:
-    - Dictionary for event parameters
-    - Set for consumed status
-    - Queue for processing order
-    - Tree for scope hierarchy
-    - Map for deferred events
-    
-    Algorithms:
-    - Priority-based scheduling
-    - Scope resolution
-    - Timeout handling
-    - Consumption tracking
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe event processing
-    2. Atomic parameter access
-    3. Synchronized scope checking
-    4. Safe concurrent consumption
-    5. Lock-free status inspection
-    6. Mutex protection for queue operations
-    
-    Performance Characteristics:
-    1. O(1) event creation
-    2. O(log n) priority queuing
-    3. O(1) parameter access
-    4. O(h) scope checking where h is hierarchy depth
-    5. O(1) status updates
-    
-    Resource Management:
-    1. Bounded queue size
-    2. Pooled event objects
-    3. Cached scope information
-    4. Limited concurrent processing
-    5. Automatic timeout cleanup
     """
-    pass
+    Represents an event in the state machine.
+    
+    Events trigger transitions between states and can carry data.
+    """
+    
+    def __init__(self, event_id: str, data: Optional[EventData] = None):
+        """
+        Initialize a new event.
+        
+        Args:
+            event_id: Unique identifier for the event
+            data: Optional data to be carried with the event
+        """
+        self._event_id = EventId(event_id)
+        self._data = data if data is not None else {}
+    
+    @property
+    def id(self) -> EventId:
+        """Get the event ID."""
+        return self._event_id
+    
+    @property
+    def data(self) -> EventData:
+        """Get the event data."""
+        return self._data
+    
+    def __eq__(self, other: Any) -> bool:
+        """
+        Compare equality with another event.
+        
+        Args:
+            other: The other event to compare with
+            
+        Returns:
+            True if the events have the same ID, False otherwise
+        """
+        if not isinstance(other, Event):
+            return False
+        return self._event_id == other._event_id
+    
+    def __hash__(self) -> int:
+        """
+        Generate a hash for the event.
+        
+        Returns:
+            Hash value for the event
+        """
+        return hash(self._event_id)
+    
+    def __repr__(self) -> str:
+        """
+        Generate a string representation of the event.
+        
+        Returns:
+            String representation of the event
+        """
+        return f"Event(id={self._event_id}, data={self._data})"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the event to a dictionary for serialization.
+        
+        Returns:
+            Dictionary representation of the event
+        """
+        return {
+            "event_id": self._event_id,
+            "data": self._data
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Event":
+        """
+        Create an event from a dictionary.
+        
+        Args:
+            data: Dictionary representation of the event
+            
+        Returns:
+            New Event instance
+        """
+        return cls(event_id=data["event_id"], data=data["data"])
 
 
 class SignalEvent(Event):

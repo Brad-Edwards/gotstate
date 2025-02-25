@@ -1,7 +1,18 @@
-"""gotstate: UML-compliant Hierarchical Finite State Machine (HFSM) implementation
+"""
+GotState: A Pythonic UML-compliant Hierarchical Finite State Machine (HFSM) library.
 
 This package provides a robust implementation of hierarchical state machines following
 UML state machine semantics.
+
+Features:
+    - Complete UML State Machine compliance
+    - Hierarchical state organization
+    - Parallel region support
+    - All UML pseudostates (history, choice, junction, etc.)
+    - Parent state re-entry
+    - Run-to-completion semantics
+    - Asynchronous support
+    - Thread-safe operations
 
 Responsibilities:
     - State machine definition and execution
@@ -45,4 +56,46 @@ Cross-cutting Concerns:
         - Protected internal state
 """
 
-__version__ = "0.1.0"
+__version__ = "2.0.0"
+
+# Core exports
+from gotstate.core.state import State
+from gotstate.core.statemachine import StateMachine
+from gotstate.core.transition import Transition
+from gotstate.core.event import Event
+from gotstate.core.pseudostate import (
+    PseudoState,
+    InitialState,
+    HistoryState,
+    DeepHistoryState,
+    ShallowHistoryState,
+    ChoiceState,
+    JunctionState,
+    ForkState,
+    JoinState,
+    EntryPointState,
+    ExitPointState,
+    TerminateState,
+)
+from gotstate.core.region import Region
+from gotstate.core.guard import Guard
+from gotstate.core.action import Action
+
+# Type exports
+from gotstate.types.common import (
+    StateId,
+    EventId,
+    TransitionId,
+    RegionId,
+)
+
+# Extension exports
+from gotstate.extensions.async_sm import AsyncStateMachine
+
+# Exceptions
+from gotstate.core.exceptions import (
+    StateError,
+    TransitionError,
+    EventError,
+    StateMachineError,
+)

@@ -1,4 +1,4 @@
-name: Security
+name: Security Scan
 
 on:
   push:
@@ -10,12 +10,28 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-      - name: Install bandit
-        run: pip install bandit
-      - name: Run bandit
-        run: bandit -r . -c bandit.yaml
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: 1.7.1
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        
+    - name: Install dependencies
+      run: |
+        poetry install --with dev
+        
+    - name: Run bandit
+      run: |
+        poetry run bandit -r gotstate
+        
+    - name: Run safety
+      run: |
+        poetry run safety check

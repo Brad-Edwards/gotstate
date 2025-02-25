@@ -1,25 +1,111 @@
 # Contributing to GotState
 
-Thank you for your interest in contributing!
+Thank you for your interest in contributing to GotState! This document provides guidelines and instructions for contributing to this project.
 
-## Code of Conduct
+## Setting Up Development Environment
 
-By participating in this project, you are expected to uphold our [Contributor Covenant](https://www.contributor-covenant.org/). Please report unacceptable behavior to the maintainer.
+1. Fork and clone the repository:
 
-## How to Contribute
+   ```bash
+   git clone https://github.com/yourusername/gotstate.git
+   cd gotstate
+   ```
 
-1. **Reporting Bugs**: Before submitting a bug report, please check existing issues to avoid duplicates. When reporting, include a clear title, steps to reproduce, and your environment details.
+2. Set up a virtual environment using Poetry:
 
-2. **Suggesting Enhancements**: Check if your suggestion already exists. If not, provide a clear description of the enhancement and its benefits.
+   ```bash
+   # Install Poetry if you haven't already
+   # curl -sSL https://install.python-poetry.org | python3 -
+   
+   # Install dependencies
+   poetry install --with dev
+   
+   # Activate the virtual environment
+   poetry shell
+   ```
 
-3. **Pull Requests**: Follow the [pull request template](docs/pull_request_template.md) and ensure your code adheres to our style guidelines.
+3. Install pre-commit hooks:
 
-## Style Guidelines
+   ```bash
+   poetry run pre-commit install
+   ```
 
-- Follow [PEP 8](https://www.python.org/dev/peps/pep-0008/) for Python code.
-- Use meaningful names and keep functions concise.
-- Add tests for new features.
+## Development Workflow
+
+1. Create a new branch for your feature or bugfix:
+
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+2. Make your changes and write tests for them.
+
+3. Run the tests to ensure everything works:
+
+   ```bash
+   poetry run pytest
+   ```
+
+4. Run linting checks:
+
+   ```bash
+   poetry run black gotstate tests
+   poetry run isort gotstate tests
+   poetry run flake8 gotstate tests
+   poetry run mypy gotstate
+   ```
+
+5. Commit your changes with a descriptive message:
+
+   ```bash
+   git commit -m "Add feature X"
+   ```
+
+6. Push your branch to your fork:
+
+   ```bash
+   git push origin feature/your-feature-name
+   ```
+
+7. Create a pull request from your fork to the main repository.
+
+## Pull Request Guidelines
+
+- Follow the Python code style conventions (PEP 8).
+- Include unit tests for new features or bug fixes.
+- Update documentation if necessary.
+- Make sure all tests pass before submitting a pull request.
+- Keep pull requests focused on a single feature or bug fix.
+
+## Code Style
+
+We use the following tools to maintain code quality:
+
+- `black` for code formatting
+- `isort` for import sorting
+- `flake8` for linting
+- `mypy` for type checking
+
+## Testing
+
+Please write tests for any new features or bug fixes. We use `pytest` for testing.
+
+To run tests:
+
+```bash
+poetry run pytest
+```
+
+To run tests with coverage:
+
+```bash
+poetry run pytest --cov=gotstate
+```
+
+## Documentation
+
+If your changes affect the API or add new features, please update the documentation accordingly.
 
 ## License
 
-By contributing, you agree your contributions will be licensed under the MIT license. 
+By contributing to GotState, you agree that your contributions will be licensed under the project's MIT License.

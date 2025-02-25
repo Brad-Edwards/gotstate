@@ -10,23 +10,29 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
+      - uses: actions/checkout@v3
+      - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
-      - name: Cache dependencies
-        uses: actions/cache@v3
+          python-version: '3.11'
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          version: 1.7.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-      - name: Check imports (isort)
-        run: isort --check-only .
-      - name: Check formatting (black)
-        run: black --check .
+          poetry install --with dev
+      - name: Check code format with black
+        run: |
+          poetry run black --check gotstate tests
+      - name: Verify import order with isort
+        run: |
+          poetry run isort --check-only --profile black gotstate tests
+      - name: Lint with flake8
+        run: |
+          poetry run flake8 gotstate tests
+      - name: Type check with mypy
+        run: |
+          poetry run mypy gotstate
