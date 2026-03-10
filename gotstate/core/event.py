@@ -7,6 +7,7 @@ semantics for the hierarchical state machine.
 
 from __future__ import annotations
 
+import bisect
 import threading
 import time
 import uuid
@@ -278,8 +279,7 @@ class EventQueue:
             if event.priority == EventPriority.DEFER:
                 self._deferred.append(event)
                 return
-            self._events.append(event)
-            self._events.sort()
+            bisect.insort(self._events, event)
 
     def dequeue(self) -> Optional[Event]:
         """Remove and return the highest-priority event, or None if empty."""
@@ -306,8 +306,7 @@ class EventQueue:
         with self._lock:
             flushed = list(self._deferred)
             for event in self._deferred:
-                self._events.append(event)
-            self._events.sort()
+                bisect.insort(self._events, event)
             self._deferred.clear()
             return flushed
 

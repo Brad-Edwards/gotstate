@@ -81,11 +81,14 @@ class ExtensionSandbox:
     def record_usage(self, resource: ResourceLimit, amount: float) -> None:
         """Record resource usage."""
         with self._lock:
-            if not self.check_resource(resource, amount):
-                self._violations.append(
-                    {"resource": resource.name, "amount": amount, "timestamp": time.monotonic()}
-                )
-                raise GotStateError(f"Resource limit exceeded for {resource.name}")
+            limit = self._resource_limits.get(resource)
+            if limit is not None:
+                current = self._resource_usage.get(resource, 0.0)
+                if current + amount > limit:
+                    self._violations.append(
+                        {"resource": resource.name, "amount": amount, "timestamp": time.monotonic()}
+                    )
+                    raise GotStateError(f"Resource limit exceeded for {resource.name}")
             self._resource_usage[resource] = self._resource_usage.get(resource, 0.0) + amount
 
     def allow_operation(self, operation: str) -> None:

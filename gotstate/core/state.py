@@ -225,10 +225,6 @@ class State:
         return f"State(name={self._name!r}, type={self._state_type.name})"
 
 
-@icontract.invariant(
-    lambda self: self._state_type == StateType.COMPOSITE,
-    "CompositeState must have COMPOSITE type",
-)
 class CompositeState(State):
     """A state that contains child states and optional parallel regions.
 

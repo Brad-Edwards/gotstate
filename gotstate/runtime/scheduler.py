@@ -7,6 +7,7 @@ and event coordination.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from enum import Enum, auto
@@ -15,6 +16,8 @@ from typing import Callable, Dict, List, Optional
 import icontract
 
 from gotstate.exceptions import GotStateError
+
+logger = logging.getLogger(__name__)
 
 
 class TimerStatus(Enum):
@@ -74,7 +77,7 @@ class Scheduler:
         try:
             callback()
         except Exception:
-            pass
+            logger.exception("Timer callback failed for timer '%s'", timer_id)
 
     def cancel_timer(self, timer_id: str) -> None:
         """Cancel a scheduled timer."""

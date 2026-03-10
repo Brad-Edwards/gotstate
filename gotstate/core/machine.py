@@ -149,7 +149,6 @@ class StateMachine:
 
             enabled = self._find_enabled_transitions(event)
             if not enabled:
-                self._event_queue.enqueue(event)
                 return False
 
             transition = enabled[0]
@@ -168,17 +167,38 @@ class StateMachine:
             return True
 
     def _find_enabled_transitions(self, event: Event) -> List[Transition]:
-        """Find all transitions enabled by the given event, sorted by priority."""
+        """Find all transitions enabled by the given event, sorted by priority.
+
+        Walks the state hierarchy from current state upward, so transitions
+        on parent composite states are checked if no local transition fires.
+        Inner (more specific) transitions take priority per UML semantics.
+        """
         enabled: List[Transition] = []
-        for transition in self._transitions:
-            if transition.source is self._current_state and transition.is_enabled(event):
-                enabled.append(transition)
+        state: Optional[State] = self._current_state
+        while state is not None:
+            for transition in self._transitions:
+                if transition.source is state and transition.is_enabled(event):
+                    enabled.append(transition)
+            if enabled:
+                break
+            state = state.parent
         enabled.sort()
         return enabled
 
     def on_transition(self, callback: Callable[[Transition], None]) -> None:
         """Register a callback invoked after each transition."""
         self._on_transition_callbacks.append(callback)
+
+    def _begin_modification(self) -> None:
+        """Enter modification mode. Used by MachineModifier."""
+        self._lock.acquire()
+        self._saved_status = self._status
+        self._status = MachineStatus.MODIFYING
+
+    def _end_modification(self) -> None:
+        """Exit modification mode. Used by MachineModifier."""
+        self._status = self._saved_status
+        self._lock.release()
 
     def add_region(self, region: Region) -> None:
         """Add a parallel region to the machine."""
@@ -292,20 +312,18 @@ class MachineModifier:
 
     def apply(self) -> None:
         """Apply all staged modifications atomically."""
-        with self._machine._lock:
-            old_status = self._machine._status
-            self._machine._status = MachineStatus.MODIFYING
-            try:
-                for state in self._pending_states:
-                    self._machine.add_state(state)
-                for transition in self._pending_transitions:
-                    self._machine.add_transition(transition)
-                self._pending_states.clear()
-                self._pending_transitions.clear()
-            except Exception:
-                self._machine._status = old_status
-                raise
-            self._machine._status = old_status
+        self._machine._begin_modification()
+        try:
+            for state in self._pending_states:
+                self._machine.add_state(state)
+            for transition in self._pending_transitions:
+                self._machine.add_transition(transition)
+            self._pending_states.clear()
+            self._pending_transitions.clear()
+        except Exception:
+            self._machine._end_modification()
+            raise
+        self._machine._end_modification()
 
     def rollback(self) -> None:
         """Discard all staged modifications."""

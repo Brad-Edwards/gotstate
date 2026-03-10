@@ -91,7 +91,8 @@ class Monitor:
         }
         with self._lock:
             self._history.append(record)
-        for subscriber in self._subscribers:
+            subscribers = list(self._subscribers)
+        for subscriber in subscribers:
             try:
                 subscriber(record)
             except Exception:
@@ -99,7 +100,8 @@ class Monitor:
 
     def subscribe(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Subscribe to monitoring events."""
-        self._subscribers.append(callback)
+        with self._lock:
+            self._subscribers.append(callback)
 
     def get_history(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Return recent monitoring events."""
