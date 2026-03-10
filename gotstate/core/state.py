@@ -1,345 +1,358 @@
 """
 State class and hierarchy management.
 
-Architecture:
-- Implements hierarchical state structure using Composite pattern
-- Manages state data with isolation guarantees
-- Enforces state invariants and validation
-- Coordinates with Region for parallel state execution
-- Preserves history state information
-
-Design Patterns:
-- Composite Pattern: Hierarchical state structure
-- Observer Pattern: State change notifications
-- Memento Pattern: History state preservation
-- Builder Pattern: State configuration
-- Visitor Pattern: State traversal
-
-Responsibilities:
-1. State Hierarchy
-   - Parent/child relationships
-   - Composite state management
-   - Submachine state handling
-   - State redefinition support
-
-2. State Data
-   - Data isolation between states
-   - Parent state data inheritance
-   - Parallel region data management
-   - History state data preservation
-
-3. State Behavior
-   - Entry/exit actions
-   - Do-activity execution
-   - Internal transitions
-   - State invariants
-
-4. State Configuration
-   - Initial/final states
-   - History state types
-   - Entry/exit points
-   - Choice/junction pseudostates
-
-Security:
-- State data isolation
-- Action execution boundaries
-- Resource usage monitoring
-- Validation at state boundaries
-
-Cross-cutting:
-- Error handling for state operations
-- Performance optimization for traversal
-- Monitoring of state changes
-- Thread safety for parallel regions
-
-Dependencies:
-- region.py: Parallel region coordination
-- transition.py: State change management
-- event.py: Event processing integration
-- machine.py: State machine context
+Implements hierarchical state structure using the Composite pattern.
+Manages parent-child relationships, state data isolation, and state types.
 """
 
-from typing import Optional, Dict, List, Set
-from dataclasses import dataclass
+from __future__ import annotations
+
+import threading
 from enum import Enum, auto
+from typing import Any, Callable, Dict, List, Optional, Set
+
+import icontract
+
+from gotstate.exceptions import DuplicateStateError, InvalidStateError, StateNotFoundError
 
 
 class StateType(Enum):
-    """Defines the different types of states in the hierarchical state machine.
-    
-    Used to distinguish between regular states, pseudostates, and special state types
-    for proper behavioral implementation and validation.
-    """
-    SIMPLE = auto()          # Leaf state with no substates
-    COMPOSITE = auto()       # State containing substates
-    SUBMACHINE = auto()      # Reference to another state machine
-    INITIAL = auto()         # Initial pseudostate
-    FINAL = auto()          # Final state
-    CHOICE = auto()         # Dynamic conditional branching
-    JUNCTION = auto()       # Static conditional branching
-    SHALLOW_HISTORY = auto() # Remembers only direct substate
-    DEEP_HISTORY = auto()    # Remembers full substate configuration
-    ENTRY_POINT = auto()    # Named entry point
-    EXIT_POINT = auto()     # Named exit point
-    TERMINATE = auto()      # Terminates entire state machine
+    """Defines the different types of states in the hierarchical state machine."""
+
+    SIMPLE = auto()
+    COMPOSITE = auto()
+    SUBMACHINE = auto()
+    INITIAL = auto()
+    FINAL = auto()
+    CHOICE = auto()
+    JUNCTION = auto()
+    SHALLOW_HISTORY = auto()
+    DEEP_HISTORY = auto()
+    ENTRY_POINT = auto()
+    EXIT_POINT = auto()
+    TERMINATE = auto()
 
 
+_PSEUDOSTATE_TYPES = frozenset(
+    {
+        StateType.INITIAL,
+        StateType.CHOICE,
+        StateType.JUNCTION,
+        StateType.SHALLOW_HISTORY,
+        StateType.DEEP_HISTORY,
+        StateType.ENTRY_POINT,
+        StateType.EXIT_POINT,
+        StateType.TERMINATE,
+    }
+)
+
+
+def _is_valid_state_name(name: str) -> bool:
+    return isinstance(name, str) and len(name) > 0
+
+
+@icontract.invariant(lambda self: isinstance(self._state_type, StateType), "State type must be a valid StateType")
+@icontract.invariant(lambda self: _is_valid_state_name(self._name), "State name must be a non-empty string")
 class State:
     """Represents a state in a hierarchical state machine.
-    
-    The State class implements the Composite pattern to manage the hierarchical
-    structure of states. It maintains parent-child relationships, handles state
-    data with proper isolation, and coordinates with parallel regions.
-    
+
+    Implements the Composite pattern for hierarchical state structure.
+    Thread-safe state data access is guaranteed for parallel regions.
+
     Class Invariants:
-    1. A state must have a unique identifier within its parent's scope
-    2. A state's type must not change after initialization
-    3. Parent-child relationships must form a directed acyclic graph (DAG)
-    4. Initial pseudostates must have exactly one outgoing transition
-    5. History states must belong to a composite state
-    6. Entry/exit points must have valid connections
-    7. State data must remain isolated between parallel regions
-    8. Parent state data must be accessible to child states
-    9. Active do-activities must be properly tracked and managed
-    10. State configuration must be valid according to UML state machine rules
-    
-    Design Patterns:
-    - Composite: Hierarchical state structure using parent-child relationships
-    - Observer: Notifies observers of state entry/exit and data changes
-    - Memento: Preserves and restores history state information
-    - Builder: Constructs complex state configurations
-    - Visitor: Enables traversal of state hierarchy
-    - Command: Encapsulates entry/exit actions and do-activities
-    
-    Data Structures:
-    - Dictionary for child state lookup (O(1) access)
-    - Set for active regions (fast membership testing)
-    - Queue for pending events (FIFO processing)
-    - Tree for hierarchical traversal
-    - Stack for history state tracking
-    
-    Algorithms:
-    - Depth-first search for state traversal
-    - Topological sort for transition execution order
-    - LCA (Lowest Common Ancestor) for transition path computation
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe state data access within parallel regions
-    2. Atomic state configuration changes
-    3. Safe concurrent execution of do-activities
-    4. Synchronized access to history state information
-    5. Lock-free read access to state configuration
-    6. Mutex protection for state data modifications
-    
-    Performance Characteristics:
-    1. O(1) child state lookup
-    2. O(log n) ancestor traversal
-    3. O(1) state type checking
-    4. O(k) parallel region synchronization where k is region count
-    5. O(d) history state restoration where d is hierarchy depth
-    
-    Resource Management:
-    1. Bounded memory usage for state data
-    2. Controlled resource allocation for do-activities
-    3. Limited thread pool for parallel regions
-    4. Cached state configuration for fast access
-    5. Pooled event objects for reduced allocation
+    1. State type must be a valid StateType enum value
+    2. State name must be a non-empty string
+    3. Parent-child relationships form a DAG (no cycles)
     """
-    pass
+
+    @icontract.require(lambda name: _is_valid_state_name(name), "Name must be a non-empty string")
+    @icontract.require(lambda state_type: isinstance(state_type, StateType), "state_type must be a StateType")
+    def __init__(
+        self,
+        name: str,
+        state_type: StateType = StateType.SIMPLE,
+        parent: Optional[State] = None,
+    ) -> None:
+        self._name = name
+        self._state_type = state_type
+        self._parent: Optional[State] = None
+        self._children: Dict[str, State] = {}
+        self._data: Dict[str, Any] = {}
+        self._entry_actions: List[Callable[[], None]] = []
+        self._exit_actions: List[Callable[[], None]] = []
+        self._is_active = False
+        self._lock = threading.RLock()
+
+        if parent is not None:
+            parent.add_child(self)
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def state_type(self) -> StateType:
+        return self._state_type
+
+    @property
+    def parent(self) -> Optional[State]:
+        return self._parent
+
+    @property
+    def children(self) -> Dict[str, State]:
+        return dict(self._children)
+
+    @property
+    def is_active(self) -> bool:
+        return self._is_active
+
+    @property
+    def is_composite(self) -> bool:
+        return self._state_type == StateType.COMPOSITE or len(self._children) > 0
+
+    @property
+    def is_pseudostate(self) -> bool:
+        return self._state_type in _PSEUDOSTATE_TYPES
+
+    @property
+    def is_leaf(self) -> bool:
+        return len(self._children) == 0
+
+    @icontract.require(lambda child: child is not None, "Child must not be None")
+    @icontract.ensure(lambda self, child: child._name in self._children, "Child must be added")
+    def add_child(self, child: State) -> None:
+        """Add a child state. Validates uniqueness and DAG property."""
+        if child is self:
+            raise InvalidStateError("A state cannot be its own child")
+        ancestor = self._parent
+        while ancestor is not None:
+            if ancestor is child:
+                raise InvalidStateError("Adding child would create a cycle in the state hierarchy")
+            ancestor = ancestor._parent
+        with self._lock:
+            if child._name in self._children:
+                raise DuplicateStateError(f"Child state '{child._name}' already exists in '{self._name}'")
+            child._parent = self
+            self._children[child._name] = child
+
+    @icontract.require(lambda name: isinstance(name, str) and len(name) > 0, "Name must be a non-empty string")
+    def remove_child(self, name: str) -> State:
+        """Remove and return a child state by name."""
+        with self._lock:
+            if name not in self._children:
+                raise StateNotFoundError(f"Child state '{name}' not found in '{self._name}'")
+            child = self._children.pop(name)
+            child._parent = None
+            return child
+
+    @icontract.require(lambda name: isinstance(name, str) and len(name) > 0, "Name must be a non-empty string")
+    def get_child(self, name: str) -> State:
+        """Get a child state by name. O(1) lookup."""
+        if name not in self._children:
+            raise StateNotFoundError(f"Child state '{name}' not found in '{self._name}'")
+        return self._children[name]
+
+    def get_ancestors(self) -> List[State]:
+        """Return list of ancestors from immediate parent to root."""
+        ancestors: List[State] = []
+        current = self._parent
+        while current is not None:
+            ancestors.append(current)
+            current = current._parent
+        return ancestors
+
+    def get_root(self) -> State:
+        """Return the root state of the hierarchy."""
+        current: State = self
+        while current._parent is not None:
+            current = current._parent
+        return current
+
+    @staticmethod
+    def find_lca(state_a: State, state_b: State) -> Optional[State]:
+        """Find the Lowest Common Ancestor of two states."""
+        ancestors_a: Set[int] = set()
+        current: Optional[State] = state_a
+        while current is not None:
+            ancestors_a.add(id(current))
+            current = current._parent
+        current = state_b
+        while current is not None:
+            if id(current) in ancestors_a:
+                return current
+            current = current._parent
+        return None
+
+    def on_entry(self, action: Callable[[], None]) -> None:
+        """Register an entry action."""
+        self._entry_actions.append(action)
+
+    def on_exit(self, action: Callable[[], None]) -> None:
+        """Register an exit action."""
+        self._exit_actions.append(action)
+
+    def enter(self) -> None:
+        """Execute entry actions and mark state as active."""
+        with self._lock:
+            self._is_active = True
+            for action in self._entry_actions:
+                action()
+
+    def exit(self) -> None:
+        """Execute exit actions and mark state as inactive."""
+        with self._lock:
+            for action in self._exit_actions:
+                action()
+            self._is_active = False
+
+    @icontract.require(lambda key: isinstance(key, str) and len(key) > 0, "Key must be a non-empty string")
+    def set_data(self, key: str, value: Any) -> None:
+        """Set state data. Thread-safe."""
+        with self._lock:
+            self._data[key] = value
+
+    @icontract.require(lambda key: isinstance(key, str) and len(key) > 0, "Key must be a non-empty string")
+    def get_data(self, key: str, default: Any = None) -> Any:
+        """Get state data, falling back to parent if not found."""
+        with self._lock:
+            if key in self._data:
+                return self._data[key]
+        if self._parent is not None:
+            return self._parent.get_data(key, default)
+        return default
+
+    def __repr__(self) -> str:
+        return f"State(name={self._name!r}, type={self._state_type.name})"
 
 
+@icontract.invariant(
+    lambda self: self._state_type == StateType.COMPOSITE,
+    "CompositeState must have COMPOSITE type",
+)
 class CompositeState(State):
-    """Represents a composite state that can contain other states.
-    
-    CompositeState extends the base State class to implement the Composite pattern,
-    managing a collection of child states and their relationships.
-    
-    Class Invariants:
-    1. Must maintain valid parent-child relationships
-    2. Must have at most one initial state per region
-    3. Must properly manage parallel regions
-    4. Must maintain history state consistency
-    5. Must enforce state naming uniqueness within scope
-    
-    Design Patterns:
-    - Composite: Manages child state hierarchy
-    - Factory: Creates appropriate state types
-    - Observer: Notifies of child state changes
-    
-    Data Structures:
-    - Dictionary of child states by name
-    - List of parallel regions
-    - Map of history states
-    - Set of active substates
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe child state access
-    2. Atomic region activation/deactivation
-    3. Synchronized history state updates
-    4. Safe concurrent region execution
-    
-    Performance Characteristics:
-    1. O(1) child state lookup
-    2. O(r) region synchronization where r is region count
-    3. O(h) history state management where h is history count
+    """A state that contains child states and optional parallel regions.
+
+    Manages initial state designation, history tracking, and
+    ensures at most one initial pseudostate per region.
     """
-    pass
+
+    def __init__(
+        self,
+        name: str,
+        parent: Optional[State] = None,
+    ) -> None:
+        super().__init__(name, StateType.COMPOSITE, parent)
+        self._initial_state: Optional[State] = None
+        self._history_state: Optional[State] = None
+
+    @property
+    def initial_state(self) -> Optional[State]:
+        return self._initial_state
+
+    @icontract.require(lambda state: state is not None, "Initial state must not be None")
+    def set_initial_state(self, state: State) -> None:
+        """Designate an initial substate. Must be a child of this composite state."""
+        if state._name not in self._children:
+            raise InvalidStateError(f"State '{state._name}' is not a child of '{self._name}'")
+        self._initial_state = state
+
+    def get_active_substates(self) -> List[State]:
+        """Return all currently active direct child states."""
+        return [child for child in self._children.values() if child._is_active]
 
 
 class PseudoState(State):
-    """Base class for all pseudostates in the state machine.
-    
-    PseudoState provides common functionality for special states that control
-    execution flow but don't represent actual system states.
-    
-    Class Invariants:
-    1. Must have valid connections according to type
-    2. Must not contain substates
-    3. Must follow UML pseudostate semantics
-    4. Must maintain transition consistency
-    
-    Design Patterns:
-    - Template Method: Defines pseudostate behavior
-    - Strategy: Implements type-specific logic
-    - Chain of Responsibility: Handles transition routing
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe transition execution
-    2. Atomic decision point evaluation
-    3. Safe concurrent access to guard conditions
-    
-    Performance Characteristics:
-    1. O(1) type checking
-    2. O(t) transition evaluation where t is transition count
-    3. O(g) guard condition evaluation where g is guard count
+    """Base class for pseudostates that control execution flow.
+
+    Pseudostates are transient vertices that cannot contain substates.
     """
-    pass
+
+    @icontract.require(
+        lambda state_type: state_type in _PSEUDOSTATE_TYPES,
+        "PseudoState type must be a pseudostate type",
+    )
+    def __init__(
+        self,
+        name: str,
+        state_type: StateType,
+        parent: Optional[State] = None,
+    ) -> None:
+        super().__init__(name, state_type, parent)
+
+    def add_child(self, child: State) -> None:
+        raise InvalidStateError("Pseudostates cannot contain child states")
 
 
 class HistoryState(PseudoState):
-    """Represents history pseudostates (shallow and deep) in the state machine.
-    
-    HistoryState maintains the historical state configuration of its parent
-    composite state, enabling state restoration.
-    
-    Class Invariants:
-    1. Must belong to a composite state
-    2. Must maintain valid history configuration
-    3. Must preserve parallel region history
-    4. Must handle default transitions
-    
-    Design Patterns:
-    - Memento: Stores and restores state configuration
-    - Observer: Tracks state configuration changes
-    - Strategy: Implements history type behavior
-    
-    Data Structures:
-    - Stack for state configuration history
-    - Map for region history tracking
-    - Set for active state tracking
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe history updates
-    2. Atomic configuration restoration
-    3. Safe concurrent region history tracking
-    
-    Performance Characteristics:
-    1. O(1) history type checking
-    2. O(d) configuration storage where d is hierarchy depth
-    3. O(r) region history management where r is region count
+    """Represents shallow or deep history pseudostates.
+
+    Maintains historical state configuration of parent composite state.
     """
-    pass
+
+    @icontract.require(
+        lambda state_type: state_type in (StateType.SHALLOW_HISTORY, StateType.DEEP_HISTORY),
+        "HistoryState must be SHALLOW_HISTORY or DEEP_HISTORY",
+    )
+    def __init__(
+        self,
+        name: str,
+        state_type: StateType = StateType.SHALLOW_HISTORY,
+        parent: Optional[State] = None,
+    ) -> None:
+        super().__init__(name, state_type, parent)
+        self._saved_configuration: Optional[List[State]] = None
+        self._default_state: Optional[State] = None
+
+    @property
+    def saved_configuration(self) -> Optional[List[State]]:
+        return self._saved_configuration
+
+    @property
+    def default_state(self) -> Optional[State]:
+        return self._default_state
+
+    @default_state.setter
+    def default_state(self, state: Optional[State]) -> None:
+        self._default_state = state
+
+    def save_configuration(self, active_states: List[State]) -> None:
+        """Save the current active state configuration."""
+        self._saved_configuration = list(active_states)
+
+    def restore_configuration(self) -> List[State]:
+        """Restore saved configuration, falling back to default."""
+        if self._saved_configuration is not None:
+            return list(self._saved_configuration)
+        if self._default_state is not None:
+            return [self._default_state]
+        return []
 
 
 class ConnectionPointState(PseudoState):
-    """Represents entry and exit points for states.
-    
-    ConnectionPointState manages named entry and exit points that provide
-    interfaces for transitions into and out of composite states.
-    
-    Class Invariants:
-    1. Must have valid connection to parent state
-    2. Must maintain transition consistency
-    3. Must have unique name within parent scope
-    4. Must enforce valid transition paths
-    
-    Design Patterns:
-    - Facade: Provides clean interface to state
-    - Mediator: Coordinates transition routing
-    - Chain of Responsibility: Handles transition paths
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe transition routing
-    2. Atomic path validation
-    3. Safe concurrent access
-    
-    Performance Characteristics:
-    1. O(1) point type checking
-    2. O(p) path validation where p is path length
-    3. O(t) transition routing where t is transition count
-    """
-    pass
+    """Named entry/exit points for composite states."""
+
+    @icontract.require(
+        lambda state_type: state_type in (StateType.ENTRY_POINT, StateType.EXIT_POINT),
+        "ConnectionPointState must be ENTRY_POINT or EXIT_POINT",
+    )
+    def __init__(
+        self,
+        name: str,
+        state_type: StateType,
+        parent: Optional[State] = None,
+    ) -> None:
+        super().__init__(name, state_type, parent)
 
 
 class ChoiceState(PseudoState):
-    """Represents a dynamic conditional branch point.
-    
-    ChoiceState evaluates guard conditions at runtime to determine the
-    transition path, enabling dynamic behavioral decisions.
-    
-    Class Invariants:
-    1. Must have at least one outgoing transition
-    2. Must evaluate guards in defined order
-    3. Must have valid default transition
-    4. Must maintain consistent decision state
-    
-    Design Patterns:
-    - Strategy: Implements guard evaluation
-    - Chain of Responsibility: Processes guards
-    - Command: Encapsulates guard conditions
-    
-    Data Structures:
-    - Priority queue for guard evaluation
-    - Decision tree for condition checking
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe guard evaluation
-    2. Atomic decision making
-    3. Safe concurrent condition access
-    
-    Performance Characteristics:
-    1. O(g) guard evaluation where g is guard count
-    2. O(log g) guard prioritization
-    3. O(d) decision tree traversal where d is tree depth
-    """
-    pass
+    """Dynamic conditional branch point that evaluates guards at runtime."""
+
+    def __init__(self, name: str, parent: Optional[State] = None) -> None:
+        super().__init__(name, StateType.CHOICE, parent)
 
 
 class JunctionState(PseudoState):
-    """Represents a static conditional branch point.
-    
-    JunctionState implements static conditional branching based on
-    guard conditions that are evaluated when the junction is reached.
-    
-    Class Invariants:
-    1. Must have at least one outgoing transition
-    2. Must evaluate guards in static order
-    3. Must have valid default transition
-    4. Must maintain transition consistency
-    
-    Design Patterns:
-    - Strategy: Implements branching logic
-    - Chain of Responsibility: Processes conditions
-    - Command: Encapsulates static decisions
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe transition selection
-    2. Atomic path determination
-    3. Safe concurrent access
-    
-    Performance Characteristics:
-    1. O(t) transition evaluation where t is transition count
-    2. O(g) guard checking where g is guard count
-    3. O(1) default transition access
-    """
-    pass
+    """Static conditional branch point that evaluates guards when reached."""
+
+    def __init__(self, name: str, parent: Optional[State] = None) -> None:
+        super().__init__(name, StateType.JUNCTION, parent)
