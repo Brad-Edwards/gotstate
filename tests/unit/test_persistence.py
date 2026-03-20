@@ -8,7 +8,7 @@ from gotstate.core.machine import StateMachine
 from gotstate.core.state import State
 from gotstate.core.transition import Transition
 from gotstate.exceptions import SerializationError, ValidationError
-from gotstate.persistence.serializer import Serializer, SerializationFormat
+from gotstate.persistence.serializer import SerializationFormat, Serializer
 from gotstate.persistence.validator import (
     ValidationLevel,
     ValidationResult,

@@ -202,8 +202,7 @@ class TestStateMachine:
         m.set_initial_state(s1)
         actions = []
         m.add_transition(
-            Transition(s1, s1, kind=TransitionKind.INTERNAL, trigger="tick",
-                       action=lambda: actions.append(1))
+            Transition(s1, s1, kind=TransitionKind.INTERNAL, trigger="tick", action=lambda: actions.append(1))
         )
         m.start()
         m.process_event(SignalEvent("tick"))

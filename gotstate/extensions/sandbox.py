@@ -106,9 +106,7 @@ class ExtensionSandbox:
         try:
             return action()
         except Exception as e:
-            self._violations.append(
-                {"type": "execution_error", "error": str(e), "timestamp": time.monotonic()}
-            )
+            self._violations.append({"type": "execution_error", "error": str(e), "timestamp": time.monotonic()})
             raise
 
     def reset_usage(self) -> None:

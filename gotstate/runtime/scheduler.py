@@ -111,8 +111,8 @@ class Scheduler:
                 try:
                     if condition():
                         triggered.append(cid)
-                except Exception:
-                    pass
+                except Exception:  # nosec B110
+                    pass  # Condition evaluation errors must not break scheduling
         return triggered
 
     def cancel_all(self) -> None:

@@ -95,8 +95,8 @@ class Monitor:
         for subscriber in subscribers:
             try:
                 subscriber(record)
-            except Exception:
-                pass
+            except Exception:  # nosec B110
+                pass  # Subscriber errors must not break monitoring
 
     def subscribe(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Subscribe to monitoring events."""

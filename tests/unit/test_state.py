@@ -220,9 +220,16 @@ class TestState:
         assert len(parent.children) == 20
 
     def test_pseudostate_types(self):
-        for st in (StateType.INITIAL, StateType.CHOICE, StateType.JUNCTION,
-                    StateType.SHALLOW_HISTORY, StateType.DEEP_HISTORY,
-                    StateType.ENTRY_POINT, StateType.EXIT_POINT, StateType.TERMINATE):
+        for st in (
+            StateType.INITIAL,
+            StateType.CHOICE,
+            StateType.JUNCTION,
+            StateType.SHALLOW_HISTORY,
+            StateType.DEEP_HISTORY,
+            StateType.ENTRY_POINT,
+            StateType.EXIT_POINT,
+            StateType.TERMINATE,
+        ):
             s = State("ps", st)
             assert s.is_pseudostate
 

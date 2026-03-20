@@ -166,8 +166,7 @@ class Transition:
     def __repr__(self) -> str:
         target_name = self._target.name if self._target else "None"
         return (
-            f"Transition({self._source.name} -> {target_name}, "
-            f"kind={self._kind.name}, trigger={self._trigger!r})"
+            f"Transition({self._source.name} -> {target_name}, " f"kind={self._kind.name}, trigger={self._trigger!r})"
         )
 
 

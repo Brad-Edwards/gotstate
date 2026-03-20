@@ -73,9 +73,7 @@ class Serializer:
             "version": self._version,
             "name": machine.name,
             "status": machine.status.name,
-            "states": [
-                {"name": s.name, "type": s.state_type.name} for s in machine.states.values()
-            ],
+            "states": [{"name": s.name, "type": s.state_type.name} for s in machine.states.values()],
             "transitions": [
                 {
                     "source": t.source.name,

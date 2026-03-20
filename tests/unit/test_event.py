@@ -158,7 +158,7 @@ class TestChangeEvent:
 
         e = ChangeEvent("change", condition)
         assert e.evaluate() is False  # False, no change to True
-        assert e.evaluate() is True   # Changed to True
+        assert e.evaluate() is True  # Changed to True
 
     def test_non_callable_condition_contract(self):
         with pytest.raises(icontract.ViolationError):
