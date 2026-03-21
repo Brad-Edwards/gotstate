@@ -1,35 +1,33 @@
 """
 Types package for type system integration.
 
-Architecture:
-- Defines core type system
-- Manages type extensions
-- Maintains type safety
-- Coordinates with validation
-- Ensures type consistency
-
-Design Patterns:
-- Factory Pattern: Type creation
-- Strategy Pattern: Type handling
-- Adapter Pattern: Type conversion
-- Visitor Pattern: Type validation
-- Composite Pattern: Type composition
-
-Security:
-- Type validation
-- Conversion safety
-- Extension isolation
-- Resource protection
-- Access control
-
-Cross-cutting:
-- Error handling
-- Performance optimization
-- Type metrics
-- Thread safety
+Defines the core type system, manages type extensions,
+and maintains type safety.
 """
 
-from .base import BaseType
-from .extensions import TypeExtension
+from .base import (
+    BaseType,
+    CompositeType,
+    GenericType,
+    PrimitiveType,
+    TypeConstraint,
+    TypeKind,
+    TypeRegistry,
+    UnionType,
+)
+from .extensions import ExtensionManager, ExtensionScope, ExtensionStatus, TypeExtension
 
-__all__ = ["BaseType", "TypeExtension"]
+__all__ = [
+    "BaseType",
+    "TypeKind",
+    "TypeConstraint",
+    "PrimitiveType",
+    "CompositeType",
+    "GenericType",
+    "UnionType",
+    "TypeRegistry",
+    "TypeExtension",
+    "ExtensionStatus",
+    "ExtensionScope",
+    "ExtensionManager",
+]

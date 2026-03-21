@@ -1,337 +1,203 @@
 """
 Core type system definitions and management.
 
-Architecture:
-- Defines core type system
-- Specifies type compatibility
-- Manages type safety
-- Coordinates with validation
-- Integrates with extensions
-
-Design Patterns:
-- Factory Pattern: Type creation
-- Strategy Pattern: Type operations
-- Visitor Pattern: Type traversal
-- Observer Pattern: Type changes
-- Template Method: Type behavior
-
-Responsibilities:
-1. Type System
-   - Core types
-   - Type hierarchy
-   - Type relationships
-   - Type constraints
-   - Type operations
-
-2. Type Safety
-   - Type checking
-   - Type conversion
-   - Type validation
-   - Error handling
-   - Safety guarantees
-
-3. Type Management
-   - Type registration
-   - Type lookup
-   - Type caching
-   - Type versioning
-   - Type metadata
-
-4. Type Integration
-   - Extension support
-   - Validation hooks
-   - Conversion bridges
-   - Serialization
-   - Type evolution
-
-Security:
-- Type validation
-- Operation safety
-- Resource limits
-- Access control
-
-Cross-cutting:
-- Error handling
-- Performance optimization
-- Type metrics
-- Thread safety
-
-Dependencies:
-- extensions.py: Type extensions
-- validator.py: Type validation
-- serializer.py: Type serialization
-- monitor.py: Type monitoring
+Defines the core type system for the state machine, including
+base types, type constraints, and type operations.
 """
 
-from typing import Optional, Dict, List, Set, Any, TypeVar, Generic
-from enum import Enum, auto
-from dataclasses import dataclass
-from threading import Lock, RLock
+from __future__ import annotations
+
+import threading
 from abc import ABC, abstractmethod
+from enum import Enum, auto
+from typing import Any, Dict, Generic, List, Optional, Set, TypeVar
+
+import icontract
+
+T = TypeVar("T")
 
 
 class TypeKind(Enum):
-    """Defines the different kinds of types.
-    
-    Used to determine type behavior and compatibility.
-    """
-    PRIMITIVE = auto()  # Basic primitive types
-    COMPOSITE = auto()  # Composed of other types
-    GENERIC = auto()    # Parameterized types
-    UNION = auto()      # Union of types
-    EXTENSION = auto()  # Extension-provided types
+    """Defines the different kinds of types."""
+
+    PRIMITIVE = auto()
+    COMPOSITE = auto()
+    GENERIC = auto()
+    UNION = auto()
+    EXTENSION = auto()
 
 
 class TypeConstraint(Enum):
-    """Defines type system constraints.
-    
-    Used to enforce type system rules and safety.
-    """
-    IMMUTABLE = auto()  # Cannot be modified
-    COVARIANT = auto()  # Allows subtype variance
-    INVARIANT = auto()  # No variance allowed
-    BOUNDED = auto()    # Has type bounds
+    """Defines type system constraints."""
+
+    IMMUTABLE = auto()
+    COVARIANT = auto()
+    INVARIANT = auto()
+    BOUNDED = auto()
 
 
 class BaseType(ABC):
     """Base class for all types in the system.
-    
-    The BaseType class implements the Template Method pattern
-    to define common type behavior and operations.
-    
-    Class Invariants:
-    1. Must maintain type safety
-    2. Must preserve constraints
-    3. Must handle conversions
-    4. Must validate operations
-    5. Must track metadata
-    6. Must support extensions
-    7. Must enable traversal
-    8. Must enforce bounds
-    9. Must optimize performance
-    10. Must maintain metrics
-    
-    Design Patterns:
-    - Template Method: Defines behavior
-    - Strategy: Implements operations
-    - Visitor: Enables traversal
-    - Observer: Tracks changes
-    - Factory: Creates instances
-    
-    Data Structures:
-    - Graph for type hierarchy
-    - Map for conversions
-    - Cache for operations
-    - Set for constraints
-    - Tree for structure
-    
-    Algorithms:
-    - Type checking
-    - Constraint solving
-    - Conversion routing
-    - Bound checking
-    - Operation resolution
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe operations
-    2. Atomic type checks
-    3. Synchronized metadata
-    4. Safe concurrent access
-    5. Lock-free inspection
-    6. Mutex protection
-    
-    Performance Characteristics:
-    1. O(1) kind checking
-    2. O(log n) hierarchy traversal
-    3. O(c) constraint check where c is constraint count
-    4. O(m) metadata access where m is metadata size
-    5. O(o) operation lookup where o is operation count
-    
-    Resource Management:
-    1. Bounded memory usage
-    2. Cached operations
-    3. Pooled instances
-    4. Automatic cleanup
-    5. Load balancing
+
+    Defines common type behavior and operations via the
+    Template Method pattern.
     """
-    pass
+
+    @icontract.require(lambda name: isinstance(name, str) and len(name) > 0, "Name must be a non-empty string")
+    @icontract.require(lambda kind: isinstance(kind, TypeKind), "Kind must be a valid TypeKind")
+    def __init__(self, name: str, kind: TypeKind) -> None:
+        self._name = name
+        self._kind = kind
+        self._constraints: Set[TypeConstraint] = set()
+        self._metadata: Dict[str, Any] = {}
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def kind(self) -> TypeKind:
+        return self._kind
+
+    @property
+    def constraints(self) -> Set[TypeConstraint]:
+        return frozenset(self._constraints)
+
+    def add_constraint(self, constraint: TypeConstraint) -> None:
+        self._constraints.add(constraint)
+
+    @abstractmethod
+    def is_compatible(self, other: BaseType) -> bool:
+        """Check if this type is compatible with another type."""
+        ...
+
+    @abstractmethod
+    def validate(self, value: Any) -> bool:
+        """Validate that a value conforms to this type."""
+        ...
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(name={self._name!r}, kind={self._kind.name})"
 
 
 class PrimitiveType(BaseType):
-    """Represents primitive types in the system.
-    
-    PrimitiveType implements basic type operations for
-    fundamental data types.
-    
-    Class Invariants:
-    1. Must be immutable
-    2. Must be atomic
-    3. Must handle conversions
-    4. Must validate values
-    
-    Design Patterns:
-    - Strategy: Implements operations
-    - Factory: Creates instances
-    - Flyweight: Shares instances
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe operations
-    2. Immutable state
-    3. Safe concurrent access
-    
-    Performance Characteristics:
-    1. O(1) value operations
-    2. O(c) conversion where c is conversion complexity
-    3. O(v) validation where v is validation complexity
-    """
-    pass
+    """Represents primitive types (int, str, float, bool, etc.)."""
+
+    def __init__(self, name: str, python_type: type) -> None:
+        super().__init__(name, TypeKind.PRIMITIVE)
+        self._python_type = python_type
+        self.add_constraint(TypeConstraint.IMMUTABLE)
+
+    @property
+    def python_type(self) -> type:
+        return self._python_type
+
+    def is_compatible(self, other: BaseType) -> bool:
+        if isinstance(other, PrimitiveType):
+            return issubclass(self._python_type, other._python_type) or issubclass(
+                other._python_type, self._python_type
+            )
+        return False
+
+    def validate(self, value: Any) -> bool:
+        return isinstance(value, self._python_type)
 
 
 class CompositeType(BaseType):
-    """Represents composite types in the system.
-    
-    CompositeType implements operations for types composed
-    of other types.
-    
-    Class Invariants:
-    1. Must maintain structure
-    2. Must validate components
-    3. Must handle recursion
-    4. Must preserve constraints
-    
-    Design Patterns:
-    - Composite: Manages structure
-    - Visitor: Traverses structure
-    - Builder: Constructs instances
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe composition
-    2. Atomic validation
-    3. Safe concurrent access
-    
-    Performance Characteristics:
-    1. O(n) traversal where n is component count
-    2. O(v) validation where v is validator count
-    3. O(c) construction where c is component count
-    """
-    pass
+    """Represents composite types composed of other types."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name, TypeKind.COMPOSITE)
+        self._fields: Dict[str, BaseType] = {}
+
+    @property
+    def fields(self) -> Dict[str, BaseType]:
+        return dict(self._fields)
+
+    def add_field(self, name: str, field_type: BaseType) -> None:
+        self._fields[name] = field_type
+
+    def is_compatible(self, other: BaseType) -> bool:
+        if not isinstance(other, CompositeType):
+            return False
+        for name, ftype in self._fields.items():
+            if name not in other._fields:
+                return False
+            if not ftype.is_compatible(other._fields[name]):
+                return False
+        return True
+
+    def validate(self, value: Any) -> bool:
+        if not isinstance(value, dict):
+            return False
+        for name, ftype in self._fields.items():
+            if name not in value:
+                return False
+            if not ftype.validate(value[name]):
+                return False
+        return True
 
 
-class GenericType(BaseType, Generic[TypeVar('T')]):
-    """Represents generic types in the system.
-    
-    GenericType implements operations for parameterized
-    types with type parameters.
-    
-    Class Invariants:
-    1. Must handle parameters
-    2. Must enforce bounds
-    3. Must resolve variance
-    4. Must maintain safety
-    
-    Design Patterns:
-    - Strategy: Implements generics
-    - Factory: Creates instances
-    - Builder: Resolves parameters
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe resolution
-    2. Atomic instantiation
-    3. Safe concurrent access
-    
-    Performance Characteristics:
-    1. O(p) parameter handling where p is parameter count
-    2. O(b) bound checking where b is bound count
-    3. O(v) variance check where v is variance point count
-    """
-    pass
+class GenericType(BaseType, Generic[T]):
+    """Represents generic (parameterized) types."""
+
+    def __init__(self, name: str, bound: Optional[BaseType] = None) -> None:
+        super().__init__(name, TypeKind.GENERIC)
+        self._bound = bound
+        if bound is not None:
+            self.add_constraint(TypeConstraint.BOUNDED)
+
+    @property
+    def bound(self) -> Optional[BaseType]:
+        return self._bound
+
+    def is_compatible(self, other: BaseType) -> bool:
+        if self._bound is not None:
+            return self._bound.is_compatible(other)
+        return True
+
+    def validate(self, value: Any) -> bool:
+        if self._bound is not None:
+            return self._bound.validate(value)
+        return True
 
 
 class UnionType(BaseType):
-    """Represents union types in the system.
-    
-    UnionType implements operations for types that can
-    be one of several possible types.
-    
-    Class Invariants:
-    1. Must track variants
-    2. Must handle dispatch
-    3. Must validate members
-    4. Must preserve safety
-    
-    Design Patterns:
-    - Strategy: Implements unions
-    - Visitor: Handles variants
-    - Chain: Processes dispatch
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe dispatch
-    2. Atomic validation
-    3. Safe concurrent access
-    
-    Performance Characteristics:
-    1. O(v) variant check where v is variant count
-    2. O(d) dispatch where d is dispatch complexity
-    3. O(m) member validation where m is member count
-    """
-    pass
+    """Represents union types (one of several possible types)."""
+
+    def __init__(self, name: str, variants: Optional[List[BaseType]] = None) -> None:
+        super().__init__(name, TypeKind.UNION)
+        self._variants: List[BaseType] = list(variants) if variants else []
+
+    @property
+    def variants(self) -> List[BaseType]:
+        return list(self._variants)
+
+    def add_variant(self, variant: BaseType) -> None:
+        self._variants.append(variant)
+
+    def is_compatible(self, other: BaseType) -> bool:
+        return any(v.is_compatible(other) for v in self._variants)
+
+    def validate(self, value: Any) -> bool:
+        return any(v.validate(value) for v in self._variants)
 
 
 class TypeRegistry:
-    """Manages type registration and lookup.
-    
-    TypeRegistry implements efficient type management and
-    lookup operations.
-    
-    Class Invariants:
-    1. Must maintain registry
-    2. Must handle versions
-    3. Must cache lookups
-    4. Must validate entries
-    
-    Design Patterns:
-    - Registry: Manages types
-    - Factory: Creates entries
-    - Cache: Optimizes lookup
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe registration
-    2. Atomic updates
-    3. Safe concurrent access
-    
-    Performance Characteristics:
-    1. O(1) lookup
-    2. O(log n) registration
-    3. O(v) version check where v is version count
-    """
-    pass
+    """Manages type registration and lookup."""
 
+    def __init__(self) -> None:
+        self._types: Dict[str, BaseType] = {}
+        self._lock = threading.Lock()
 
-class TypeConverter:
-    """Manages type conversions.
-    
-    TypeConverter implements safe type conversion operations
-    with validation.
-    
-    Class Invariants:
-    1. Must validate conversion
-    2. Must preserve semantics
-    3. Must handle errors
-    4. Must track success
-    
-    Design Patterns:
-    - Strategy: Implements conversion
-    - Chain: Processes steps
-    - Observer: Reports results
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe conversion
-    2. Atomic operations
-    3. Safe concurrent access
-    
-    Performance Characteristics:
-    1. O(c) conversion where c is conversion complexity
-    2. O(v) validation where v is validation count
-    3. O(s) step execution where s is step count
-    """
-    pass
+    def register(self, type_def: BaseType) -> None:
+        with self._lock:
+            self._types[type_def.name] = type_def
+
+    def get(self, name: str) -> Optional[BaseType]:
+        with self._lock:
+            return self._types.get(name)
+
+    def all_types(self) -> Dict[str, BaseType]:
+        with self._lock:
+            return dict(self._types)

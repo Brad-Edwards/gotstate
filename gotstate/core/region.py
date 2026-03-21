@@ -1,297 +1,220 @@
 """
 Parallel region and concurrency management.
 
-Architecture:
-- Implements parallel region execution
-- Manages region synchronization
-- Handles cross-region transitions
-- Coordinates with State for hierarchy
-- Integrates with Executor for concurrency
-
-Design Patterns:
-- Composite Pattern: Region hierarchy
-- Observer Pattern: Region events
-- Mediator Pattern: Region coordination
-- State Pattern: Region lifecycle
-- Strategy Pattern: Execution policies
-
-Responsibilities:
-1. Parallel Execution
-   - True parallel regions
-   - State consistency
-   - Cross-region transitions
-   - Join/fork pseudostates
-   - Event ordering
-
-2. Region Synchronization
-   - State consistency
-   - Event processing
-   - Synchronization points
-   - Race condition prevention
-   - Resource coordination
-
-3. Region Lifecycle
-   - Initialization sequence
-   - Termination order
-   - History restoration
-   - Cross-region coordination
-   - Data consistency
-
-4. Event Management
-   - Event ordering
-   - Event propagation
-   - Priority handling
-   - Scope boundaries
-   - Processing rules
-
-Security:
-- Region isolation
-- Resource boundaries
-- State protection
-- Event validation
-
-Cross-cutting:
-- Error handling
-- Performance monitoring
-- Region metrics
-- Thread safety
-
-Dependencies:
-- state.py: State hierarchy
-- event.py: Event processing
-- executor.py: Parallel execution
-- machine.py: Machine context
+Implements parallel region execution, synchronization, and cross-region
+coordination for the hierarchical state machine.
 """
 
-from typing import Optional, List, Set, Dict
+from __future__ import annotations
+
+import threading
 from enum import Enum, auto
-from dataclasses import dataclass
-from threading import Lock, Event
+from typing import Dict, List, Optional, Set
+
+import icontract
+
+from gotstate.core.state import State
+from gotstate.exceptions import RegionError
 
 
 class RegionStatus(Enum):
-    """Defines the possible states of a region.
-    
-    Used to track region lifecycle and coordinate execution.
-    """
-    INACTIVE = auto()   # Region not yet started
-    ACTIVE = auto()     # Region executing normally
-    SUSPENDED = auto()  # Region temporarily suspended
-    TERMINATING = auto() # Region in process of terminating
-    TERMINATED = auto() # Region fully terminated
+    """Defines the possible states of a region."""
+
+    INACTIVE = auto()
+    ACTIVE = auto()
+    SUSPENDED = auto()
+    TERMINATING = auto()
+    TERMINATED = auto()
 
 
+@icontract.invariant(lambda self: isinstance(self._status, RegionStatus), "Region status must be valid")
+@icontract.invariant(
+    lambda self: isinstance(self._name, str) and len(self._name) > 0, "Region name must be a non-empty string"
+)
 class Region:
     """Represents a parallel region in a hierarchical state machine.
-    
-    The Region class implements concurrent execution of orthogonal
-    state configurations with proper synchronization and isolation.
-    
+
+    Manages concurrent execution of orthogonal state configurations
+    with proper synchronization and isolation.
+
     Class Invariants:
-    1. Must maintain state consistency
-    2. Must preserve event ordering
-    3. Must handle cross-region transitions
-    4. Must enforce isolation boundaries
-    5. Must coordinate initialization/termination
-    6. Must preserve history state
-    7. Must handle interruptions gracefully
-    8. Must maintain event scope
-    9. Must prevent race conditions
-    10. Must manage resources properly
-    
-    Design Patterns:
-    - Composite: Manages region hierarchy
-    - Observer: Notifies of region events
-    - Mediator: Coordinates between regions
-    - State: Manages region lifecycle
-    - Strategy: Implements execution policies
-    - Command: Encapsulates region operations
-    
-    Data Structures:
-    - Set for active states
-    - Queue for pending events
-    - Map for history states
-    - Tree for scope hierarchy
-    - Graph for transition paths
-    
-    Algorithms:
-    - Parallel execution scheduling
-    - Event propagation routing
-    - Synchronization point management
-    - Resource allocation
-    - Deadlock prevention
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe state access
-    2. Atomic region operations
-    3. Synchronized event processing
-    4. Safe cross-region transitions
-    5. Lock-free status inspection
-    6. Mutex protection for critical sections
-    
-    Performance Characteristics:
-    1. O(1) status updates
-    2. O(log n) event routing
-    3. O(p) parallel execution where p is active paths
-    4. O(s) synchronization where s is sync points
-    5. O(r) cross-region coordination where r is region count
-    
-    Resource Management:
-    1. Bounded thread usage
-    2. Controlled memory allocation
-    3. Resource pooling
-    4. Automatic cleanup
-    5. Load balancing
+    1. Region status must be a valid RegionStatus
+    2. Region name must be a non-empty string
     """
-    pass
+
+    @icontract.require(lambda name: isinstance(name, str) and len(name) > 0, "Name must be a non-empty string")
+    def __init__(self, name: str, parent_state: Optional[State] = None) -> None:
+        self._name = name
+        self._parent_state = parent_state
+        self._status = RegionStatus.INACTIVE
+        self._states: Dict[str, State] = {}
+        self._active_state: Optional[State] = None
+        self._initial_state: Optional[State] = None
+        self._lock = threading.RLock()
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def status(self) -> RegionStatus:
+        return self._status
+
+    @property
+    def parent_state(self) -> Optional[State]:
+        return self._parent_state
+
+    @property
+    def active_state(self) -> Optional[State]:
+        return self._active_state
+
+    @property
+    def initial_state(self) -> Optional[State]:
+        return self._initial_state
+
+    @property
+    def states(self) -> Dict[str, State]:
+        return dict(self._states)
+
+    @icontract.require(lambda state: state is not None, "State must not be None")
+    def add_state(self, state: State) -> None:
+        """Add a state to this region."""
+        with self._lock:
+            if state.name in self._states:
+                raise RegionError(f"State '{state.name}' already exists in region '{self._name}'")
+            self._states[state.name] = state
+
+    @icontract.require(lambda state: state is not None, "State must not be None")
+    def set_initial_state(self, state: State) -> None:
+        """Designate the initial state for this region."""
+        if state.name not in self._states:
+            raise RegionError(f"State '{state.name}' is not in region '{self._name}'")
+        self._initial_state = state
+
+    def activate(self) -> None:
+        """Activate the region, entering its initial state."""
+        with self._lock:
+            if self._status == RegionStatus.ACTIVE:
+                return
+            self._status = RegionStatus.ACTIVE
+            if self._initial_state is not None:
+                self._active_state = self._initial_state
+                self._initial_state.enter()
+
+    def deactivate(self) -> None:
+        """Deactivate the region, exiting the current active state."""
+        with self._lock:
+            self._status = RegionStatus.TERMINATING
+            if self._active_state is not None:
+                self._active_state.exit()
+                self._active_state = None
+            self._status = RegionStatus.TERMINATED
+
+    def set_active_state(self, state: State) -> None:
+        """Change the active state within this region."""
+        with self._lock:
+            if state.name not in self._states:
+                raise RegionError(f"State '{state.name}' is not in region '{self._name}'")
+            self._active_state = state
+
+    def __repr__(self) -> str:
+        active = self._active_state.name if self._active_state else "None"
+        return f"Region(name={self._name!r}, status={self._status.name}, active={active})"
 
 
 class ParallelRegion(Region):
-    """Represents a region that executes in parallel with siblings.
-    
-    ParallelRegion implements true concurrent execution with proper
-    isolation and synchronization guarantees.
-    
-    Class Invariants:
-    1. Must maintain parallel execution
-    2. Must preserve isolation
-    3. Must handle shared resources
-    4. Must coordinate termination
-    
-    Design Patterns:
-    - Strategy: Implements parallel execution
-    - Observer: Monitors execution status
-    - Mediator: Coordinates resources
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe execution
-    2. Atomic operations
-    3. Safe resource sharing
-    
-    Performance Characteristics:
-    1. O(1) execution management
-    2. O(r) resource coordination where r is resource count
-    3. O(s) state synchronization where s is shared state count
-    """
-    pass
+    """A region that executes in parallel with sibling regions."""
+
+    def __init__(self, name: str, parent_state: Optional[State] = None) -> None:
+        super().__init__(name, parent_state)
 
 
 class SynchronizationRegion(Region):
-    """Represents a region that coordinates synchronization points.
-    
-    SynchronizationRegion manages join/fork pseudostates and ensures
-    proper coordination between parallel regions.
-    
-    Class Invariants:
-    1. Must maintain sync point validity
-    2. Must handle partial completion
-    3. Must prevent deadlocks
-    4. Must track progress
-    
-    Design Patterns:
-    - Mediator: Coordinates synchronization
-    - Observer: Monitors progress
-    - Command: Encapsulates sync operations
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe synchronization
-    2. Atomic progress updates
-    3. Safe concurrent access
-    
-    Performance Characteristics:
-    1. O(1) point management
-    2. O(p) progress tracking where p is participant count
-    3. O(d) deadlock detection where d is dependency count
-    """
-    pass
+    """A region that coordinates synchronization points between parallel regions."""
+
+    def __init__(self, name: str, parent_state: Optional[State] = None) -> None:
+        super().__init__(name, parent_state)
+        self._sync_points: Set[str] = set()
+        self._completed: Set[str] = set()
+
+    def add_sync_point(self, point_id: str) -> None:
+        self._sync_points.add(point_id)
+
+    def mark_completed(self, point_id: str) -> None:
+        self._completed.add(point_id)
+
+    @property
+    def is_synchronized(self) -> bool:
+        return self._sync_points == self._completed
+
+    def reset(self) -> None:
+        self._completed.clear()
 
 
 class HistoryRegion(Region):
-    """Represents a region that maintains history state information.
-    
-    HistoryRegion preserves and restores historical state configurations
-    for both shallow and deep history.
-    
-    Class Invariants:
-    1. Must maintain history accuracy
-    2. Must handle parallel states
-    3. Must preserve ordering
-    4. Must support restoration
-    
-    Design Patterns:
-    - Memento: Preserves history state
-    - Strategy: Implements history types
-    - Command: Encapsulates restoration
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe history tracking
-    2. Atomic state restoration
-    3. Safe concurrent access
-    
-    Performance Characteristics:
-    1. O(1) history updates
-    2. O(h) state restoration where h is history depth
-    3. O(s) parallel state handling where s is state count
-    """
-    pass
+    """A region that maintains history state information."""
+
+    def __init__(self, name: str, parent_state: Optional[State] = None) -> None:
+        super().__init__(name, parent_state)
+        self._history: Optional[State] = None
+
+    def save_history(self) -> None:
+        """Save current active state as history."""
+        self._history = self._active_state
+
+    def restore_history(self) -> Optional[State]:
+        """Restore saved history state."""
+        return self._history
 
 
+@icontract.invariant(
+    lambda self: isinstance(self._regions, dict),
+    "Regions collection must be a dict",
+)
 class RegionManager:
     """Manages multiple regions and their interactions.
-    
-    RegionManager coordinates parallel regions, handles resource
-    allocation, and ensures proper synchronization.
-    
-    Class Invariants:
-    1. Must maintain region isolation
-    2. Must handle resource allocation
-    3. Must prevent deadlocks
-    4. Must coordinate execution
-    5. Must manage lifecycle
-    6. Must track dependencies
-    7. Must handle failures
-    8. Must preserve ordering
-    9. Must support scaling
-    10. Must enforce boundaries
-    
-    Design Patterns:
-    - Facade: Provides region management interface
-    - Factory: Creates region instances
-    - Observer: Monitors region status
-    - Mediator: Coordinates interactions
-    
-    Data Structures:
-    - Map of active regions
-    - Graph of dependencies
-    - Queue of pending operations
-    - Pool of resources
-    
-    Algorithms:
-    - Resource allocation
-    - Deadlock detection
-    - Load balancing
-    - Failure recovery
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe management
-    2. Atomic operations
-    3. Synchronized coordination
-    4. Safe concurrent access
-    5. Lock-free inspection
-    6. Mutex protection
-    
-    Performance Characteristics:
-    1. O(1) region lookup
-    2. O(log n) resource allocation
-    3. O(d) deadlock detection where d is dependency count
-    4. O(r) coordination where r is region count
-    5. O(f) failure handling where f is failure count
-    
-    Resource Management:
-    1. Bounded region count
-    2. Pooled resources
-    3. Automatic cleanup
-    4. Load distribution
-    5. Failure isolation
+
+    Coordinates parallel region execution, resource allocation,
+    and synchronization.
     """
-    pass
+
+    def __init__(self) -> None:
+        self._regions: Dict[str, Region] = {}
+        self._lock = threading.RLock()
+
+    @property
+    def regions(self) -> Dict[str, Region]:
+        return dict(self._regions)
+
+    @icontract.require(lambda region: region is not None, "Region must not be None")
+    def add_region(self, region: Region) -> None:
+        with self._lock:
+            if region.name in self._regions:
+                raise RegionError(f"Region '{region.name}' already registered")
+            self._regions[region.name] = region
+
+    def remove_region(self, name: str) -> Region:
+        with self._lock:
+            if name not in self._regions:
+                raise RegionError(f"Region '{name}' not found")
+            return self._regions.pop(name)
+
+    def get_region(self, name: str) -> Region:
+        if name not in self._regions:
+            raise RegionError(f"Region '{name}' not found")
+        return self._regions[name]
+
+    def activate_all(self) -> None:
+        """Activate all managed regions."""
+        with self._lock:
+            for region in self._regions.values():
+                region.activate()
+
+    def deactivate_all(self) -> None:
+        """Deactivate all managed regions."""
+        with self._lock:
+            for region in self._regions.values():
+                region.deactivate()
+
+    def get_active_regions(self) -> List[Region]:
+        return [r for r in self._regions.values() if r.status == RegionStatus.ACTIVE]

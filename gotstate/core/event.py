@@ -1,367 +1,331 @@
 """
 Event processing and queue management.
 
-Architecture:
-- Implements event processing and queue management
-- Handles event patterns and ordering
-- Maintains event processing semantics
-- Coordinates with Executor for processing
-- Integrates with Scheduler for time events
-
-Design Patterns:
-- Observer Pattern: Event notifications
-- Command Pattern: Event execution
-- Strategy Pattern: Processing patterns
-- Queue Pattern: Event queuing
-- Chain of Responsibility: Event handling
-
-Responsibilities:
-1. Event Processing
-   - Synchronous processing
-   - Asynchronous processing
-   - Event deferral
-   - Priority handling
-   - Completion events
-
-2. Event Queue
-   - Queue management
-   - Event ordering
-   - Event cancellation
-   - Timeout handling
-   - Event filtering
-
-3. Processing Patterns
-   - Single consumption
-   - Broadcast events
-   - Conditional events
-   - Event scoping
-   - Priority rules
-
-4. Run-to-Completion
-   - RTC semantics
-   - Queue during transitions
-   - Order preservation
-   - Re-entrant processing
-   - Timeout handling
-
-Security:
-- Event validation
-- Queue protection
-- Resource monitoring
-- Processing boundaries
-
-Cross-cutting:
-- Error handling
-- Performance optimization
-- Event metrics
-- Thread safety
-
-Dependencies:
-- transition.py: Event triggers
-- executor.py: Event execution
-- scheduler.py: Time events
-- machine.py: Machine context
+Implements event types, priority-based queuing, and run-to-completion
+semantics for the hierarchical state machine.
 """
 
-from typing import Optional, Dict, List, Any, Set
+from __future__ import annotations
+
+import bisect
+import threading
+import time
+import uuid
 from enum import Enum, auto
-from dataclasses import dataclass
-from queue import PriorityQueue
+from typing import Any, Callable, Dict, List, Optional
+
+import icontract
+
+from gotstate.exceptions import EventQueueFullError, InvalidEventError
 
 
 class EventKind(Enum):
-    """Defines the different types of events in the state machine.
-    
-    Used to determine event processing behavior and routing.
-    """
-    SIGNAL = auto()     # External signal events
-    CALL = auto()       # Synchronous call events
-    TIME = auto()       # Time-based events
-    CHANGE = auto()     # Change notification events
-    COMPLETION = auto() # State completion events
+    """Defines the different types of events in the state machine."""
+
+    SIGNAL = auto()
+    CALL = auto()
+    TIME = auto()
+    CHANGE = auto()
+    COMPLETION = auto()
 
 
 class EventPriority(Enum):
     """Defines priority levels for event processing.
-    
-    Used to determine event processing order in the queue.
+
+    Numeric values determine queue ordering (lower = higher priority).
     """
-    HIGH = auto()    # Processed before normal priority
-    NORMAL = auto()  # Default processing priority
-    LOW = auto()     # Processed after normal priority
-    DEFER = auto()   # Deferred until state exit
+
+    HIGH = 0
+    NORMAL = 1
+    LOW = 2
+    DEFER = 3
 
 
+@icontract.invariant(lambda self: isinstance(self._kind, EventKind), "Event kind must be valid")
+@icontract.invariant(lambda self: isinstance(self._priority, EventPriority), "Event priority must be valid")
+@icontract.invariant(lambda self: isinstance(self._event_id, str) and len(self._event_id) > 0, "Event ID must exist")
 class Event:
     """Represents an event in the state machine.
-    
-    The Event class implements the Command pattern to encapsulate event
-    data and processing behavior. It supports various event types and
-    processing patterns.
-    
+
+    Events are immutable after creation. The event_id is auto-generated
+    and unique. Event data (payload) is stored as a read-only dict.
+
     Class Invariants:
-    1. Event ID must be unique within its scope
-    2. Event kind must not change after creation
-    3. Event data must be immutable
-    4. Priority must be valid
-    5. Timeout must be non-negative if specified
-    6. Parameters must be serializable
-    7. Event scope must be well-defined
-    8. Processing status must be tracked
-    9. Cancellation must be handled gracefully
-    10. Resources must be properly managed
-    
-    Design Patterns:
-    - Command: Encapsulates event data and behavior
-    - Observer: Notifies of event processing
-    - Strategy: Implements processing patterns
-    - Memento: Preserves event state
-    - Chain of Responsibility: Handles event processing
-    
-    Data Structures:
-    - Dictionary for event parameters
-    - Set for consumed status
-    - Queue for processing order
-    - Tree for scope hierarchy
-    - Map for deferred events
-    
-    Algorithms:
-    - Priority-based scheduling
-    - Scope resolution
-    - Timeout handling
-    - Consumption tracking
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe event processing
-    2. Atomic parameter access
-    3. Synchronized scope checking
-    4. Safe concurrent consumption
-    5. Lock-free status inspection
-    6. Mutex protection for queue operations
-    
-    Performance Characteristics:
-    1. O(1) event creation
-    2. O(log n) priority queuing
-    3. O(1) parameter access
-    4. O(h) scope checking where h is hierarchy depth
-    5. O(1) status updates
-    
-    Resource Management:
-    1. Bounded queue size
-    2. Pooled event objects
-    3. Cached scope information
-    4. Limited concurrent processing
-    5. Automatic timeout cleanup
+    1. Event kind must be a valid EventKind
+    2. Event priority must be a valid EventPriority
+    3. Event ID must be a non-empty string
     """
-    pass
+
+    @icontract.require(lambda kind: isinstance(kind, EventKind), "kind must be a valid EventKind")
+    @icontract.require(lambda priority: isinstance(priority, EventPriority), "priority must be a valid EventPriority")
+    @icontract.require(lambda name: isinstance(name, str) and len(name) > 0, "name must be a non-empty string")
+    def __init__(
+        self,
+        name: str,
+        kind: EventKind = EventKind.SIGNAL,
+        priority: EventPriority = EventPriority.NORMAL,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self._event_id = str(uuid.uuid4())
+        self._name = name
+        self._kind = kind
+        self._priority = priority
+        self._data: Dict[str, Any] = dict(data) if data else {}
+        self._timestamp = time.monotonic()
+        self._consumed = False
+
+    @property
+    def event_id(self) -> str:
+        return self._event_id
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def kind(self) -> EventKind:
+        return self._kind
+
+    @property
+    def priority(self) -> EventPriority:
+        return self._priority
+
+    @property
+    def data(self) -> Dict[str, Any]:
+        return dict(self._data)
+
+    @property
+    def timestamp(self) -> float:
+        return self._timestamp
+
+    @property
+    def is_consumed(self) -> bool:
+        return self._consumed
+
+    def consume(self) -> None:
+        """Mark the event as consumed."""
+        self._consumed = True
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, Event):
+            return NotImplemented
+        if self._priority.value != other._priority.value:
+            return self._priority.value < other._priority.value
+        return self._timestamp < other._timestamp
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Event):
+            return NotImplemented
+        return self._event_id == other._event_id
+
+    def __hash__(self) -> int:
+        return hash(self._event_id)
+
+    def __repr__(self) -> str:
+        return f"Event(name={self._name!r}, kind={self._kind.name}, priority={self._priority.name})"
 
 
 class SignalEvent(Event):
-    """Represents an asynchronous signal event.
-    
-    SignalEvent implements asynchronous event processing with
-    optional payload data and broadcast capabilities.
-    
-    Class Invariants:
-    1. Must maintain signal ordering
-    2. Must handle broadcast properly
-    3. Must track consumption status
-    4. Must preserve payload integrity
-    
-    Design Patterns:
-    - Observer: Implements signal notification
-    - Command: Encapsulates signal data
-    - Strategy: Implements broadcast behavior
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe signal dispatch
-    2. Atomic consumption tracking
-    3. Safe concurrent broadcast
-    
-    Performance Characteristics:
-    1. O(1) signal creation
-    2. O(n) broadcast where n is listener count
-    3. O(1) consumption status
-    """
-    pass
+    """Asynchronous signal event with optional payload."""
+
+    def __init__(
+        self,
+        name: str,
+        priority: EventPriority = EventPriority.NORMAL,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(name, EventKind.SIGNAL, priority, data)
 
 
 class CallEvent(Event):
-    """Represents a synchronous call event.
-    
-    CallEvent implements synchronous operation calls with
-    return values and parameter passing.
-    
-    Class Invariants:
-    1. Must complete synchronously
-    2. Must handle return values
-    3. Must validate parameters
-    4. Must maintain call semantics
-    
-    Design Patterns:
-    - Command: Encapsulates operation call
-    - Strategy: Implements call handling
-    - Template Method: Defines call sequence
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe parameter handling
-    2. Atomic operation execution
-    3. Safe concurrent calls
-    
-    Performance Characteristics:
-    1. O(1) call creation
-    2. O(p) parameter validation where p is parameter count
-    3. O(1) return value handling
-    """
-    pass
+    """Synchronous call event with return value support."""
+
+    def __init__(
+        self,
+        name: str,
+        operation: Optional[Callable[..., Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(name, EventKind.CALL, EventPriority.NORMAL, data)
+        self._operation = operation
+        self._result: Any = None
+
+    @property
+    def operation(self) -> Optional[Callable[..., Any]]:
+        return self._operation
+
+    @property
+    def result(self) -> Any:
+        return self._result
+
+    @result.setter
+    def result(self, value: Any) -> None:
+        self._result = value
 
 
 class TimeEvent(Event):
-    """Represents a time-based event.
-    
-    TimeEvent implements both relative ("after") and absolute ("at")
-    timing events with proper scheduling.
-    
-    Class Invariants:
-    1. Must have valid time specification
-    2. Must maintain timing accuracy
-    3. Must handle cancellation
-    4. Must track scheduling status
-    
-    Design Patterns:
-    - Command: Encapsulates timing logic
-    - Observer: Notifies of timing
-    - Strategy: Implements timing types
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe scheduling
-    2. Atomic timer operations
-    3. Safe concurrent access
-    
-    Performance Characteristics:
-    1. O(1) event creation
-    2. O(log n) scheduling where n is timer count
-    3. O(1) cancellation
-    """
-    pass
+    """Time-based event supporting relative and absolute timing."""
+
+    @icontract.require(lambda duration: duration is None or duration >= 0, "Duration must be non-negative")
+    def __init__(
+        self,
+        name: str,
+        duration: Optional[float] = None,
+        absolute_time: Optional[float] = None,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(name, EventKind.TIME, EventPriority.NORMAL, data)
+        self._duration = duration
+        self._absolute_time = absolute_time
+        self._cancelled = False
+
+    @property
+    def duration(self) -> Optional[float]:
+        return self._duration
+
+    @property
+    def absolute_time(self) -> Optional[float]:
+        return self._absolute_time
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancelled
+
+    def cancel(self) -> None:
+        self._cancelled = True
 
 
 class ChangeEvent(Event):
-    """Represents a change notification event.
-    
-    ChangeEvent implements condition-based events that trigger
-    when monitored values change.
-    
-    Class Invariants:
-    1. Must track condition state
-    2. Must detect all changes
-    3. Must prevent missed events
-    4. Must maintain change history
-    
-    Design Patterns:
-    - Observer: Monitors changes
-    - Command: Encapsulates conditions
-    - Strategy: Implements detection
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe condition monitoring
-    2. Atomic change detection
-    3. Safe concurrent notification
-    
-    Performance Characteristics:
-    1. O(1) event creation
-    2. O(c) condition evaluation where c is condition complexity
-    3. O(h) history tracking where h is history size
-    """
-    pass
+    """Event triggered when a monitored condition changes."""
+
+    @icontract.require(lambda condition: callable(condition), "Condition must be callable")
+    def __init__(
+        self,
+        name: str,
+        condition: Callable[[], bool],
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(name, EventKind.CHANGE, EventPriority.NORMAL, data)
+        self._condition = condition
+        self._last_value: Optional[bool] = None
+
+    @property
+    def condition(self) -> Callable[[], bool]:
+        return self._condition
+
+    def evaluate(self) -> bool:
+        """Evaluate the condition and return True if it changed to True."""
+        current = self._condition()
+        changed = current and self._last_value is not True
+        self._last_value = current
+        return changed
 
 
 class CompletionEvent(Event):
-    """Represents a state completion event.
-    
-    CompletionEvent is automatically generated when a state
-    completes its do-activity or becomes final.
-    
-    Class Invariants:
-    1. Must track completion status
-    2. Must maintain state consistency
-    3. Must handle parallel regions
-    4. Must preserve completion order
-    
-    Design Patterns:
-    - Observer: Notifies of completion
-    - Command: Encapsulates completion
-    - Strategy: Implements completion types
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe status tracking
-    2. Atomic completion detection
-    3. Safe concurrent notification
-    
-    Performance Characteristics:
-    1. O(1) event creation
-    2. O(r) region checking where r is region count
-    3. O(1) status updates
-    """
-    pass
+    """Event generated when a state completes its do-activity or reaches a final state."""
+
+    def __init__(self, name: str, source_state_name: str) -> None:
+        super().__init__(name, EventKind.COMPLETION, EventPriority.HIGH)
+        self._source_state_name = source_state_name
+
+    @property
+    def source_state_name(self) -> str:
+        return self._source_state_name
 
 
+_DEFAULT_MAX_SIZE = 1000
+
+
+@icontract.invariant(lambda self: self._max_size > 0, "Max size must be positive")
+@icontract.invariant(lambda self: len(self._events) <= self._max_size, "Queue must not exceed max size")
 class EventQueue:
-    """Manages event queuing and processing.
-    
-    EventQueue implements a priority-based event queue with
-    run-to-completion semantics and proper ordering.
-    
+    """Priority-based event queue with run-to-completion semantics.
+
+    Thread-safe. Events are dequeued in priority order, with FIFO
+    ordering within the same priority level.
+
     Class Invariants:
-    1. Must maintain event order
-    2. Must enforce RTC semantics
-    3. Must handle priorities
-    4. Must manage timeouts
-    5. Must support cancellation
-    6. Must track queue status
-    7. Must handle overflow
-    8. Must preserve fairness
-    9. Must support filtering
-    10. Must maintain consistency
-    
-    Design Patterns:
-    - Queue: Manages event ordering
-    - Strategy: Implements queue policies
-    - Observer: Notifies of queue changes
-    - Chain of Responsibility: Processes events
-    
-    Data Structures:
-    - Priority queue for events
-    - Set for cancelled events
-    - Map for deferred events
-    - List for processing history
-    
-    Algorithms:
-    - Priority scheduling
-    - Timeout management
-    - Fairness enforcement
-    - Load balancing
-    
-    Threading/Concurrency Guarantees:
-    1. Thread-safe queue operations
-    2. Atomic event processing
-    3. Synchronized status updates
-    4. Safe concurrent access
-    5. Lock-free inspection
-    6. Mutex protection for modifications
-    
-    Performance Characteristics:
-    1. O(log n) enqueue/dequeue
-    2. O(1) cancellation
-    3. O(1) status check
-    4. O(k) filtering where k is filter count
-    5. O(t) timeout cleanup where t is timeout count
-    
-    Resource Management:
-    1. Bounded queue size
-    2. Memory-efficient storage
-    3. Automatic cleanup
-    4. Resource pooling
-    5. Load shedding
+    1. Max size is always positive
+    2. Number of events never exceeds max size
     """
-    pass
+
+    @icontract.require(lambda max_size: max_size > 0, "max_size must be positive")
+    def __init__(self, max_size: int = _DEFAULT_MAX_SIZE) -> None:
+        self._max_size = max_size
+        self._events: List[Event] = []
+        self._deferred: List[Event] = []
+        self._lock = threading.Lock()
+
+    @property
+    def size(self) -> int:
+        with self._lock:
+            return len(self._events)
+
+    @property
+    def is_empty(self) -> bool:
+        with self._lock:
+            return len(self._events) == 0
+
+    @property
+    def max_size(self) -> int:
+        return self._max_size
+
+    @icontract.require(lambda event: isinstance(event, Event), "Must enqueue an Event instance")
+    def enqueue(self, event: Event) -> None:
+        """Add an event to the queue, maintaining priority order."""
+        with self._lock:
+            if len(self._events) + len(self._deferred) >= self._max_size:
+                raise EventQueueFullError(f"Event queue is full (max_size={self._max_size})")
+            if event.priority == EventPriority.DEFER:
+                self._deferred.append(event)
+                return
+            bisect.insort(self._events, event)
+
+    def dequeue(self) -> Optional[Event]:
+        """Remove and return the highest-priority event, or None if empty."""
+        with self._lock:
+            if self._events:
+                return self._events.pop(0)
+            return None
+
+    def peek(self) -> Optional[Event]:
+        """Return the highest-priority event without removing it."""
+        with self._lock:
+            if self._events:
+                return self._events[0]
+            return None
+
+    def clear(self) -> None:
+        """Remove all events from the queue."""
+        with self._lock:
+            self._events.clear()
+            self._deferred.clear()
+
+    def flush_deferred(self) -> List[Event]:
+        """Move deferred events back into the main queue and return them."""
+        with self._lock:
+            flushed = list(self._deferred)
+            for event in self._deferred:
+                bisect.insort(self._events, event)
+            self._deferred.clear()
+            return flushed
+
+    def cancel(self, event_id: str) -> bool:
+        """Cancel an event by its ID. Returns True if found and removed."""
+        with self._lock:
+            for i, event in enumerate(self._events):
+                if event.event_id == event_id:
+                    self._events.pop(i)
+                    return True
+            for i, event in enumerate(self._deferred):
+                if event.event_id == event_id:
+                    self._deferred.pop(i)
+                    return True
+            return False
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._events)
+
+    def __repr__(self) -> str:
+        return f"EventQueue(size={len(self._events)}, deferred={len(self._deferred)}, max={self._max_size})"

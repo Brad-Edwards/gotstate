@@ -15,6 +15,7 @@ exceptiongroup==1.2.2
 filelock==3.12.4
 flake8==7.1.1
 hypothesis==6.122.3
+icontract==2.7.3
 idna==3.10
 iniconfig==2.0.0
 isort==5.13.2
