@@ -138,12 +138,15 @@ class Transition:
 
         if self._kind == TransitionKind.LOCAL:
             lca = State.find_lca(self._source, self._target) if self._target else None
-            if lca is self._source or lca is self._target:
+            if lca is self._source:
+                # Target is a descendant of source; do not exit source (the LCA).
                 self._run_action(event)
                 if self._target is not None and self._target is not self._source:
-                    if self._source.is_active:
-                        self._source.exit()
                     self._target.enter()
+            elif lca is self._target:
+                # Source is a descendant of target; exit source, keep target active.
+                self._source.exit()
+                self._run_action(event)
             else:
                 self._source.exit()
                 self._run_action(event)

@@ -84,8 +84,10 @@ class ExtensionManager:
         self._extensions: Dict[str, TypeExtension] = {}
         self._lock = threading.Lock()
 
-    def register(self, extension: TypeExtension) -> None:
+    def register(self, extension: TypeExtension, replace: bool = False) -> None:
         with self._lock:
+            if not replace and extension.name in self._extensions:
+                raise ValueError(f"Extension '{extension.name}' is already registered")
             extension._status = ExtensionStatus.REGISTERING
             self._extensions[extension.name] = extension
             extension.activate()

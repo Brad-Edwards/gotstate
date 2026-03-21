@@ -104,7 +104,8 @@ class HookManager:
 
     def execute_hooks(self, phase: str, context: Dict[str, Any]) -> None:
         """Execute all hooks for a given phase in priority order."""
-        hooks = self._hooks.get(phase, [])
+        with self._lock:
+            hooks = list(self._hooks.get(phase, []))
         for hook in hooks:
             if hook.is_active:
                 try:
@@ -116,4 +117,5 @@ class HookManager:
                     hook.on_error(context, e)
 
     def get_hooks(self, phase: str) -> List[ExtensionHooks]:
-        return list(self._hooks.get(phase, []))
+        with self._lock:
+            return list(self._hooks.get(phase, []))

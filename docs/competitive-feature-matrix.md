@@ -26,12 +26,12 @@ A competitive analysis of gotstate against the leading state machine and statech
 | **Final state** | Yes | Yes (`type: 'final'`) | Yes (`X` terminate) | Yes (terminate pseudo-state) | Yes | Yes (`<final>`) |
 | **History - shallow** | Yes | Yes | Yes (`(H)`) | Yes | Yes (`History.SHALLOW`) | Yes |
 | **History - deep** | Yes | Yes | No | Yes (`H*`) | Yes (`History.DEEP`) | Yes |
-| **Choice pseudo-state** | No | Yes (guarded arrays) | Yes (via guards) | Yes (implicit via guard ordering) | Yes | No (use guards) |
-| **Junction pseudo-state** | No | No | No | No explicit | Yes | No |
+| **Choice pseudo-state** | Yes (`ChoiceState`) | Yes (guarded arrays) | Yes (via guards) | Yes (implicit via guard ordering) | Yes | No (use guards) |
+| **Junction pseudo-state** | Yes (`JunctionState`) | No | No | No explicit | Yes | No |
 | **Fork pseudo-state** | No | No (implicit via parallel) | No (implicit) | Yes (explicit fork entry) | Yes | No (implicit) |
 | **Join pseudo-state** | No | No (implicit via parallel) | No | Yes | Yes | No (implicit) |
-| **Entry point pseudo-state** | No | No | No | Yes | Yes | No |
-| **Exit point pseudo-state** | No | No | No | Partial | Yes | No |
+| **Entry point pseudo-state** | Yes (`ConnectionPointState`) | No | No | Yes | Yes | No |
+| **Exit point pseudo-state** | Yes (`ConnectionPointState`) | No | No | Partial | Yes | No |
 
 ## 2. Transition Types
 
@@ -39,7 +39,7 @@ A competitive analysis of gotstate against the leading state machine and statech
 |---|---|---|---|---|---|---|
 | **External transitions** | Yes | Yes (default) | Yes (default) | Yes | Yes | Yes (default) |
 | **Internal transitions** | Yes | Yes (`internal: true`) | Yes | Yes | Yes | Yes (`type="internal"`) |
-| **Local transitions** | No | Yes | No | No | No | Yes (`type="local"`) |
+| **Local transitions** | Yes (`LocalTransition`) | Yes | No | No | No | Yes (`type="local"`) |
 | **Self-transitions** | Yes | Yes | Yes | Yes | Yes | Yes |
 | **Eventless / automatic** | No | Yes (`always`) | Yes (anonymous events) | Yes (completion transitions) | Yes (triggerless) | Yes (no `event` attr) |
 | **Delayed / timed** | No | Yes (`after: { delay }`) | No | No | Yes (timer-based) | Yes (`<send delay>`) |
@@ -200,7 +200,7 @@ A competitive analysis of gotstate against the leading state machine and statech
 - **Visualization and tooling** — XState's Stately Studio is best-in-class. gotstate has no visual editor, runtime inspector, or diagram generation.
 - **SCXML compliance** — XState closely follows the W3C algorithm. gotstate has no SCXML alignment.
 - **Composable guards** — XState provides `and()`, `or()`, `not()` guard combinators. gotstate guards are simple boolean functions.
-- **Pseudostates** — Spring SM supports the full UML pseudostate complement (choice, junction, fork, join, entry/exit points). gotstate supports none of these.
+- **Pseudostates** — Spring SM supports the full UML pseudostate complement (choice, junction, fork, join, entry/exit points). gotstate supports choice, junction, and entry/exit points but lacks fork and join.
 - **Delayed / timed transitions** — XState and SCXML have first-class timer support. gotstate has no built-in timing.
 - **Wildcard event matching** — XState and Boost.SML support catch-all event patterns. gotstate does not.
 - **Model-based testing** — XState can automatically generate test paths from machine definitions. gotstate has a pytest suite but no generative testing.

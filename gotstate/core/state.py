@@ -124,13 +124,15 @@ class State:
         """Add a child state. Validates uniqueness and DAG property."""
         if child is self:
             raise InvalidStateError("A state cannot be its own child")
+        if child._parent is not None and child._parent is not self:
+            raise InvalidStateError(f"Child state '{child._name}' already has a parent '{child._parent._name}'")
         ancestor = self._parent
         while ancestor is not None:
             if ancestor is child:
                 raise InvalidStateError("Adding child would create a cycle in the state hierarchy")
             ancestor = ancestor._parent
         with self._lock:
-            if child._name in self._children:
+            if child._name in self._children and self._children[child._name] is not child:
                 raise DuplicateStateError(f"Child state '{child._name}' already exists in '{self._name}'")
             child._parent = self
             self._children[child._name] = child

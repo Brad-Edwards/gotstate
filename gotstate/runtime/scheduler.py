@@ -74,6 +74,7 @@ class Scheduler:
     def _on_timer_expired(self, timer_id: str, callback: Callable[[], None]) -> None:
         with self._lock:
             self._timer_statuses[timer_id] = TimerStatus.EXPIRED
+            self._timers.pop(timer_id, None)
         try:
             callback()
         except Exception:
@@ -82,9 +83,11 @@ class Scheduler:
     def cancel_timer(self, timer_id: str) -> None:
         """Cancel a scheduled timer."""
         with self._lock:
-            if timer_id not in self._timers:
+            if timer_id not in self._timers and timer_id not in self._timer_statuses:
                 raise GotStateError(f"Timer '{timer_id}' not found")
-            self._timers[timer_id].cancel()
+            timer = self._timers.pop(timer_id, None)
+            if timer is not None:
+                timer.cancel()
             self._timer_statuses[timer_id] = TimerStatus.CANCELLED
 
     def get_timer_status(self, timer_id: str) -> TimerStatus:
@@ -121,3 +124,4 @@ class Scheduler:
             for timer_id, timer in self._timers.items():
                 timer.cancel()
                 self._timer_statuses[timer_id] = TimerStatus.CANCELLED
+            self._timers.clear()

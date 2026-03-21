@@ -307,16 +307,27 @@ class MachineModifier:
         self._pending_transitions.append(transition)
 
     def apply(self) -> None:
-        """Apply all staged modifications atomically."""
+        """Apply all staged modifications atomically.
+
+        If any addition fails, all changes made during this call are rolled back.
+        """
         self._machine._begin_modification()
+        applied_states: List[State] = []
+        applied_transitions: List[Transition] = []
         try:
             for state in self._pending_states:
                 self._machine.add_state(state)
+                applied_states.append(state)
             for transition in self._pending_transitions:
                 self._machine.add_transition(transition)
+                applied_transitions.append(transition)
             self._pending_states.clear()
             self._pending_transitions.clear()
         except Exception:
+            for transition in reversed(applied_transitions):
+                self._machine._transitions.remove(transition)
+            for state in reversed(applied_states):
+                self._machine._states.pop(state.name, None)
             self._machine._end_modification()
             raise
         self._machine._end_modification()

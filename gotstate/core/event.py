@@ -274,7 +274,7 @@ class EventQueue:
     def enqueue(self, event: Event) -> None:
         """Add an event to the queue, maintaining priority order."""
         with self._lock:
-            if len(self._events) >= self._max_size:
+            if len(self._events) + len(self._deferred) >= self._max_size:
                 raise EventQueueFullError(f"Event queue is full (max_size={self._max_size})")
             if event.priority == EventPriority.DEFER:
                 self._deferred.append(event)
