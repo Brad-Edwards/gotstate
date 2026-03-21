@@ -15,11 +15,7 @@ from gotstate.core.machine import (
 )
 from gotstate.core.state import State, StateType
 from gotstate.core.transition import Transition, TransitionKind, TransitionPriority
-from gotstate.exceptions import (
-    MachineAlreadyRunningError,
-    MachineError,
-    MachineNotInitializedError,
-)
+from gotstate.exceptions import MachineAlreadyRunningError, MachineError, MachineNotInitializedError
 
 
 class TestStateMachine:

@@ -18,11 +18,7 @@ from gotstate.core.event import Event, EventQueue
 from gotstate.core.region import Region, RegionManager
 from gotstate.core.state import CompositeState, State, StateType
 from gotstate.core.transition import Transition, TransitionKind
-from gotstate.exceptions import (
-    MachineAlreadyRunningError,
-    MachineError,
-    MachineNotInitializedError,
-)
+from gotstate.exceptions import MachineAlreadyRunningError, MachineError, MachineNotInitializedError
 
 logger = logging.getLogger(__name__)
 

@@ -7,13 +7,7 @@ import icontract
 import pytest
 
 from gotstate.exceptions import GotStateError
-from gotstate.runtime.executor import (
-    ExecutionContext,
-    ExecutionMode,
-    ExecutionStatus,
-    ExecutionUnit,
-    Executor,
-)
+from gotstate.runtime.executor import ExecutionContext, ExecutionMode, ExecutionStatus, ExecutionUnit, Executor
 from gotstate.runtime.monitor import MetricType, Monitor, MonitoringLevel
 from gotstate.runtime.scheduler import Scheduler, TimerKind, TimerStatus
 

@@ -3,17 +3,8 @@
 import pytest
 
 from gotstate.exceptions import GotStateError
-from gotstate.extensions.hooks import (
-    ExtensionHooks,
-    HookManager,
-    HookPhase,
-    HookPriority,
-)
-from gotstate.extensions.sandbox import (
-    ExtensionSandbox,
-    ResourceLimit,
-    SecurityLevel,
-)
+from gotstate.extensions.hooks import ExtensionHooks, HookManager, HookPhase, HookPriority
+from gotstate.extensions.sandbox import ExtensionSandbox, ResourceLimit, SecurityLevel
 
 
 class ConcreteHook(ExtensionHooks):

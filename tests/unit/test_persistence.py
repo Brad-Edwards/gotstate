@@ -9,11 +9,7 @@ from gotstate.core.state import State
 from gotstate.core.transition import Transition
 from gotstate.exceptions import SerializationError, ValidationError
 from gotstate.persistence.serializer import SerializationFormat, Serializer
-from gotstate.persistence.validator import (
-    ValidationLevel,
-    ValidationResult,
-    Validator,
-)
+from gotstate.persistence.validator import ValidationLevel, ValidationResult, Validator
 
 
 class TestSerializer:
