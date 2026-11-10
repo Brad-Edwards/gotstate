@@ -1,0 +1,36 @@
+# The dependency updates of section 22.5 of the documentation: one grouped pull
+# request for each ecosystem each week, to dev, after a cooldown of one day, so
+# no update arrives on the day of its release. Dependabot has no mise
+# ecosystem, so the tools that mise pins update by hand.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directories: ["/", "/tools"]
+    target-branch: dev
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 1
+    groups:
+      go-modules:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 1
+    groups:
+      github-actions:
+        patterns: ["*"]
+  - package-ecosystem: uv
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 1
+    groups:
+      python:
+        patterns: ["*"]

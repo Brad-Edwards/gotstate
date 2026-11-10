@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ground-control": {
+      "type": "stdio",
+      "command": "grndctl",
+      "args": ["mcp"]
+    }
+  }
+}

@@ -1,0 +1,7 @@
+extends: existence
+message: "Name the actor before the action in '%s'."
+level: error
+ignorecase: true
+tokens:
+  - '\b(?:is|are|was|were|be|been)\s+(?:\w+ly\s+)?\w+ed\s+by\b'
+  - '\b(?:is|are|was|were|be|been)\s+(?:written|given|known|taken|built|held|sent|shown)\s+by\b'

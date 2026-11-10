@@ -1,0 +1,11 @@
+extends: substitution
+message: "Use '%s' instead of '%s'. State the condition for optional behavior."
+level: error
+ignorecase: true
+swap:
+  shall: must
+  should: must
+  might: can
+  'may(?!\s+\d)': can
+  could: can
+  would: will

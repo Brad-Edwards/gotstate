@@ -1,0 +1,5 @@
+# go-test-coverage keeps statement coverage at or above 90% for each Go
+# package, as section 22.4 requires.
+profile: .cache/coverage.out
+threshold:
+  package: 90

@@ -1,0 +1,10 @@
+extends: existence
+message: "Write the full form of '%s'."
+level: error
+ignorecase: true
+tokens:
+  - "\\b\\w+n['’]t\\b"
+  - "\\b\\w+['’](?:ll|re|ve)\\b"
+  - "\\b(?:it|that|there|what|who|let)['’]s\\b"
+  - "\\b(?:I|you|he|she|it|we|they)['’]d\\b"
+  - "\\bI['’]m\\b"

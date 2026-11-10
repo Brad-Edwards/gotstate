@@ -1,0 +1,6 @@
+extends: occurrence
+message: 'Use at most 20 words in a procedure step.'
+level: error
+scope: list
+max: 20
+token: '\S+'

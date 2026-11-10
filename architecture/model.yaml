@@ -1,0 +1,138 @@
+# The architecture model of gotstate.
+#
+# The architecture checker reads this model and the Go packages of the module.
+# A structural change to this file needs a design record in
+# architecture/designs/, in the same pull request. See
+# docs/23-architecture-model.md.
+#
+# Match semantics: a forbidden import, a forbidden symbol and an external entry
+# each match the path itself. A pattern that ends in "/..." also matches every
+# package below it. An external pattern never crosses into another module, so a
+# nested go.mod or a /vN major version needs its own entry. A match never
+# extends a path segment, so "k8s.io/api" does not match "k8s.io/apiserver". An
+# import needs both the layer entry and, once components exist, the component
+# grant.
+version: 1
+module: github.com/Brad-Edwards/gotstate
+
+system:
+  id: gotstate
+  name: gotstate
+  description: A Go library for hierarchical finite state machines.
+
+people:
+  - id: developer
+    name: Developer
+    description: Writes a Go program that imports the library.
+
+external_systems: []
+
+relationships:
+  - from: developer
+    to: library
+    description: Imports
+    technology: Go module
+
+containers:
+  - id: library
+    name: gotstate module
+    technology: Go
+    description: The Go module that programs import.
+
+layers:
+  - id: internal
+    directory: internal
+    description: All packages of the module that are not public packages.
+    uses: []
+    external: []
+
+components: []
+
+test_modules:
+  - github.com/google/go-cmp
+  - github.com/rogpeppe/go-internal
+
+test_support: []
+
+rules:
+  - id: no-environment-access
+    description: >-
+      Library code reads and writes no environment variable. The program that
+      imports the library passes typed values (Google Go Style, Flags).
+    scope:
+      layers: [internal]
+      test_files: false
+    forbid_symbols:
+      - os.Getenv
+      - os.LookupEnv
+      - os.Environ
+      - os.ExpandEnv
+      - os.Setenv
+      - os.Unsetenv
+      - os.Clearenv
+      - os.UserHomeDir
+      - os.TempDir
+      - syscall.Getenv
+      - syscall.Environ
+      - syscall.Setenv
+      - syscall.Unsetenv
+      - syscall.Clearenv
+    fix: Take the value as a typed option or parameter from the calling program.
+
+  - id: no-flag-package
+    description: >-
+      Library code defines no command-line flags. The program that imports the
+      library parses its own flags (Google Go Style, Flags).
+    scope:
+      layers: [internal]
+      test_files: false
+    forbid_imports: [flag]
+    fix: Take the value as a typed option or parameter from the calling program.
+
+  - id: no-process-execution
+    description: Library code starts no local processes.
+    scope:
+      layers: [internal]
+      test_files: false
+    forbid_imports: [os/exec]
+    forbid_symbols: [os.StartProcess, syscall.Exec, syscall.ForkExec, syscall.StartProcess]
+    fix: Take a small interface in the consumer and let the calling program implement it.
+
+  - id: explicit-logging
+    description: >-
+      Code logs through a *slog.Logger that its caller passes, and no library
+      code sets or reads the process-wide logger. sloglint forbids the
+      package-level slog functions.
+    scope:
+      layers: [internal]
+      test_files: false
+    forbid_imports: [log]
+    forbid_symbols: [log/slog.SetDefault, log/slog.Default, log/slog.SetLogLoggerLevel]
+    fix: >-
+      Take a *slog.Logger as a parameter or as a struct field that the
+      constructor sets, and use its Context methods.
+
+  - id: no-process-globals
+    description: >-
+      Root contexts, process exit, process arguments, signal handling and the
+      default HTTP client, transport and multiplexer belong to the calling
+      program (Google Go Style, Global state).
+    scope:
+      layers: [internal]
+      test_files: false
+    forbid_symbols:
+      - context.Background
+      - context.TODO
+      - os.Exit
+      - os.Args
+      - syscall.Exit
+      - os/signal.Notify
+      - os/signal.NotifyContext
+      - net/http.DefaultClient
+      - net/http.DefaultTransport
+      - net/http.DefaultServeMux
+      - net/http.Handle
+      - net/http.HandleFunc
+    fix: >-
+      Take the context, the arguments or the HTTP client as a parameter from
+      the calling program, and return an error instead of exiting.
