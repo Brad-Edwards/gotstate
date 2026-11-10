@@ -2,6 +2,7 @@
 
 gotstate is a Go library for hierarchical finite state machines.
 Anyone can open an issue. The repository accepts pull requests from vetted authors only.
+
 A contribution must keep the library tested and documented, and it must follow the standards below.
 
 ## Choose the route
