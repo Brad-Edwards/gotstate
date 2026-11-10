@@ -1,8 +1,9 @@
 # Get support
 
-gotstate is community supported on a best-effort basis.
+gotstate is supported on a best-effort basis.
 
-Use GitHub issues for reproducible defects, focused feature requests and documentation problems.
+The repository accepts issues, pull requests and discussions from vetted authors only.
+Vetted authors use GitHub issues for reproducible defects, focused feature requests and documentation problems.
 Use the private route in [SECURITY.md](SECURITY.md) for suspected vulnerabilities.
 
 Include the gotstate version, the Go version and the operating system.
