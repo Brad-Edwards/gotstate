@@ -1,0 +1,11 @@
+extends: existence
+message: "Replace '%s' with the exact condition or complete list."
+level: error
+ignorecase: true
+tokens:
+  - 'and/or'
+  - '\betc\.'
+  - '\be\.g\.'
+  - '\bi\.e\.'
+  - '\b(?:obviously|simply|clearly|seamlessly|robustly)\b'
+  - '\bit (?:is|should be) (?:important|worth) (?:noting|noted)\b'

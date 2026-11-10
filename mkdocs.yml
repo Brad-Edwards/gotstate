@@ -1,0 +1,29 @@
+site_name: gotstate documentation
+repo_url: https://github.com/Brad-Edwards/gotstate
+edit_uri: ''
+docs_dir: docs
+site_dir: .cache/docs-site
+use_directory_urls: false
+theme:
+  name: readthedocs
+  highlightjs: false
+  navigation_depth: 4
+plugins:
+  - search
+markdown_extensions:
+  - tables
+  - toc:
+      permalink: false
+validation:
+  nav:
+    omitted_files: warn
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
+nav:
+  - '0 Contents': 00-contents.md
+  - 'Engineering and delivery':
+      - '22 Engineering standards': 22-engineering-standards.md
+      - '23 Architecture model': 23-architecture-model.md
+      - '24 Writing guide': 24-writing-guide.md

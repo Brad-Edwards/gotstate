@@ -1,0 +1,25 @@
+name: Bug report
+description: Report wrong behavior of the library.
+labels: [bug]
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Actual and expected behavior
+      description: What the library did, and what it must do.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The smallest Go code that shows the problem.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release or the commit of the library, and the Go version.
+    validations:
+      required: true

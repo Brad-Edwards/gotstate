@@ -1,0 +1,12 @@
+# Tool runtimes for repository checks.
+min_version = "2026.10.0"
+
+[settings]
+exec_auto_install = false
+lockfile = true
+
+[tools]
+go = "1.27.3"
+uv = "0.12.22"
+vale = "3.24.0"
+"aqua:aquasecurity/trivy" = "0.76.1"

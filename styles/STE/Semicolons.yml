@@ -1,0 +1,6 @@
+extends: existence
+message: 'Split the sentence at the semicolon.'
+level: error
+nonword: true
+tokens:
+  - ';'

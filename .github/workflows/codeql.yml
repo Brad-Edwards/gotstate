@@ -1,0 +1,85 @@
+name: CodeQL
+
+on:
+  workflow_call:
+    outputs:
+      result:
+        description: Verified completion of all applicable analyses
+        value: ${{ jobs.complete.outputs.result }}
+  schedule:
+    - cron: '23 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  languages:
+    name: Find languages
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.find.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # CodeQL supports no build-less mode for Go, so Go uses autobuild.
+      - id: find
+        name: List the languages that have source files, with their build modes
+        run: |
+          languages=()
+          if git ls-files -- '*.go' ':!:tools/**' | grep -q .; then languages+=('{"language":"go","build-mode":"autobuild"}'); fi
+          echo "matrix=[$(IFS=,; echo "${languages[*]}")]" >> "$GITHUB_OUTPUT"
+
+  analyze:
+    name: Analyze
+    needs: languages
+    if: needs.languages.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      # The CodeQL action reads the workflow run, which a private repository allows only with this permission.
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.languages.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:${{ matrix.language }}
+
+  complete:
+    name: CodeQL completion
+    needs: [languages, analyze]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.verify.outputs.result }}
+    steps:
+      - id: verify
+        name: Require all applicable analyses
+        env:
+          LANGUAGES_RESULT: ${{ needs.languages.result }}
+          MATRIX: ${{ needs.languages.outputs.matrix }}
+          ANALYZE_RESULT: ${{ needs.analyze.result }}
+        run: |
+          test "$LANGUAGES_RESULT" = success
+          test -n "$MATRIX"
+          if [ "$MATRIX" = '[]' ]; then
+            test "$ANALYZE_RESULT" = skipped
+          else
+            test "$ANALYZE_RESULT" = success
+          fi
+          echo "result=success" >> "$GITHUB_OUTPUT"

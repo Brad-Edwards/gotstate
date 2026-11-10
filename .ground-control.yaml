@@ -1,0 +1,33 @@
+schema_version: 1
+project: gotstate
+github_repo: Brad-Edwards/gotstate
+workflow:
+  base_branch: dev
+  # Local commands require PKGS or FILES; only CI runs the completion gate.
+  test_command: make go-test
+  lint_command: make go-lint
+  completion_command: make ci-check
+  policy_command: make hygiene
+  precommit_command: make hygiene
+  pr_title:
+    types: [feat, fix, docs, chore, refactor, test, build, ci, perf, style, revert]
+    require_scope: false
+    subject_pattern: '^[a-z].*$'
+sonarcloud:
+  project_key: Brad-Edwards_gotstate
+  organization: brad-edwards
+rules:
+  plan_rules: AGENTS.md
+docs:
+  adr_dir: architecture/designs/
+  architecture_overview: docs/23-architecture-model.md
+  coding_standards: docs/22-engineering-standards.md
+  workflow_reference: docs/22-engineering-standards.md
+cross_cutting_concerns:
+  description: |
+    Design: docs/00-contents.md indexes the documents; architecture/model.yaml
+    defines the layers and boundaries. Structural changes need a design record.
+    Checks: use explicit PKGS or FILES locally. PR CI owns make ci-check.
+    Policy: make hygiene runs the repository's staged-file pre-commit checks.
+    Branches: target dev; commits are signed; a person merges after all gates pass.
+    Security: .env and .mcp.json stay local. Never commit credentials.

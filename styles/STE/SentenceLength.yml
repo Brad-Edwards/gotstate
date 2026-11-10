@@ -1,0 +1,6 @@
+extends: occurrence
+message: 'Use at most 25 words in a descriptive sentence.'
+level: error
+scope: sentence
+max: 25
+token: '\S+'

@@ -1,0 +1,6 @@
+extends: occurrence
+message: 'Use at most three sentences in a paragraph.'
+level: error
+scope: paragraph
+max: 3
+token: '[.!?](?:\s|$)'

@@ -1,0 +1,20 @@
+extends: substitution
+message: "Use '%s' instead of '%s'."
+level: error
+ignorecase: true
+swap:
+  utilize: use
+  utilization: use
+  commence: start
+  terminate: stop
+  in order to: to
+  prior to: before
+  subsequent to: after
+  in the event that: if
+  at this point in time: now
+  a number of: several
+  in conjunction with: with
+  facilitate: help
+  aforementioned: this
+  whilst: while
+  amongst: among
